@@ -35,12 +35,12 @@
 
 ### A. 无代码 / 低代码托管平台(描述→直接跑,框架隐藏,SaaS 托管)
 - Arahi AI、Nagent、MindStudio、SketricGen、Vellum。
-- **与诉求冲突**:锁定、托管、隐藏 harness,不给"可自定义、不依赖框架的代码"。
+- **与诉求冲突**:锁定、托管、隐藏 harness,不给"可自定义、不依赖 agent 框架的代码"。
 
 ### B. 代码脚手架生成器(最接近 HarnessForge)
 - [`create-agent-app` / AgentForge](https://github.com/Saichandra2520/agentforge):一条命令生成 ReAct/RAG/Multi-Agent —— 但**构建在 LangGraph 之上**(正是要避开的)。
 - [`create-google-adk-agent`](https://github.com/unrealandychan/create-adk-agent):交互式向导选 agent 类型/工具/MCP —— 但绑死 Google ADK。
-- [`full-stack-ai-agent-template`](https://github.com/vstorm-co/full-stack-ai-agent-template):FastAPI + Next.js,内置 5 个 agent 框架、4 个向量库、RAG、流式、会话持久化 —— 功能很全,但**静态模板 + 依赖框架**,没有 Web 配置向导。
+- [`full-stack-ai-agent-template`](https://github.com/vstorm-co/full-stack-ai-agent-template):FastAPI + Next.js,内置 5 个 agent 框架、4 个向量库、RAG、流式、会话持久化 —— 功能很全,但**静态模板 + 依赖 agent 框架**,没有 Web 配置向导。
 - 各类 cookiecutter(agent-api-cookiecutter、agent-framework-cookiecutter 等):都绑定某个框架。
 
 ### C. 轻量框架 / from-scratch 教学仓库
@@ -49,10 +49,10 @@
 
 ### 结论:立项有意义,但窗口窄
 
-HarnessForge 设想的精确组合 —— **"不依赖 LangGraph/LangChain 的、生成你完全拥有可删改代码的 harness 生成器 + Web 可视化配置向导 + MCP 工具目录 + RAG/上下文/护栏可选 + 同时产出 Web/CLI 接口"** —— 目前**没有完全对位的项目**。
+HarnessForge 设想的精确组合 —— **"不绑定 agent 编排框架(LangChain/LangGraph/ADK)、生成你完全拥有可删改代码的 harness 生成器 + Web 可视化配置向导 + MCP 工具目录 + RAG/上下文/护栏可选 + 同时产出 Web/CLI 接口"** —— 目前**没有完全对位的项目**。MVP 不一次做全,先收敛到「生成 → 跑通 → 易改」的黄金路径,其余按分层(L1/L2/L3)推进(详见 [01-project-plan.md](./01-project-plan.md))。
 
 差异化窗口比较窄,必须把以下三点打透,否则会被 `create-agent-app` 与 `full-stack-ai-agent-template` 覆盖:
-1. **framework-free**:生成代码零 LangGraph/LangChain 依赖。
+1. **无 agent 框架锁定(不是「无依赖」)**:生成代码零 LangChain/LangGraph/ADK 等 **agent 编排框架**依赖;底座只用通用库(openai SDK / pydantic / typer 等),不构成锁定。
 2. **own-your-code(eject 即所得)**:产出独立、可读、可删改的仓库。
 3. **配置即生成**:Web 向导 / CLI 采集 spec → 一键渲染。
 
@@ -60,26 +60,27 @@ HarnessForge 设想的精确组合 —— **"不依赖 LangGraph/LangChain 的�
 
 - 官方 [MCP Registry](https://registry.modelcontextprotocol.io/);Smithery(7000+ servers,CLI 一键装)、mcp.so(19000+)、Glama、[awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers)。
 - MCP 在 2026 年初已达 ~9700+ 公共 server、月 ~9700 万 SDK 下载。官方 Python SDK 成熟,接入 stdio / HTTP-SSE 传输都简单。
-- HarnessForge MVP 采用**手策静态 catalog**(离线、确定、可审查),v2 再接联网 registry。安全上需注意:工具元数据会被 agent 当指令,优先用 vendor 维护的 server、收紧权限。
+- HarnessForge MVP 采用**手策静态 catalog**(离线、确定、可审查)+ **仅本地 stdio 传输**;HTTP/SSE 远程传输与联网 registry 推迟到 L3/v2。安全上需注意:工具元数据会被 agent 当指令,优先用 vendor 维护的 server、收紧权限。
 
 ## 4. 可行性与难度
 
-整体**可行**,核心不难,难在"做全 + 做好"。粗略拆解(单人 / 小团队):
+整体**可行**,核心不难,难在"做全 + 做好"。粗略拆解(单人 / 小团队;"层"列对应 [01-project-plan.md](./01-project-plan.md) 的 L1/L2/L3 分层 MVP):
 
-| 模块 | 难度 | 说明 |
-| --- | --- | --- |
-| 核心循环(原生 function-calling) | 易 | 150–300 行 |
-| 代码生成引擎(Jinja2 + spec) | 中 | |
-| Web 配置向导 | 中 | 无构建单页即可 |
-| MCP 工具接入(MCP Python SDK) | 易–中 | stdio + HTTP/SSE |
-| 基础 RAG(chunk/embed/检索) | 中 | sqlite-vec 本地零服务 |
-| 多 LLM profile + 角色路由 | 中 | generation/compaction/embedding 分别绑定 |
-| 上下文预算管理(truncate/summarize/offload) | 中 | |
-| 轻量护栏(HITL + 预算停止) | 中 | |
-| 轻量可观测(JSONL trace + 成本) | 中 | |
-| 沙箱(Docker/microVM) | 中–难 | **放 v2**,最易拖时间 |
+| 模块 | 难度 | 层 | 说明 |
+| --- | --- | --- | --- |
+| 核心循环(原生 function-calling) | 易 | L1 | 150–300 行;走 Chat Completions + tools(provider-agnostic),不用 Responses |
+| 代码生成引擎(Jinja2 + spec) | 中 | L1 | |
+| 可运行性 / 打包(uv 契约 + Docker + 冒烟自检) | 易–中 | L1 | uv 锁定 + 自动管 Python;默认产出 Dockerfile/devcontainer;生成后自检 |
+| 轻量可观测(JSONL trace + 成本) | 中 | L1 | |
+| 轻量护栏(预算停止) | 中 | L1 | HITL Web 确认推迟到 L3 |
+| MCP 工具接入(MCP Python SDK) | 易–中 | L2 | MVP **仅 stdio**;HTTP/SSE 远程推迟 |
+| 多 LLM profile + 角色路由 | 中 | L2 | generation/compaction/embedding 分别绑定 |
+| 上下文预算管理(truncate/summarize) | 中 | L2 | offload 落盘推迟到 L3 |
+| Web 配置向导 | 中 | L2 | 无构建单页即可 |
+| 基础 RAG(chunk/embed/检索) | 中 | L3 | sqlite-vec 本地零服务;备 numpy 余弦兜底 |
+| 沙箱 / 隔离执行(Docker/microVM) | 中–难 | v2 | 最易拖时间;区别于 L1 的打包用 Docker |
 
-**风险点**:scope 过大(想一次全做)、差异化不够锐(沦为又一个脚手架)、沙箱与安全是深坑。对策:MVP 砍到"一条龙能跑通的最小闭环",沙箱与多范式坚决推迟。
+**风险点**:scope 过大(想一次全做)、差异化不够锐(沦为又一个脚手架)、沙箱与安全是深坑、生成产物在异构环境跑不起来。对策:MVP 收敛到**黄金路径**并按**垂直切片**推进(详见 [01-project-plan.md](./01-project-plan.md) §3/§9);可运行性靠 uv 契约 + 默认 Docker + 生成后冒烟自检(§7);沙箱 / 多范式 / HTTP-SSE MCP / RAG 等坚决推迟。
 
 ## 5. 参考资料
 

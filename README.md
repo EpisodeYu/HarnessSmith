@@ -1,6 +1,6 @@
 # HarnessForge
 
-> **Forge your own agent harness.** A config-to-code generator that scaffolds a standalone, **framework-free** agent harness you fully own — no LangGraph, no LangChain, no lock-in.
+> **Forge your own agent harness.** A config-to-code generator that scaffolds a standalone agent harness you fully own — **no agent-framework lock-in** (no LangGraph, no LangChain, no ADK), and no dependency on HarnessForge after it's generated.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 ![Status: Planning](https://img.shields.io/badge/status-planning-orange.svg)
@@ -18,24 +18,29 @@ In 2026 the field converged on one equation: **`Agent = Model + Harness`**. The 
 
 ### Three things that make it different
 
-- **Framework-free** — generated code has **zero** LangGraph/LangChain dependency. The loop is yours.
-- **Own your code (eject by default)** — output is a readable, deletable, customizable repo. No runtime lock-in.
+- **No agent-framework lock-in** (not "dependency-free") — generated code has **zero** LangChain/LangGraph/ADK *agent-framework* dependency; the loop is yours. It still uses ordinary libraries (OpenAI SDK, Pydantic, Typer) — those aren't agent frameworks.
+- **Own your code (eject by default)** — output is a readable, deletable, customizable repo. No runtime lock-in, and no dependency on HarnessForge after generation.
 - **Config-to-code** — a web wizard / CLI captures a `HarnessSpec`, then renders the whole thing in one shot.
 
-## What it generates (MVP)
+## What it generates
 
-A self-contained `framework-free` harness with:
+The default product is a **thin, fully-runnable harness**. Heavy features are generated only when you toggle them in the spec — so you depend only on what you actually use.
 
-- **Native function-calling loop** — TAO/ReAct semantics via the API's `tool_calls`, with stop conditions, max-steps, and error handling.
-- **Multiple LLM profiles + role routing** — bind different models to `generation` / `compaction` / `embedding` roles. Built on the OpenAI SDK + `base_url` (provider-agnostic).
-- **Secure secrets** — API keys never touch `config.yaml`, the spec snapshot, or git. Stored in `.env` (gitignored, `0600`) or OS keyring; the web config panel is write-only and masks secrets on read.
-- **Configurable context management** — `max_context_tokens` plus a strategy: `truncate` / `summarize` (via the compaction model) / `offload`.
-- **MCP tools** — pick from a curated catalog, both `stdio` (local) and `HTTP/SSE` (remote) transports, with an allowlist.
-- **Optional RAG** — a minimal ingest loop (chunk → embed → store → retrieve) on local `sqlite-vec`.
-- **Unified config + hot reload** — one `config.yaml`, a `/config` web panel to view/edit/hot-reload at runtime.
-- **Lightweight guardrails & observability** — human-in-the-loop confirmation for risky tools, per-run step/time/cost budgets, and a JSONL trace with token/cost counts.
-- **Two interfaces** — a Typer CLI (`run` + `ingest`) and a FastAPI web app (`/chat` SSE + `/config`).
+**MVP golden path (L1 — always generated):**
+
+- **Native function-calling loop** — TAO/ReAct semantics via the API's `tool_calls`, with stop conditions, max-steps, and error handling. Built on the OpenAI SDK + `base_url` using the **Chat Completions API** (provider-agnostic; works with vLLM / together / groq / etc.).
+- **Tool registry** — add a tool = write a function + register it, no loop changes. Risky tools (shell / file-write) are off by default, allowlist-only.
+- **Budget stop + JSONL trace** — per-run step/time/cost budgets and a JSONL trace with token/cost counts.
+- **CLI** (Typer) — `run` a turn-based chat.
+- **Runnable anywhere** — ships `uv.lock` + `.python-version` (uv auto-manages Python and an isolated venv), a default **Dockerfile + devcontainer**, a `requirements.txt` pip fallback, and the generator **smoke-tests the new repo** (`uv sync` + `pytest` + a mock run) before declaring it runnable.
 - **Built to extend** — clear module boundaries, a tool registry, lifecycle hooks, Protocol interfaces, and an `AGENTS.md` extension guide.
+
+Secrets never touch `config.yaml`, the spec snapshot, or git — `config.yaml` holds only env-var *names*; real values live in `.env` (gitignored).
+
+**Optional, spec-toggled (not in the default product):**
+
+- **L2** — MCP tools (local `stdio`), multiple LLM profiles + role routing (`generation` / `compaction` / `embedding`), a minimal FastAPI + SSE web chat, context strategies (`truncate` / `summarize`).
+- **L3** — RAG ingest (chunk → embed → store → retrieve) on local `sqlite-vec`, a `/config` hot-reload panel, OS keyring secrets, full human-in-the-loop web flow, HTTP/SSE remote MCP, context offload.
 
 ## Planned usage
 
@@ -57,30 +62,37 @@ The generated `my-agent/` repo then runs on its own:
 
 ```bash
 cd my-agent
-uv sync
+uv sync                       # uv installs the right Python + an isolated venv
 cp .env.example .env          # add your API keys here
-uv run my-agent run           # chat in the terminal
-uv run my-agent ingest ./docs # optional: build the RAG store
-uv run my-agent serve         # web chat + config panel
+uv run my-agent run           # chat in the terminal (L1)
+
+# or run in a fully sealed environment (generated by default):
+docker build -t my-agent . && docker run --rm -it my-agent
+
+# optional, only if enabled in the spec:
+uv run my-agent serve         # web chat (L2)
+uv run my-agent ingest ./docs # build the RAG store (L3)
 ```
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  user[User] --> wizard["Web Wizard / CLI"]
-  wizard --> spec["HarnessSpec (Pydantic, YAML)"]
+  user[User] --> entry["CLI (L1) / Web Wizard (L2)"]
+  entry --> spec["HarnessSpec (Pydantic, YAML)"]
   spec --> gen["Generator (Jinja2)"]
-  catalog["MCP Tool Catalog"] --> gen
-  templates["Template Library (framework-free)"] --> gen
+  templates["Template Library (no agent framework)"] --> gen
+  catalog["MCP Catalog (L2)"] -.-> gen
   gen --> repo["Generated Repo (you own it)"]
   subgraph repoInner [Generated Repo]
-    config["config.py unified config + secrets"]
-    loop["loop.py function-calling + budget/HITL"]
-    llm["llm.py profiles + role routing"]
-    tools["tools.py + MCP"]
-    rag["rag.py ingest + retrieve"]
+    config["config.py"]
+    loop["loop.py function-calling + budget"]
+    llm["llm.py Chat Completions (+profiles L2)"]
+    tools["tools.py (+MCP stdio L2)"]
     trace["trace.py JSONL + cost"]
+    cli["cli.py run"]
+    docker["Dockerfile + devcontainer"]
+    rag["rag.py (L3)"]
   end
   repo --> repoInner
 ```
@@ -88,11 +100,11 @@ flowchart LR
 ## Documentation
 
 - [docs/00-research-and-feasibility.md](./docs/00-research-and-feasibility.md) — what an agent harness is (2026), competitive landscape, feasibility.
-- [docs/01-project-plan.md](./docs/01-project-plan.md) — positioning, MVP scope, design principles, architecture, acceptance criteria, roadmap.
+- [docs/01-project-plan.md](./docs/01-project-plan.md) — positioning, target users & success metrics, layered MVP scope, design principles, architecture, key decisions, runnability guarantees, acceptance criteria, vertical-slice roadmap.
 
 ## 中文简介
 
-HarnessForge 是一个"配置即生成"的代码生成器:通过 Web 向导 / CLI 采集需求,产出一套**不依赖 LangGraph/LangChain**、你完全拥有可删改的独立 agent harness 代码仓库,并自带 CLI + Web 调用接口。三个差异点:**framework-free**、**own-your-code(eject 即所得)**、**配置即生成**。当前处于规划阶段,详见 [`docs/`](./docs/)。
+HarnessForge 是一个"配置即生成"的代码生成器:通过 CLI / Web 向导采集需求,产出一套**不绑定 agent 编排框架(LangChain/LangGraph/ADK)**、你完全拥有可删改的独立 agent harness 代码仓库,生成后不再依赖 HarnessForge。三个差异点:**无 agent 框架锁定(不是"无依赖")**、**own-your-code(eject 即所得)**、**配置即生成**。MVP 先做"生成 → 跑通 → 易改"的黄金路径(L1),并随产物落地可运行性保障(uv 契约 + 默认 Docker + 生成后冒烟自检);MCP / 多 profile / Web chat 等为 L2/L3。当前处于规划阶段,详见 [`docs/`](./docs/)。
 
 ## License
 
