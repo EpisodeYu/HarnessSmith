@@ -97,7 +97,7 @@
 - **plan**:读相关 slice 文档顶部"交付物";复述理解 + 实现计划(≤ 10 行);列会改的文件、新增测试、所需 `.env` key 名;命中 §6 就在 plan 阶段先停。
 - **implement**:先用 Read/Grep/SemanticSearch 看现有代码沿用风格;小步走能 commit 就 commit;不碰无关代码。
 - **self-verify**:跑 §5.1(大改动加 §5.2);自查 §1–§4 没违反;fail 先修不要假装看不见。
-- **handoff**:按 `docs/02-development/00-overview.md §完成报告模板` 输出报告;Conventional Commits 提交。
+- **handoff**:**先按 §9 把受影响文档更新到与实现一致**(门禁勾选、字段 / 行为描述、决策点结论);再按 `docs/02-development/00-overview.md §完成报告模板` 输出报告;Conventional Commits 提交。
 
 ## 8. 提交与分支
 
@@ -107,6 +107,7 @@
 
 ## 9. 文档维护
 
+- **任务完成即更新文档(硬规则)**:每个任务 / slice 一旦实现完成,必须把受影响的文档更新到**与实现一致**——slice 子文档勾选退出门禁、修正字段枚举 / 行为描述、回填人审决策点结论,并同步 `01-project-plan.md` / `00-overview.md` 的相关条目。**文档落后于实现 = 任务未完成**。实现与初版计划有偏差时,在文档就地标注"实现说明"而非默默留旧描述。
 - 改 `HarnessSpec` 字段:同步 `01-project-plan.md §5` + 相关 slice 文档。
 - 改全局决策(罕见,走 §6 人审):必须改 `docs/02-development/00-overview.md` 的决策总表。
 - 改 `.env.example` / 默认依赖:同步产物 README / AGENTS.md 与相关 slice 文档。
