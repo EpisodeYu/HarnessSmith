@@ -11,8 +11,8 @@
 
 | 角色 | 负责 | 不做 |
 |------|------|------|
-| **Agent(你)** | 写生成器与模板代码、写/跑测试、调试、维护文档与变更记录、按 slice 自驱推进、提交 PR、写完成报告 | 不替人拍板产品决策、不动用钱/联网批量/破坏定位的事、不直接 push `main` |
-| **人** | 方向与验收、slice 关键决策点签字、**环境与密钥配置(见 §0.1)**、合并 PR、对外发布 | 不写代码、不做 Agent 已能自动化的事 |
+| **Agent(你)** | 写生成器与模板代码、写/跑测试、调试、维护文档与变更记录、按 slice 自驱推进、**测试全绿后直接 commit + push `main`**、写完成报告 | 不替人拍板产品决策、不动用钱/联网批量/破坏定位的事、不 `--force` push、不在测试未绿时推 `main` |
+| **人** | 方向与验收、slice 关键决策点签字、**环境与密钥配置(见 §0.1)**、对外发布 | 不写代码、不做 Agent 已能自动化的事 |
 
 **一句话**:Agent 负责"怎么做",人负责"做不做、装环境、给 key、何时发布"。
 开发文档里写"开发者要做 X"一律理解为"**你(Agent)要做 X**,由人按切片节奏验收"。
@@ -21,7 +21,7 @@
 
 - 安装本机工具链:`uv`、`docker`(Agent 不改系统级配置、不装系统包)。
 - **API key / `.env` 真实值**:Agent 只维护 `.env.example`,**绝不写入真实 `.env`、绝不把 key 写进任何被 git 跟踪的文件**。日常开发用 **mock LLM**,不需要真 key;只有"真实 LLM 冒烟 / 对外演示"才需要人提供 key。
-- PyPI 发布凭证、GitHub 仓库设置、合并 PR、push `main`。
+- PyPI 发布凭证、GitHub 仓库设置、对外发布。
 
 > Agent 需要某个 key / 环境时:在 plan 阶段列出所需 `.env` key 名与用途,**停下来请人配置**,不要自己编造或跳过。
 
@@ -103,7 +103,7 @@
 
 - **Conventional Commits**:`feat: / fix: / refactor: / docs: / chore: / test: / perf: / build: / ci:`。
 - 一个 commit 一件事,不捎带无关改动。
-- `main` 受保护;功能走 feature branch + PR;Agent **不直接 push `main`、不 `--force`、不跳 pre-commit hook**(除非人明确允许)。
+- `main` **不再受保护**:本片(§5.1)门禁全绿后,Agent **可直接 commit 并 push `main`**,无需 feature branch / PR。仍 **不 `--force` push、不跳 pre-commit hook**(除非人明确允许);测试未绿不得推 `main`。需要走 PR 时人会显式要求。
 
 ## 9. 文档维护
 

@@ -105,7 +105,7 @@ HarnessForge/                      # 生成器本体(本仓库)
 
 ## 6. 开发规则
 
-- **Conventional Commits**;`main` 保护,走 feature branch + PR;Agent 不直接 push `main`(见 `CLAUDE.md §8`)。
+- **Conventional Commits**;`main` **不受保护**,门禁全绿后 Agent 可直接 commit + push `main`(不 `--force`、测试未绿不推;见 `CLAUDE.md §8`)。
 - **测试硬门槛**:黄金路径 + 可运行性自检,见 `CLAUDE.md §5`。生成器项目的"完成"以**生成产物能跑通**为准,不是"生成器代码写完"。
 - **薄优先 + 两层心智**:见 `CLAUDE.md §2 / §4`。任何给默认产物加依赖的冲动,先回看 §3 决策表与 `CLAUDE.md §6`。
 
