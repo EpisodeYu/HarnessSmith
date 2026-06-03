@@ -1,0 +1,76 @@
+"""Context-window management: keep the message history within budget.
+
+Applied before each LLM call. ``truncate`` (default) keeps the system message
+plus the last ``keep_last_turns`` turns; ``summarize`` folds the older turns
+into a ``compaction``-role summary and keeps the rest. With
+``max_context_tokens`` unset (or strategy ``none``) it is a no-op, so the
+default behavior matches a plain loop. Cheap and editable — no tokenizer dep.
+"""
+
+from __future__ import annotations
+
+from .config import ContextConfig
+from .llm import LLMClient
+
+_SUMMARY_PROMPT = (
+    "Summarize the earlier conversation below concisely, preserving facts, "
+    "decisions, and any open tasks. Output only the summary."
+)
+
+
+def estimate_tokens(messages: list[dict]) -> int:
+    """Rough token estimate (~4 chars/token) — good enough to trigger trimming."""
+    total = 0
+    for message in messages:
+        total += len(str(message.get("content") or "")) // 4 + 4
+        for call in message.get("tool_calls") or []:
+            args = call.get("function", {}).get("arguments") or ""
+            total += len(str(args)) // 4
+    return total
+
+
+def _split_keep_last_turns(messages: list[dict], keep_last_turns: int):
+    """Split into (system, dropped, kept) where kept starts at a user turn."""
+    system = [m for m in messages if m.get("role") == "system"]
+    rest = [m for m in messages if m.get("role") != "system"]
+
+    seen = 0
+    cut = 0
+    for i in range(len(rest) - 1, -1, -1):
+        if rest[i].get("role") == "user":
+            seen += 1
+            if seen >= keep_last_turns:
+                cut = i
+                break
+    kept = rest[cut:]
+    # A clean turn starts at a user message — drop any orphan lead-in so we
+    # never send a tool result without its preceding assistant tool_calls.
+    while kept and kept[0].get("role") != "user":
+        kept = kept[1:]
+    dropped = rest[: len(rest) - len(kept)]
+    return system, dropped, kept
+
+
+def fit(
+    messages: list[dict],
+    ctx: ContextConfig,
+    *,
+    summarizer: LLMClient | None = None,
+) -> list[dict]:
+    """Return ``messages`` trimmed to fit ``ctx`` (no-op if already within budget)."""
+    if ctx.strategy == "none" or ctx.max_context_tokens is None:
+        return messages
+    if estimate_tokens(messages) <= ctx.max_context_tokens:
+        return messages
+
+    system, dropped, kept = _split_keep_last_turns(messages, ctx.keep_last_turns)
+    if not dropped:
+        return messages
+
+    if ctx.strategy == "summarize" and summarizer is not None:
+        convo = [{"role": "system", "content": _SUMMARY_PROMPT}, *dropped]
+        summary = summarizer.complete(convo, None).content or ""
+        note = {"role": "system", "content": f"Summary of earlier conversation:\n{summary}"}
+        return system + [note] + kept
+
+    return system + kept

@@ -12,7 +12,7 @@ from pathlib import Path
 import typer
 
 from ..harness.config import load_config
-from ..harness.llm import make_client
+from ..harness.llm import ClientRouter
 from ..harness.loop import run as run_loop
 
 app = typer.Typer(
@@ -43,8 +43,8 @@ def run(
     config = load_config(config_path)
     if prompt is None:
         prompt = typer.prompt("You")
-    client = make_client(config, role, mock=mock)
-    result = run_loop(prompt, client=client, config=config, role=role)
+    router = ClientRouter(config, mock=mock)
+    result = run_loop(prompt, client_for=router.client_for, config=config, role=role)
     typer.echo(result.answer)
     typer.secho(
         f"[{result.stop_reason}] steps={result.steps} "

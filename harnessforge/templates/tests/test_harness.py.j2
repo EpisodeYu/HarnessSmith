@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import json
 
-from {{ project_slug }}.harness.config import Config
+from {{ project_slug }}.harness.config import Config, ContextConfig
+from {{ project_slug }}.harness.context import estimate_tokens, fit
 from {{ project_slug }}.harness.hooks import Hooks
-from {{ project_slug }}.harness.llm import LLMResponse, ToolCall, Usage
+from {{ project_slug }}.harness.llm import ClientRouter, LLMResponse, ToolCall, Usage
 from {{ project_slug }}.harness.loop import run
 from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
 from {{ project_slug }}.harness.tools import Registry
@@ -31,6 +32,27 @@ def _config(tmp_path, **overrides):
 
 def _events(result):
     return [json.loads(line) for line in result.trace.path.read_text().splitlines()]
+
+
+def _multi_profile_config():
+    return Config.model_validate(
+        {
+            "llms": [
+                {"name": "primary", "model": "m-gen"},
+                {"name": "small", "model": "m-comp"},
+            ],
+            "roles": {"generation": "primary", "compaction": "small"},
+            "observability": {"trace": False},
+        }
+    )
+
+
+def _conversation(turns):
+    messages = [{"role": "system", "content": "system rules"}]
+    for i in range(turns):
+        messages.append({"role": "user", "content": "u" * 120 + str(i)})
+        messages.append({"role": "assistant", "content": "a" * 120 + str(i)})
+    return messages
 
 
 def test_mock_runs_one_tool_call(tmp_path):
@@ -152,3 +174,55 @@ def test_trace_records_tokens_and_cost(tmp_path):
     end = _events(result)[-1]
     assert end["event"] == "run_end"
     assert end["total_tokens"] == result.trace.total_tokens
+
+
+def test_profile_for_routes_roles():
+    config = _multi_profile_config()
+    assert config.profile_for("generation").name == "primary"
+    assert config.profile_for("generation").model == "m-gen"
+    assert config.profile_for("compaction").name == "small"
+
+
+def test_client_router_caches_per_role():
+    router = ClientRouter(_multi_profile_config(), mock=True)
+    gen_a = router.client_for("generation")
+    gen_b = router.client_for("generation")
+    comp = router.client_for("compaction")
+    assert gen_a is gen_b
+    assert comp is not gen_a
+
+
+def test_loop_runs_via_client_for(tmp_path):
+    config = _config(tmp_path)
+    router = ClientRouter(config, mock=True)
+    result = run("hi", client_for=router.client_for, config=config)
+    assert result.stop_reason == "final"
+    assert result.steps == 1
+
+
+def test_context_truncate_is_noop_without_limit():
+    messages = _conversation(8)
+    fitted = fit(messages, ContextConfig(strategy="truncate"))
+    assert fitted == messages
+
+
+def test_context_truncate_keeps_system_and_recent_turns():
+    messages = _conversation(10)
+    ctx = ContextConfig(strategy="truncate", max_context_tokens=50, keep_last_turns=2)
+    fitted = fit(messages, ctx)
+
+    assert estimate_tokens(messages) > 50
+    assert fitted[0]["role"] == "system"
+    assert fitted[1]["role"] == "user"  # clean turn boundary
+    assert len(fitted) < len(messages)
+    assert fitted[-1] is messages[-1]  # most recent message preserved
+
+
+def test_context_summarize_injects_summary():
+    messages = _conversation(10)
+    ctx = ContextConfig(strategy="summarize", max_context_tokens=50, keep_last_turns=2)
+    fitted = fit(messages, ctx, summarizer=MockLLM(final="SUMMARY TEXT"))
+
+    assert fitted[0]["role"] == "system"
+    assert any("SUMMARY TEXT" in (m.get("content") or "") for m in fitted)
+    assert len(fitted) < len(messages)

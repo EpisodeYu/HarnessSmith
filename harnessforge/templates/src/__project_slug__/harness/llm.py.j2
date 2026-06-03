@@ -53,12 +53,18 @@ class OpenAIClient:
         base_url = resolve_env(profile.base_url_env)
         self._client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = profile.model
+        self.temperature = profile.temperature
+        self.max_tokens = profile.max_tokens
 
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
         kwargs: dict[str, Any] = {"model": self.model, "messages": messages}
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        if self.temperature is not None:
+            kwargs["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
         resp = self._client.chat.completions.create(**kwargs)
         message = resp.choices[0].message
         calls = [
@@ -75,9 +81,35 @@ class OpenAIClient:
 
 
 def make_client(config: Config, role: str = "generation", *, mock: bool = False) -> LLMClient:
-    """Build the LLM client for ``role``; ``mock=True`` returns an offline client."""
+    """Build a single LLM client for ``role``; ``mock=True`` returns an offline one."""
     if mock:
         from .mock import MockLLM
 
         return MockLLM()
     return OpenAIClient(config.profile_for(role))
+
+
+class ClientRouter:
+    """Resolve and cache one client per role (``generation`` / ``compaction`` / ...).
+
+    The loop uses ``generation``; context summarization uses ``compaction``. Pass
+    ``client_for`` (the bound method) into ``run()`` to route within one turn.
+    """
+
+    def __init__(self, config: Config, *, mock: bool = False) -> None:
+        self._config = config
+        self._mock = mock
+        self._cache: dict[str, LLMClient] = {}
+
+    def client_for(self, role: str = "generation") -> LLMClient:
+        if self._mock:
+            key = f"mock:{role}"
+            if key not in self._cache:
+                from .mock import MockLLM
+
+                self._cache[key] = MockLLM()
+            return self._cache[key]
+        profile = self._config.profile_for(role)
+        if profile.name not in self._cache:
+            self._cache[profile.name] = OpenAIClient(profile)
+        return self._cache[profile.name]

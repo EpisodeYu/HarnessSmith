@@ -39,6 +39,9 @@ class LLMProfileConfig(BaseModel):
     model: str
     api_key_env: str = "OPENAI_API_KEY"
     base_url_env: str | None = None
+    # Optional sampling knobs passed through to the API when set.
+    temperature: float | None = None
+    max_tokens: int | None = Field(default=None, gt=0)
     # Optional cost accounting (USD per 1K tokens). Set these to track spend in
     # the trace and to enable a cost-based budget stop; defaults to free.
     prompt_cost_per_1k: float = 0.0
@@ -57,6 +60,21 @@ class ToolConfig(BaseModel):
 
     name: str
     enabled: bool = True
+
+
+class ContextConfig(BaseModel):
+    """How to keep the message history within the model's context window.
+
+    Runtime-only (lives here + in config.yaml, not in the spec). With
+    ``max_context_tokens`` unset it is a no-op, so the default matches a plain
+    loop. ``summarize`` folds older turns into a ``compaction``-role summary.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: str = "truncate"  # "truncate" | "summarize" | "none"
+    max_context_tokens: int | None = Field(default=None, gt=0)
+    keep_last_turns: int = Field(default=6, ge=1)
 
 
 class ObservabilityConfig(BaseModel):
@@ -91,12 +109,12 @@ class Config(BaseModel):
     roles: dict[str, str] = Field(default_factory=dict)
     prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     tools: list[ToolConfig] = Field(default_factory=list)
+    context: ContextConfig = Field(default_factory=ContextConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
 
     # Forward-compatible passthrough — declared so a richer spec still loads,
     # but not interpreted in this slice.
-    context: dict[str, Any] | None = None
     rag: dict[str, Any] | None = None
     secrets: dict[str, Any] | None = None
 
@@ -106,7 +124,7 @@ class Config(BaseModel):
         if isinstance(data, dict):
             empties: dict[str, Any] = {
                 "llms": [], "roles": {}, "tools": [],
-                "prompts": {}, "observability": {}, "budget": {},
+                "prompts": {}, "context": {}, "observability": {}, "budget": {},
             }
             for key, default in empties.items():
                 if key in data and data[key] is None:
