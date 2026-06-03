@@ -9,6 +9,8 @@ to drive specific tool calls in tests.
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .llm import LLMResponse, ToolCall, Usage
@@ -63,3 +65,18 @@ class MockLLM:
             ],
             usage=self._usage,
         )
+
+    def stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        *,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> LLMResponse:
+        """Same result as :meth:`complete`, but emit any text to ``on_delta``
+        token-by-token so streaming UIs can be tested offline."""
+        response = self.complete(messages, tools)
+        if on_delta is not None and response.content:
+            for token in re.findall(r"\S+\s*", response.content):
+                on_delta(token)
+        return response

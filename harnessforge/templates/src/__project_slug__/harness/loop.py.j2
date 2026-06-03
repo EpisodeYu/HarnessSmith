@@ -42,11 +42,14 @@ def run(
     registry: Registry = default_registry,
     hooks: Hooks | None = None,
     trace: Trace | None = None,
+    on_delta: Callable[[str], None] | None = None,
 ) -> RunResult:
     """Run one turn of the agent loop and return the final answer + telemetry.
 
     Provide either ``client`` (single profile) or ``client_for`` (role router,
-    enables context summarization via the ``compaction`` role).
+    enables context summarization via the ``compaction`` role). Pass ``on_delta``
+    to stream assistant text tokens as they arrive (e.g. for a live web UI); the
+    loop logic is identical either way.
     """
     hooks = hooks or Hooks()
     if client is None:
@@ -93,7 +96,10 @@ def run(
         messages = fit_context(messages, context_cfg, summarizer=summarizer)
         hooks.before_step(step, messages)
         try:
-            response = client.complete(messages, tool_schemas or None)
+            if on_delta is not None:
+                response = client.stream(messages, tool_schemas or None, on_delta=on_delta)
+            else:
+                response = client.complete(messages, tool_schemas or None)
         except Exception as exc:
             hooks.on_error("llm", exc)
             trace.event("error", where="llm", error=str(exc))

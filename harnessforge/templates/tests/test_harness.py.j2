@@ -200,6 +200,24 @@ def test_loop_runs_via_client_for(tmp_path):
     assert result.steps == 1
 
 
+def test_mock_stream_emits_tokens_matching_content():
+    deltas = []
+    client = MockLLM(script=["Hello there, world."])
+    response = client.stream([], None, on_delta=deltas.append)
+    assert "".join(deltas) == "Hello there, world."
+    assert response.content == "Hello there, world."
+    assert len(deltas) > 1  # streamed in more than one chunk
+
+
+def test_loop_on_delta_streams_final_answer(tmp_path):
+    config = _config(tmp_path)
+    deltas = []
+    client = MockLLM(script=[ScriptedCall("get_current_time", {}), "Streamed answer."])
+    result = run("hi", client=client, config=config, on_delta=deltas.append)
+    assert result.answer == "Streamed answer."
+    assert "".join(deltas) == "Streamed answer."  # only assistant text, not tool output
+
+
 def test_context_truncate_is_noop_without_limit():
     messages = _conversation(8)
     fitted = fit(messages, ContextConfig(strategy="truncate"))

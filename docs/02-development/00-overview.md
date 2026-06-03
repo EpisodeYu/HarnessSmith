@@ -39,7 +39,7 @@ graph LR
 | **Slice 0** 骨架 | [`01-slice-0-scaffold.md`](./01-slice-0-scaffold.md) | `HarnessSpec` 最小字段 + Jinja2 生成引擎 + 写出仓库 / 拷 spec / `git init` / 重跑警告 | spec 校验 + 渲染单测绿;能生成一个空壳仓库;`ReadLints` clean | spec 最小字段集是否合理 |
 | **Slice 1** 黄金路径 ★核心里程碑 | [`02-slice-1-golden-path.md`](./02-slice-1-golden-path.md) | 薄模板核心(config/llm/loop/tools/hooks/trace/prompts/mock)+ 原生 function-calling(Chat Completions)+ 工具注册表 + 预算停止 + CLI `run` + JSONL trace + 可运行性保障(uv 契约 + 默认 Docker + 冒烟自检)+ coding-assistant preset。**状态:✅ 已完成(38 fast + 3 golden;ReadLints clean;§4 人审已签字)** | `01-project-plan.md §8` **全部 blocker** 通过(黄金快照、无框架断言、生成后冒烟、Docker 冒烟、CLI、tool+hook、trace、预算停止、密钥不入 git、`uvx` 冒烟、preset 生成并 pytest)✅ | **立项假设成立——人已签字 ✅** |
 | **Slice 2** 路由 + 上下文 | [`03-slice-2-routing-and-context.md`](./03-slice-2-routing-and-context.md) | 多 LLM profile + `client_for(role)`(generation/compaction/embedding),loop 按角色取 client;context `truncate`(默认)+ 可选 `summarize`(走 compaction 角色)。**状态:✅ 已完成(38 fast + 3 golden;产物自带测试 14;ReadLints clean)** | non-blocker 测试绿:`client_for(role)` 路由(mock)、context 策略单测;关 summarize 时仍薄 ✅ | 角色集合/默认 context 策略是否合理(软确认,无硬门槛) |
-| **Slice 3** 产物 Web(自持) | (开工时立子文档) | 产物 `interfaces/web.py`:FastAPI + **SSE 流式 chat** + **运行期 `/config` 配置面板**(决策④:行为性配置全可改);spec 开关,关掉则不含 fastapi/uvicorn 依赖 | `/chat` SSE 流式(mock)测试;`/config` 改运行期配置生效;关 Web 时 `pyproject` 不含 fastapi/uvicorn(薄验证) | Web/UX 一眼是否可用;配置面板可改字段范围 |
+| **Slice 3** 产物 Web(自持) | [`04-slice-3-product-web.md`](./04-slice-3-product-web.md) | 产物 `interfaces/web.py`:FastAPI + **SSE chat,默认 token 级流式、可选**(`llm.stream`+`loop.run(on_delta)`,仍 Chat Completions)+ **运行期 `/config` 配置面板**(决策④:行为性配置全可改,进程内生效);spec 开关 `interfaces.web`,关掉则零 Web 痕迹、不含 fastapi/uvicorn。生成器新增**按 spec 条件渲染文件**机制。**状态:✅ 实现完成,门禁全绿(41 fast + 4 golden);Web/UX 与字段范围两项人审待签字** | `/chat` token 流 / 非流(mock)测试 ✅;`/config` 改运行期配置生效 ✅;关 Web 时 `pyproject`/`lock`/`req` 不含 fastapi/uvicorn(薄验证)✅ | Web/UX 一眼是否可用;配置面板可改字段范围(**待人签字**) |
 | **Slice 4** MCP 工具 | (开工时立子文档) | `harnessforge/catalog/mcp_servers.yaml` 静态 catalog;产物 MCP client(**仅 stdio**)+ allowlist + 沿用 Slice 1 风险标记;spec 开关(关掉不含 `mcp`) | MCP stdio 工具调用测试(本地 stdio mock server);非 allowlist tool 不注册;关 MCP 时 `pyproject` 不含 `mcp` | catalog 收录哪些 server(安全审,优先 vendor 维护) |
 | **Slice 5** wizard + 范式 | (开工时立子文档) | `harnessforge/wizard/`(FastAPI + 单页静态表单,无构建)产合法 spec;**范式扁平多选** ReAct/Plan/Reflection → 渲染对应 `loop.py` 模板 | wizard 产出的 spec 校验通过并能 `generator` 生成;各范式渲染的产物 `uv sync && pytest` 绿 | wizard 字段是否齐/对外可读;范式默认集 |
 | **Slice 6+ (v1+)** | (暂不立子文档) | **supervisor multi-agent**(agent 即 tool,固定拓扑,opt-in)、**周期预算**(天/周/月,持久化可选模块)、RAG ingest + sqlite-vec、HTTP/SSE 远程 MCP、`/config` 热重载进阶、keyring、完整 HITL Web、context offload | 各项做到即验(见 `01 §7 Non-blocker`) | **不在 MVP**;进入前需人决定排期 |
@@ -90,11 +90,11 @@ HarnessForge/                      # 生成器本体(本仓库)
 │   └── 02-development/            # 本目录
 ├── harnessforge/
 │   ├── spec.py                    # HarnessSpec
-│   ├── generator.py               # 渲染 + 写仓库 + uv lock + 冒烟自检
+│   ├── generator.py               # 渲染(+按 spec 条件渲染)+ 写仓库 + uv lock + 冒烟自检
 │   ├── cli.py                     # new / --spec / --preset / doctor / --no-verify
-│   ├── catalog/mcp_servers.yaml   # (Slice 3) 静态 MCP catalog
+│   ├── catalog/mcp_servers.yaml   # (Slice 4) 静态 MCP catalog
 │   ├── presets/                   # coding-assistant / rag-research 骨架 / 空白示例
-│   ├── wizard/                    # (Slice 3) FastAPI 单页表单
+│   ├── wizard/                    # (Slice 5) FastAPI 单页表单
 │   └── templates/                 # 生成产物 Jinja2 模板(见下)
 └── tests/                         # 生成器单测 + 黄金快照测试
 
@@ -105,7 +105,7 @@ HarnessForge/                      # 生成器本体(本仓库)
 ├── uv.lock + .python-version + requirements.txt
 ├── Dockerfile + .dockerignore + .devcontainer/
 ├── src/<pkg>/harness/             # config/loop/llm/tools/trace/prompts/hooks (+context L2, +rag L3)
-├── src/<pkg>/interfaces/          # cli.py (run) (+web.py SSE L2)
+├── src/<pkg>/interfaces/          # cli.py (run) (+web.py SSE chat + /config,Slice 3,opt-in)
 └── tests/ + README.md + AGENTS.md
 ```
 

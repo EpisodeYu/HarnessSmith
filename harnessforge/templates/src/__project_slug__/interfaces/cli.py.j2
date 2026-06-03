@@ -38,20 +38,61 @@ def run(
     mock: bool = typer.Option(
         False, "--mock", help="Use the offline mock LLM (no API key / network)."
     ),
+    stream: bool = typer.Option(
+        False, "--stream/--no-stream", help="Stream the answer token-by-token."
+    ),
 ) -> None:
     """Run one turn of the agent loop."""
     config = load_config(config_path)
     if prompt is None:
         prompt = typer.prompt("You")
     router = ClientRouter(config, mock=mock)
-    result = run_loop(prompt, client_for=router.client_for, config=config, role=role)
-    typer.echo(result.answer)
+
+    printed = False
+
+    def _on_delta(text: str) -> None:
+        nonlocal printed
+        printed = True
+        typer.echo(text, nl=False)
+
+    result = run_loop(
+        prompt,
+        client_for=router.client_for,
+        config=config,
+        role=role,
+        on_delta=_on_delta if stream else None,
+    )
+    if printed:
+        typer.echo("")  # finish the streamed line
+    else:
+        typer.echo(result.answer)  # non-stream, or a budget-stop message
     typer.secho(
         f"[{result.stop_reason}] steps={result.steps} "
         f"tokens={result.trace.total_tokens} cost=${result.trace.cost_usd:.4f}",
         fg=typer.colors.BRIGHT_BLACK,
     )
+{% if interfaces.web %}
 
+@app.command()
+def serve(
+    host: str = typer.Option(
+        "127.0.0.1", "--host", help="Bind host (use 0.0.0.0 to expose on the network)."
+    ),
+    port: int = typer.Option(8000, "--port", help="Bind port."),
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to config.yaml."
+    ),
+    mock: bool = typer.Option(
+        False, "--mock", help="Use the offline mock LLM (no API key / network)."
+    ),
+) -> None:
+    """Serve the web chat + live /config panel."""
+    import uvicorn
+
+    from .web import create_app
+
+    uvicorn.run(create_app(load_config(config_path), mock=mock), host=host, port=port)
+{% endif %}
 
 if __name__ == "__main__":
     app()

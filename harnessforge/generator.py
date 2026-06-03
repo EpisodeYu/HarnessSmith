@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import socket
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,6 +26,17 @@ PATH_SLUG_TOKEN = "__project_slug__"
 JINJA_SUFFIX = ".j2"
 SPEC_SNAPSHOT_NAME = "harness.spec.yaml"
 REQUIREMENTS_NAME = "requirements.txt"
+
+# Templates written only when their spec predicate is true. Keys are paths
+# relative to ``templates/`` (posix, keeping the slug token and the .j2 suffix).
+# This is how an opt-in capability stays out of a repo that didn't ask for it:
+# the web interface now, MCP / wizard in later slices. Everything not listed
+# here is always rendered.
+CONDITIONAL_TEMPLATES: dict[str, Callable[[HarnessSpec], bool]] = {
+    "src/__project_slug__/interfaces/web.py.j2": lambda spec: spec.interfaces.web,
+    "src/__project_slug__/interfaces/web_index.html.j2": lambda spec: spec.interfaces.web,
+    "tests/test_web.py.j2": lambda spec: spec.interfaces.web,
+}
 
 
 class GenerationError(Exception):
@@ -126,6 +138,9 @@ def generate(
     result = GenerationResult(target_dir=target_dir, project_slug=spec.project_slug)
     for template_file in _iter_template_files(templates_dir):
         relpath = template_file.relative_to(templates_dir)
+        predicate = CONDITIONAL_TEMPLATES.get(relpath.as_posix())
+        if predicate is not None and not predicate(spec):
+            continue
         out_relpath = _render_relpath(relpath, spec.project_slug)
         rendered = env.get_template(relpath.as_posix()).render(**context)
         out_path = target_dir / out_relpath

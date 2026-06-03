@@ -9,6 +9,7 @@ implement (vLLM, together, groq, ...).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -37,9 +38,22 @@ class LLMResponse:
 
 
 class LLMClient(Protocol):
-    """Anything that can turn messages (+tool schemas) into an LLMResponse."""
+    """Anything that can turn messages (+tool schemas) into an LLMResponse.
+
+    ``stream`` does the same thing but also forwards text tokens to ``on_delta``
+    as they arrive (for live UIs); it still returns the fully assembled response.
+    """
 
     def complete(self, messages: list[dict], tools: list[dict] | None) -> LLMResponse:
+        ...
+
+    def stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None,
+        *,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> LLMResponse:
         ...
 
 
@@ -56,7 +70,7 @@ class OpenAIClient:
         self.temperature = profile.temperature
         self.max_tokens = profile.max_tokens
 
-    def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
+    def _request_kwargs(self, messages: list[dict], tools: list[dict] | None) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"model": self.model, "messages": messages}
         if tools:
             kwargs["tools"] = tools
@@ -65,7 +79,10 @@ class OpenAIClient:
             kwargs["temperature"] = self.temperature
         if self.max_tokens is not None:
             kwargs["max_tokens"] = self.max_tokens
-        resp = self._client.chat.completions.create(**kwargs)
+        return kwargs
+
+    def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
+        resp = self._client.chat.completions.create(**self._request_kwargs(messages, tools))
         message = resp.choices[0].message
         calls = [
             ToolCall(id=tc.id, name=tc.function.name, arguments=tc.function.arguments)
@@ -78,6 +95,55 @@ class OpenAIClient:
             else Usage()
         )
         return LLMResponse(content=message.content, tool_calls=calls, usage=usage)
+
+    def stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        *,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> LLMResponse:
+        """Stream a Chat Completions response, assembling the same LLMResponse.
+
+        Text deltas are pushed to ``on_delta`` as they arrive. Tool-call and
+        usage deltas are accumulated across chunks. ``include_usage`` asks for a
+        final usage chunk; providers that ignore it leave usage at 0 (so a
+        cost/token budget can't trigger — same caveat as a profile without prices).
+        """
+        kwargs = self._request_kwargs(messages, tools)
+        kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
+
+        content: list[str] = []
+        calls: dict[int, dict[str, str]] = {}
+        usage = Usage()
+        for chunk in self._client.chat.completions.create(**kwargs):
+            if chunk.usage is not None:
+                usage = Usage(
+                    chunk.usage.prompt_tokens,
+                    chunk.usage.completion_tokens,
+                    chunk.usage.total_tokens,
+                )
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                content.append(delta.content)
+                if on_delta is not None:
+                    on_delta(delta.content)
+            for tc in delta.tool_calls or []:
+                slot = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                if tc.id:
+                    slot["id"] = tc.id
+                if tc.function and tc.function.name:
+                    slot["name"] = tc.function.name
+                if tc.function and tc.function.arguments:
+                    slot["arguments"] += tc.function.arguments
+        tool_calls = [
+            ToolCall(id=calls[i]["id"], name=calls[i]["name"], arguments=calls[i]["arguments"])
+            for i in sorted(calls)
+        ]
+        return LLMResponse(content="".join(content) or None, tool_calls=tool_calls, usage=usage)
 
 
 def make_client(config: Config, role: str = "generation", *, mock: bool = False) -> LLMClient:

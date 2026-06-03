@@ -185,3 +185,60 @@ def test_config_yaml_renders_from_spec_without_secrets(tmp_path, preset_spec):
     assert "get_current_time" in config and "calculator" in config
     assert "max_steps: 8" in config
     assert "sk-" not in config  # never a real secret value
+
+
+# --- Slice 3: optional web interface (conditional generation) --------------
+
+
+def test_web_disabled_omits_web_files_and_deps(tmp_path, preset_spec):
+    """Default (web: false) repo has zero web footprint — stays thin."""
+    out = tmp_path / "noweb"
+    generate(preset_spec, out, git_init=False)
+    pkg = out / "src" / "coding_assistant"
+    assert not (pkg / "interfaces" / "web.py").exists()
+    assert not (pkg / "interfaces" / "web_index.html").exists()
+    assert not (out / "tests" / "test_web.py").exists()
+
+    pyproject = (out / "pyproject.toml").read_text(encoding="utf-8").lower()
+    assert "fastapi" not in pyproject
+    assert "uvicorn" not in pyproject
+    assert "httpx" not in pyproject
+
+    cli = (pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    assert "def serve(" not in cli
+
+
+def test_web_enabled_generates_web_files_and_deps(tmp_path, spec):
+    spec.interfaces.web = True
+    out = tmp_path / "web"
+    generate(spec, out, git_init=False)
+    pkg = out / "src" / "agent_harness"
+
+    assert (pkg / "interfaces" / "web.py").is_file()
+    assert (pkg / "interfaces" / "web_index.html").is_file()
+    assert (out / "tests" / "test_web.py").is_file()
+
+    pyproject = (out / "pyproject.toml").read_text(encoding="utf-8")
+    assert "fastapi" in pyproject and "uvicorn" in pyproject
+    assert "httpx" in pyproject  # test dep for fastapi.testclient
+    # never an agent framework, even with web enabled
+    lowered = pyproject.lower()
+    for forbidden in ("langchain", "langgraph", "adk"):
+        assert forbidden not in lowered
+
+    cli = (pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    assert "def serve(" in cli
+
+    # web.py is valid Python even though fastapi isn't installed in this dev env
+    py_compile.compile(str(pkg / "interfaces" / "web.py"), doraise=True)
+
+
+def test_web_index_has_no_unrendered_jinja(tmp_path, spec):
+    spec.interfaces.web = True
+    out = tmp_path / "web"
+    generate(spec, out, git_init=False)
+    html = (out / "src" / "agent_harness" / "interfaces" / "web_index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "{{" not in html and "{%" not in html
+    assert "agent_harness" in html  # project_slug was rendered into the title

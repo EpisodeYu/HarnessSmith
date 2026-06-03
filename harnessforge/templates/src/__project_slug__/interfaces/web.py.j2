@@ -1,0 +1,139 @@
+"""Optional web interface: a streaming chat + a live ``/config`` panel (FastAPI).
+
+Generated only when ``interfaces.web`` is enabled. ``/chat`` streams the loop's
+progress over Server-Sent Events by listening on the existing :class:`Hooks`
+extension point — the loop itself is untouched. ``/config`` reads and edits the
+*runtime behavioral* config in-process (prompts, budget, enabled tools, context,
+sampling) and never exposes secrets: profiles only carry env-var NAMES. Edits
+apply to the running process; restart reloads ``config.yaml`` from disk.
+
+Run it with ``{{ project_slug }} serve`` or ``uvicorn``.
+"""
+
+from __future__ import annotations
+
+import json
+import queue
+import threading
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+
+from ..harness.config import Config, load_config
+from ..harness.hooks import Hooks
+from ..harness.llm import ClientRouter, LLMResponse, ToolCall
+from ..harness.loop import run as run_loop
+
+_INDEX_HTML = (Path(__file__).parent / "web_index.html").read_text(encoding="utf-8")
+
+# Behavioral config the panel may edit. Structural config (which interfaces or
+# modules exist) is NOT here — that requires regenerating. ``secrets`` is never
+# editable or returned, so a real key value can never enter the panel.
+_EDITABLE_FIELDS = (
+    "llms", "roles", "prompts", "tools", "context", "observability", "budget",
+)
+
+
+class _StreamHooks(Hooks):
+    """Push loop lifecycle events onto a queue, formatted as SSE later."""
+
+    def __init__(self, q: queue.Queue) -> None:
+        self._q = q
+
+    def after_step(self, step: int, response: LLMResponse) -> None:
+        self._q.put(("step", {"step": step, "tools": [c.name for c in response.tool_calls]}))
+
+    def before_tool(self, call: ToolCall) -> None:
+        self._q.put(("tool_call", {"name": call.name, "arguments": call.arguments}))
+
+    def after_tool(self, call: ToolCall, result: str) -> None:
+        self._q.put(("tool_result", {"name": call.name, "result": result}))
+
+    def on_error(self, where: str, error: Exception) -> None:
+        self._q.put(("error", {"where": where, "error": str(error)}))
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _chat_events(message: str, config: Config, *, mock: bool, stream: bool = True):
+    """Drive one ``run()`` in a worker thread and yield its events as SSE.
+
+    With ``stream=True`` assistant text is forwarded token-by-token as
+    ``event: token``; otherwise only step/tool/final events are emitted.
+    """
+    q: queue.Queue = queue.Queue()
+    hooks = _StreamHooks(q)
+    on_delta = (lambda text: q.put(("token", {"text": text}))) if stream else None
+
+    def worker() -> None:
+        try:
+            router = ClientRouter(config, mock=mock)
+            result = run_loop(
+                message,
+                client_for=router.client_for,
+                config=config,
+                hooks=hooks,
+                on_delta=on_delta,
+            )
+            q.put(("final", {
+                "answer": result.answer,
+                "stop_reason": result.stop_reason,
+                "steps": result.steps,
+                "tokens": result.trace.total_tokens,
+                "cost_usd": round(result.trace.cost_usd, 6),
+            }))
+        except Exception as exc:  # never leave the stream hanging
+            q.put(("error", {"where": "run", "error": str(exc)}))
+        finally:
+            q.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+    while True:
+        item = q.get()
+        if item is None:
+            break
+        yield _sse(*item)
+
+
+def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
+    """Build the FastAPI app. ``config`` defaults to ``load_config()`` (config.yaml)."""
+    app = FastAPI(title="{{ project_slug }} — web")
+    app.state.config = config or load_config()
+    app.state.mock = mock
+
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> str:
+        return _INDEX_HTML
+
+    @app.get("/chat")
+    def chat(message: str, stream: bool = True) -> StreamingResponse:
+        return StreamingResponse(
+            _chat_events(message, app.state.config, mock=app.state.mock, stream=stream),
+            media_type="text/event-stream",
+        )
+
+    @app.get("/config")
+    def get_config() -> dict:
+        # model_dump holds only env-var NAMES (api_key_env), never secret values.
+        return app.state.config.model_dump(mode="json", include=set(_EDITABLE_FIELDS))
+
+    @app.post("/config")
+    async def set_config(request: Request):
+        patch = await request.json()
+        current = app.state.config.model_dump(mode="json")
+        for key in _EDITABLE_FIELDS:  # secrets/structural keys are ignored
+            if key in patch:
+                current[key] = patch[key]
+        try:
+            app.state.config = Config.model_validate(current)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return app.state.config.model_dump(mode="json", include=set(_EDITABLE_FIELDS))
+
+    return app
+
+
+app = create_app()

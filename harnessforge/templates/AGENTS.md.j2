@@ -92,3 +92,24 @@ not the spec) so you can change provider rates without regenerating.
 
 Every run writes a JSONL trace under the configured `trace_dir` with per-step
 token counts and cost. Inspect a run with `cat traces/run-*.jsonl`.
+{% if interfaces.web %}
+## Web interface
+
+`interfaces/web.py` is a thin FastAPI app (`{{ project_slug }} serve`):
+
+- `GET /chat?message=...&stream=true` — Server-Sent Events. With `stream=true`
+  (default) the assistant's answer is streamed **token-by-token** (`event: token`)
+  for a live typing effect; tool calls/results and a `final` event (answer +
+  token/cost stats) are always emitted. The loop runs in a worker thread and
+  pushes events onto a queue. Token streaming rides on `loop.run(on_delta=...)`,
+  which calls the client's `stream()` instead of `complete()`. Set `stream=false`
+  for a single non-streamed response.
+- `GET|POST /config` — read/edit the **runtime behavioral** config (the same
+  fields as `config.yaml`). Edits apply in-process; restart reloads from disk.
+  Secrets are never returned or editable — profiles only carry env-var names.
+
+The CLI streams too: `{{ project_slug }} run --stream "..."`. To stream from your
+own code, pass `on_delta` (a `Callable[[str], None]`) to `run()`.
+
+To add a structural change (a new endpoint, a new module), edit `web.py`
+directly — it's yours. Behavioral knobs belong in `config.yaml` / the panel.{% endif %}

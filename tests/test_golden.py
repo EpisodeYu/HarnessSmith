@@ -52,6 +52,24 @@ def test_golden_preset_generates_locks_and_smoke_passes(tmp_path):
 
 
 @pytest.mark.golden
+def test_golden_web_enabled_generates_locks_and_smoke_passes(tmp_path):
+    """web=true -> generate -> lock -> sync + import + mock step + pytest (test_web)."""
+    spec = load_spec(preset_spec_path("coding-assistant"))
+    spec.interfaces.web = True
+    out = tmp_path / "ca_web"
+    result = generate(spec, out, git_init=False)
+
+    lock_dependencies(out)
+    lock_text = (out / "uv.lock").read_text(encoding="utf-8").lower()
+    assert "fastapi" in lock_text and "uvicorn" in lock_text
+    for forbidden in FORBIDDEN:
+        assert forbidden not in lock_text, f"{forbidden} in uv.lock"
+
+    # Runs the generated pytest, which includes tests/test_web.py (SSE + /config).
+    smoke_check(out, result.project_slug)
+
+
+@pytest.mark.golden
 def test_uvx_harnessforge_new_smoke(tmp_path):
     """`uvx --from <repo> harnessforge new ...` builds + runs the CLI one-shot."""
     if shutil.which("uv") is None:

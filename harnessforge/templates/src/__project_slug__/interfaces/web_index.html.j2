@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ project_slug }} — web</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <main class="mx-auto max-w-3xl p-6 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-xl font-semibold">{{ project_slug }}</h1>
+      <nav class="text-sm space-x-3">
+        <button id="tab-chat" class="font-semibold underline">Chat</button>
+        <button id="tab-config" class="text-slate-500">Config</button>
+      </nav>
+    </header>
+
+    <section id="view-chat" class="space-y-3">
+      <div id="log" class="h-96 overflow-y-auto rounded-lg border bg-white p-4 text-sm space-y-2"></div>
+      <form id="chat-form" class="flex items-center gap-2">
+        <input id="msg" class="flex-1 rounded-lg border px-3 py-2" placeholder="Ask something…" autocomplete="off" />
+        <label class="flex items-center gap-1 text-sm text-slate-500">
+          <input id="stream" type="checkbox" checked /> stream
+        </label>
+        <button class="rounded-lg bg-slate-800 px-4 py-2 text-white">Send</button>
+      </form>
+    </section>
+
+    <section id="view-config" class="hidden space-y-3">
+      <p class="text-sm text-slate-500">Runtime behavioral config (no secrets). Edits apply in-process.</p>
+      <textarea id="cfg" class="h-96 w-full rounded-lg border bg-white p-3 font-mono text-xs"></textarea>
+      <div class="flex items-center gap-3">
+        <button id="cfg-save" class="rounded-lg bg-slate-800 px-4 py-2 text-white">Save</button>
+        <button id="cfg-reload" class="rounded-lg border px-4 py-2">Reload</button>
+        <span id="cfg-status" class="text-sm text-slate-500"></span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const log = $("log");
+
+    function line(text, cls) {
+      const el = document.createElement("div");
+      el.className = cls || "text-slate-700";
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+      return el;
+    }
+
+    $("chat-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const message = $("msg").value.trim();
+      if (!message) return;
+      $("msg").value = "";
+      line("you: " + message, "font-semibold");
+
+      const stream = $("stream").checked;
+      let answer = null;  // the live assistant line, created on the first token
+      const url = "/chat?message=" + encodeURIComponent(message) + "&stream=" + stream;
+      const es = new EventSource(url);
+
+      es.addEventListener("token", (ev) => {
+        if (answer === null) answer = line("", "text-slate-900 whitespace-pre-wrap");
+        answer.textContent += JSON.parse(ev.data).text;
+        log.scrollTop = log.scrollHeight;
+      });
+      es.addEventListener("tool_call", (ev) => {
+        const d = JSON.parse(ev.data);
+        line("→ tool " + d.name + " " + d.arguments, "text-amber-700");
+      });
+      es.addEventListener("tool_result", (ev) => {
+        const d = JSON.parse(ev.data);
+        line("← " + d.name + ": " + d.result, "text-emerald-700");
+      });
+      es.addEventListener("error", (ev) => {
+        if (ev.data) line("error: " + ev.data, "text-red-600");
+        es.close();
+      });
+      es.addEventListener("final", (ev) => {
+        const d = JSON.parse(ev.data);
+        if (answer === null) line(d.answer, "text-slate-900 whitespace-pre-wrap");
+        line("[" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=$" + d.cost_usd, "text-xs text-slate-400");
+        es.close();
+      });
+    });
+
+    async function loadConfig() {
+      const resp = await fetch("/config");
+      $("cfg").value = JSON.stringify(await resp.json(), null, 2);
+      $("cfg-status").textContent = "";
+    }
+    $("cfg-reload").addEventListener("click", loadConfig);
+    $("cfg-save").addEventListener("click", async () => {
+      let body;
+      try { body = JSON.parse($("cfg").value); }
+      catch (err) { $("cfg-status").textContent = "invalid JSON"; return; }
+      const resp = await fetch("/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        $("cfg").value = JSON.stringify(data, null, 2);
+        $("cfg-status").textContent = "saved";
+      } else {
+        $("cfg-status").textContent = data.error || "rejected";
+      }
+    });
+
+    function show(which) {
+      $("view-chat").classList.toggle("hidden", which !== "chat");
+      $("view-config").classList.toggle("hidden", which !== "config");
+      $("tab-chat").className = which === "chat" ? "font-semibold underline" : "text-slate-500";
+      $("tab-config").className = which === "config" ? "font-semibold underline" : "text-slate-500";
+      if (which === "config") loadConfig();
+    }
+    $("tab-chat").addEventListener("click", () => show("chat"));
+    $("tab-config").addEventListener("click", () => show("config"));
+  </script>
+</body>
+</html>
