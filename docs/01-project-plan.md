@@ -103,7 +103,7 @@ flowchart LR
 ```
 
 生成器目录(仓库根 `/home/s1yu/HarnessForge`,独立 git repo,MIT;支持 `uvx harnessforge new` 免安装一次性运行):
-- `harnessforge/spec.py` — `HarnessSpec`(llms/roles/context/tools/interfaces/observability + `version`;rag/secrets backend 字段预留但 MVP 不全实现)。
+- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/llms/roles/prompts/tools/interfaces/observability/budget;context/rag/secrets backend 字段预留但 MVP 不全实现)。
 - `harnessforge/generator.py` — 渲染模板 → 写出仓库 + 拷入 `harness.spec.yaml` + `git init` + `uv lock` + 重跑警告不覆盖 + 生成后冒烟自检(`uv sync`+`pytest`+mock 跑一步)。
 - `harnessforge/cli.py` — Typer 入口(`new`、`--spec`、`--preset`、交互模式、`doctor` 预检、`--no-verify` 关闭冒烟自检)。
 - `harnessforge/catalog/mcp_servers.yaml` — 精选静态 MCP catalog(L2)。
