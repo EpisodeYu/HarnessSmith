@@ -12,12 +12,18 @@ llms:
 roles:
   generation: default
 
+prompts:
+  system: "You are a helpful assistant."
+
+tools: []
+
 interfaces:
   cli: true
   web: false
 
-tools: []
-
 observability:
   trace: true
   trace_dir: traces
+
+budget:
+  max_steps: 8

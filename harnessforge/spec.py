@@ -56,6 +56,28 @@ class Observability(BaseModel):
     trace_dir: str = "traces"
 
 
+class Prompts(BaseModel):
+    """System-prompt assembly inputs (consumed by prompts.py in Slice 1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    system: str | None = None
+    persona: str | None = None
+
+
+class Budget(BaseModel):
+    """Per-run guardrail budget; ``None`` means no limit.
+
+    Declared in Slice 0; enforcement (budget-stop) is wired in Slice 1.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_steps: int | None = Field(default=None, gt=0)
+    max_seconds: float | None = Field(default=None, gt=0)
+    max_cost_usd: float | None = Field(default=None, gt=0)
+
+
 class HarnessSpec(BaseModel):
     """Minimal HarnessSpec for Slice 0.
 
@@ -69,9 +91,11 @@ class HarnessSpec(BaseModel):
     project_slug: str = "agent_harness"
     llms: list[LLMProfile] = Field(default_factory=list)
     roles: dict[str, str] = Field(default_factory=dict)
-    interfaces: Interfaces = Field(default_factory=Interfaces)
+    prompts: Prompts = Field(default_factory=Prompts)
     tools: list[ToolSpec] = Field(default_factory=list)
+    interfaces: Interfaces = Field(default_factory=Interfaces)
     observability: Observability = Field(default_factory=Observability)
+    budget: Budget = Field(default_factory=Budget)
 
     # Reserved for later slices: declared so specs stay forward-compatible under
     # extra="forbid", but not used by the Slice 0 generator.

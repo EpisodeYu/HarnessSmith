@@ -20,6 +20,8 @@ def test_example_spec_is_valid():
     assert [p.name for p in spec.llms] == ["default"]
     assert spec.roles == {"generation": "default"}
     assert spec.interfaces.cli is True
+    assert spec.prompts.system == "You are a helpful assistant."
+    assert spec.budget.max_steps == 8
 
 
 def test_defaults_fill_in_minimal_spec():
@@ -27,7 +29,15 @@ def test_defaults_fill_in_minimal_spec():
     assert spec.project_slug == "agent_harness"
     assert spec.interfaces.cli is True
     assert spec.observability.trace_dir == "traces"
+    assert spec.prompts.system is None and spec.prompts.persona is None
+    assert spec.budget.max_steps is None
     assert spec.context is None and spec.rag is None and spec.secrets is None
+
+
+@pytest.mark.parametrize("field", ["max_steps", "max_seconds", "max_cost_usd"])
+def test_non_positive_budget_is_rejected(field):
+    with pytest.raises(ValidationError):
+        HarnessSpec.model_validate({"budget": {field: 0}})
 
 
 def test_unknown_top_level_field_is_rejected():
