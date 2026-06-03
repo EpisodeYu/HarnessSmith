@@ -92,4 +92,4 @@
 - **密钥红线**(`CLAUDE.md §6.5`):`/config` 面板、SSE 事件、trace、日志任一路径出现明文 key 即失败。面板只可见 env 引用名;"密钥只写不回显面板" = L3,本片不做密钥编辑。
 - **不绑框架**:FastAPI/uvicorn 是通用 Web 库,**不是 agent 编排框架**,不违反定位红线(`01-project-plan §1` 措辞);但仅在 `web=true` 时进产物。
 - **配方 vs 活旋钮**(决策④,`01 §4`):`/config` 改的是运行期行为性配置(`config.yaml` 域);接口有无 / 模块 / 范式拓扑是结构性的,只能重新生成。Web 面板属**产物自持**,HarnessForge 不做中心化配置/托管。
-- **HTTP/SSE 远程 MCP、`/config` 热重载进阶、完整 HITL Web** 均为 v1+,不在本片(`00-overview §2` Slice 6+)。
+- **MCP 工具**(stdio + 远程 HTTP/SSE)挪到 Slice 4(2026-06-03 定向);**`/config` 热重载进阶、完整 HITL Web、联网 MCP registry** 仍为 v1+,均不在本片(`00-overview §2` Slice 4 / Slice 6+)。

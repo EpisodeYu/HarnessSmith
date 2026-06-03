@@ -27,9 +27,9 @@ graph LR
     S0["Slice 0 骨架<br/>spec + 渲染引擎"] --> S1["Slice 1 黄金路径 ★<br/>生成可跑的薄 harness"]
     S1 --> S2["Slice 2 路由+上下文<br/>profiles/role + context"]
     S2 --> S3["Slice 3 产物 Web<br/>chat SSE + /config 面板"]
-    S3 --> S4["Slice 4 MCP 工具<br/>stdio + catalog + allowlist"]
+    S3 --> S4["Slice 4 MCP 工具<br/>stdio + 远程 + allowlist"]
     S4 --> S5["Slice 5 wizard+范式<br/>表单产 spec + 多范式渲染"]
-    S5 --> V["v1+ (非 MVP)<br/>multi-agent / 周期预算 / RAG / 远程 MCP / …"]
+    S5 --> V["v1+ (非 MVP)<br/>multi-agent / 周期预算 / RAG / MCP registry / …"]
 ```
 
 > **切分说明(人已定向,2026-06)**:原"Slice 2 接口与配置 / Slice 3 工具生态"过胖(各捆了 3–4 件独立能力),已按中粒度重切为 S2–S5,每片 = 一个内聚能力。旧子文档 `03-slice-2-interfaces-and-config.md` / `04-slice-3-tools-ecosystem.md` 已被取代(内容拆入下表;细节见 git 历史)。
@@ -40,9 +40,9 @@ graph LR
 | **Slice 1** 黄金路径 ★核心里程碑 | [`02-slice-1-golden-path.md`](./02-slice-1-golden-path.md) | 薄模板核心(config/llm/loop/tools/hooks/trace/prompts/mock)+ 原生 function-calling(Chat Completions)+ 工具注册表 + 预算停止 + CLI `run` + JSONL trace + 可运行性保障(uv 契约 + 默认 Docker + 冒烟自检)+ coding-assistant preset。**状态:✅ 已完成(38 fast + 3 golden;ReadLints clean;§4 人审已签字)** | `01-project-plan.md §8` **全部 blocker** 通过(黄金快照、无框架断言、生成后冒烟、Docker 冒烟、CLI、tool+hook、trace、预算停止、密钥不入 git、`uvx` 冒烟、preset 生成并 pytest)✅ | **立项假设成立——人已签字 ✅** |
 | **Slice 2** 路由 + 上下文 | [`03-slice-2-routing-and-context.md`](./03-slice-2-routing-and-context.md) | 多 LLM profile + `client_for(role)`(generation/compaction/embedding),loop 按角色取 client;context `truncate`(默认)+ 可选 `summarize`(走 compaction 角色)。**状态:✅ 已完成(38 fast + 3 golden;产物自带测试 14;ReadLints clean)** | non-blocker 测试绿:`client_for(role)` 路由(mock)、context 策略单测;关 summarize 时仍薄 ✅ | 角色集合/默认 context 策略是否合理(软确认,无硬门槛) |
 | **Slice 3** 产物 Web(自持) | [`04-slice-3-product-web.md`](./04-slice-3-product-web.md) | 产物 `interfaces/web.py`:FastAPI + **SSE chat,默认 token 级流式、可选**(`llm.stream`+`loop.run(on_delta)`,仍 Chat Completions)+ **运行期 `/config` 配置面板**(决策④:行为性配置全可改,进程内生效);spec 开关 `interfaces.web`,关掉则零 Web 痕迹、不含 fastapi/uvicorn。生成器新增**按 spec 条件渲染文件**机制。**状态:✅ 已完成,门禁全绿(41 fast + 4 golden);§4 两项人审 2026-06-03 经真实 LLM(`mimo-v2.5-pro`)验收已签字通过** | `/chat` token 流 / 非流(mock)测试 ✅;`/config` 改运行期配置生效 ✅;关 Web 时 `pyproject`/`lock`/`req` 不含 fastapi/uvicorn(薄验证)✅ | Web/UX 一眼是否可用 ✅;配置面板可改字段范围 ✅(2026-06-03 人已签字) |
-| **Slice 4** MCP 工具 | (开工时立子文档) | `harnessforge/catalog/mcp_servers.yaml` 静态 catalog;产物 MCP client(**仅 stdio**)+ allowlist + 沿用 Slice 1 风险标记;spec 开关(关掉不含 `mcp`) | MCP stdio 工具调用测试(本地 stdio mock server);非 allowlist tool 不注册;关 MCP 时 `pyproject` 不含 `mcp` | catalog 收录哪些 server(安全审,优先 vendor 维护) |
-| **Slice 5** wizard + 范式 | (开工时立子文档) | `harnessforge/wizard/`(FastAPI + 单页静态表单,无构建)产合法 spec;**范式扁平多选** ReAct/Plan/Reflection → 渲染对应 `loop.py` 模板 | wizard 产出的 spec 校验通过并能 `generator` 生成;各范式渲染的产物 `uv sync && pytest` 绿 | wizard 字段是否齐/对外可读;范式默认集 |
-| **Slice 6+ (v1+)** | (暂不立子文档) | **supervisor multi-agent**(agent 即 tool,固定拓扑,opt-in)、**周期预算**(天/周/月,持久化可选模块)、RAG ingest + sqlite-vec、HTTP/SSE 远程 MCP、`/config` 热重载进阶、keyring、完整 HITL Web、context offload、**推理模型流式 UX**(reasoning 阶段显式提示/思考流,避免无反应等待;2026-06-03 真实 LLM 验收发现,详见 `04-slice-3-product-web.md §4`) | 各项做到即验(见 `01 §7 Non-blocker`) | **不在 MVP**;进入前需人决定排期 |
+| **Slice 4** MCP 工具 | [`05-slice-4-mcp-tools.md`](./05-slice-4-mcp-tools.md) | 产物 MCP client(**stdio + 远程 HTTP/SSE**,人 2026-06-03 定向)+ allowlist + 沿用 Slice 1 风险标记。**生成期只决定 on/off**(`spec.mcp.enabled` + `mcp` 依赖,关掉零痕迹);**server/tool/传输全运行期** `config.yaml`(tool allowlist 可经 Slice 3 `/config` 当场改)。catalog(预设便捷数据源)挪 Slice 5 wizard。**状态:📋 计划中(未开工);新增 `HarnessSpec.mcp.enabled` → 触发 `§6.1`,实现前需人审** | MCP stdio 工具调用测试(本地 stdio mock server)+ 远程传输路径覆盖;非 allowlist tool 不注册;关 MCP 时 `pyproject`/`uv.lock`/`req` 不含 `mcp` | ① 新增 `mcp.enabled` spec 字段(§6.1);② 远程 HTTP/SSE 纳入 MVP(改全局决策,**人 2026-06-03 已定向 ✅**) |
+| **Slice 5** wizard + 范式 | (开工时立子文档) | `harnessforge/wizard/`(FastAPI + 单页静态表单,无构建)产合法 spec;**范式扁平多选** ReAct/Plan/Reflection → 渲染对应 `loop.py` 模板;**`harnessforge/catalog/mcp_servers.yaml` 静态预设清单**(由 Slice 4 挪来)供 wizard/CLI 预填 MCP server 条目 | wizard 产出的 spec 校验通过并能 `generator` 生成;各范式渲染的产物 `uv sync && pytest` 绿;catalog 预填的 server 条目能落 `config.yaml` | wizard 字段是否齐/对外可读;范式默认集;catalog 预置哪些热门 server(便捷预设,非安全闸) |
+| **Slice 6+ (v1+)** | (暂不立子文档) | **supervisor multi-agent**(agent 即 tool,固定拓扑,opt-in)、**周期预算**(天/周/月,持久化可选模块)、RAG ingest + sqlite-vec、**联网 MCP registry / `/config` 改 MCP server 热重连 / `forge add` 增量接 server**(MCP 远程 HTTP/SSE 传输本身已提前进 Slice 4)、`/config` 热重载进阶、keyring、完整 HITL Web、context offload、**推理模型流式 UX**(reasoning 阶段显式提示/思考流,避免无反应等待;2026-06-03 真实 LLM 验收发现,详见 `04-slice-3-product-web.md §4`) | 各项做到即验(见 `01 §7 Non-blocker`) | **不在 MVP**;进入前需人决定排期 |
 
 > **循环范式 / multi-agent(候选,v1+;人已定向)**:默认 loop 是单一原生 function-calling(ReAct/TAO),薄+无框架的核心卖点。扩展走 **wizard 扁平多选 + "生成期 spec 开关 → 渲染对应 `loop.py` 模板"**:① **单 loop 范式** ReAct(默认)/ Plan(Ask-Plan)/ Reflection;② **一种 supervisor multi-agent 模式**——以 "agent 即 tool"(子 agent = 再跑一个 `run()`)固定拓扑生成为**自有代码**,opt-in。**红线**:不做通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层(那是 `01 §6` 禁止的"框架抽象层")。multi-agent 定位措辞已按此细化(见 `01 §6`)。
 
@@ -69,7 +69,7 @@ graph LR
 | Python / 工具 | Python 3.11+;`uv`(lock + 自动管 Python + 隔离 venv) |
 | **可运行性契约** | 产物随仓库带 `uv.lock` + `.python-version`;**默认生成 `Dockerfile` + `.devcontainer`**;生成器**默认对新仓库冒烟自检**;`requirements.txt` 作 pip 兜底 |
 | 安全(轻量,本地自用) | 密钥不入 git(`config.yaml`/`harness.spec.yaml` 只存 env 引用名,真值放 `.env`);高风险工具(shell/写文件)默认关,仅 allowlist 显式开;沙箱 / keyring / 全链路 redaction 推迟 |
-| MCP | MVP 仅 **stdio 本地**传输 + 手策静态 catalog;HTTP/SSE 远程 + 联网 registry 推迟到 L3/v2 |
+| MCP | **stdio 本地 + 远程 HTTP/SSE 传输都做**(人 2026-06-03 定向,取代原"仅 stdio");**生成期只决定 on/off**(`spec.mcp.enabled` + `mcp` 依赖),**server/tool/传输全运行期** `config.yaml`(用户可自带 server,无白名单;安全闸=tool allowlist + 风险标记 + 密钥按 env 名)。catalog = Slice 5 wizard 预填便捷数据源(非编译进产物、非安全闸)。**联网 MCP registry 仍推迟 v1+** |
 | context 默认 | `truncate`(summarize 为 L2 可选;offload 为 L3) |
 | 配置控制面 | **spec = 配方(生成什么 + 初值);`config.yaml` = 运行期权威活旋钮(行为性配置全可改)**;结构性变更(接口/模块/范式拓扑=代码)需重新生成或 `forge add`。运行期配置面板**生成进产物自身 Web**(产物自持),**HarnessForge 不做中心化配置/托管**(守"生成后不再依赖 HarnessForge") |
 | 范式 / multi-agent | 默认 ReAct;扩展走 wizard 扁平多选 + spec 渲染不同 `loop.py`:单 loop 范式(ReAct/Plan/Reflection)+ **一种 supervisor multi-agent(agent 即 tool,固定拓扑,生成为自有代码,opt-in)**;**禁**通用多 agent 编排框架 / 工作流 DSL / 动态图引擎。排 v1+ |
@@ -92,7 +92,7 @@ HarnessForge/                      # 生成器本体(本仓库)
 │   ├── spec.py                    # HarnessSpec
 │   ├── generator.py               # 渲染(+按 spec 条件渲染)+ 写仓库 + uv lock + 冒烟自检
 │   ├── cli.py                     # new / --spec / --preset / doctor / --no-verify
-│   ├── catalog/mcp_servers.yaml   # (Slice 4) 静态 MCP catalog
+│   ├── catalog/mcp_servers.yaml   # (Slice 5) wizard 预填用 MCP server 预设清单
 │   ├── presets/                   # coding-assistant / rag-research 骨架 / 空白示例
 │   ├── wizard/                    # (Slice 5) FastAPI 单页表单
 │   └── templates/                 # 生成产物 Jinja2 模板(见下)
@@ -104,7 +104,7 @@ HarnessForge/                      # 生成器本体(本仓库)
 ├── config.yaml + harness.spec.yaml + .env.example + LICENSE
 ├── uv.lock + .python-version + requirements.txt
 ├── Dockerfile + .dockerignore + .devcontainer/
-├── src/<pkg>/harness/             # config/loop/llm/tools/trace/prompts/hooks (+context L2, +rag L3)
+├── src/<pkg>/harness/             # config/loop/llm/tools/trace/prompts/hooks (+context L2, +mcp.py Slice 4 opt-in, +rag L3)
 ├── src/<pkg>/interfaces/          # cli.py (run) (+web.py SSE chat + /config,Slice 3,opt-in)
 └── tests/ + README.md + AGENTS.md
 ```
@@ -126,7 +126,7 @@ HarnessForge/                      # 生成器本体(本仓库)
 
 > 出现冲动时回看。来自 `01-project-plan.md §6`。
 
-不做:生产级权限系统、云托管、**通用多 agent 编排框架 / 工作流编排 DSL / 动态图引擎 / 运行期范式抽象层**、在线 MCP registry、沙箱、跨会话长期记忆、**HarnessForge 侧中心化配置/托管**;以及 L3/v1+ 项(RAG / HTTP-SSE MCP / `/config` 热重载 / keyring / 完整 HITL Web / context offload / 多范式 + 一种 supervisor multi-agent / 周期预算)在 MVP 内不做。
+不做:生产级权限系统、云托管、**通用多 agent 编排框架 / 工作流编排 DSL / 动态图引擎 / 运行期范式抽象层**、在线 MCP registry、沙箱、跨会话长期记忆、**HarnessForge 侧中心化配置/托管**;以及 L3/v1+ 项(RAG / 联网 MCP registry / `/config` 热重载 / keyring / 完整 HITL Web / context offload / 多范式 + 一种 supervisor multi-agent / 周期预算)在 MVP 内不做。(注:MCP 远程 HTTP/SSE 传输已于 2026-06-03 提前进 Slice 4/L2。)
 
 > **注**:multi-agent 不是一刀切禁掉——红线是"通用编排框架"。允许 v1+ 做**一个具体、固定拓扑、生成为自有代码的 supervisor 模式**(opt-in),详见 `01-project-plan.md §6`。
 

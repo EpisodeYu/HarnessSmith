@@ -60,7 +60,7 @@ HarnessForge 设想的精确组合 —— **"不绑定 agent 编排框架(LangCh
 
 - 官方 [MCP Registry](https://registry.modelcontextprotocol.io/);Smithery(7000+ servers,CLI 一键装)、mcp.so(19000+)、Glama、[awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers)。
 - MCP 在 2026 年初已达 ~9700+ 公共 server、月 ~9700 万 SDK 下载。官方 Python SDK 成熟,接入 stdio / HTTP-SSE 传输都简单。
-- HarnessForge MVP 采用**手策静态 catalog**(离线、确定、可审查)+ **仅本地 stdio 传输**;HTTP/SSE 远程传输与联网 registry 推迟到 L3/v2。安全上需注意:工具元数据会被 agent 当指令,优先用 vendor 维护的 server、收紧权限。
+- HarnessForge MVP 接入 **stdio 本地 + 远程 HTTP/SSE 传输**(2026-06-03 定向,取代初版"仅 stdio");生成期只决定有无,server/tool 全运行期 `config.yaml` 配。**联网 registry 仍推迟 v1+**;静态 catalog 降级为 wizard 预填便捷数据源(非安全闸)。安全上需注意:工具元数据会被 agent 当指令,优先用 vendor 维护的 server、收紧权限、高风险工具默认关。
 
 ## 4. 可行性与难度
 
@@ -73,14 +73,14 @@ HarnessForge 设想的精确组合 —— **"不绑定 agent 编排框架(LangCh
 | 可运行性 / 打包(uv 契约 + Docker + 冒烟自检) | 易–中 | L1 | uv 锁定 + 自动管 Python;默认产出 Dockerfile/devcontainer;生成后自检 |
 | 轻量可观测(JSONL trace + 成本) | 中 | L1 | |
 | 轻量护栏(预算停止) | 中 | L1 | HITL Web 确认推迟到 L3 |
-| MCP 工具接入(MCP Python SDK) | 易–中 | L2 | MVP **仅 stdio**;HTTP/SSE 远程推迟 |
+| MCP 工具接入(MCP Python SDK) | 易–中 | L2 | **stdio + 远程 HTTP/SSE**(2026-06-03 定向);联网 registry 推迟 v1+ |
 | 多 LLM profile + 角色路由 | 中 | L2 | generation/compaction/embedding 分别绑定 |
 | 上下文预算管理(truncate/summarize) | 中 | L2 | offload 落盘推迟到 L3 |
 | Web 配置向导 | 中 | L2 | 无构建单页即可 |
 | 基础 RAG(chunk/embed/检索) | 中 | L3 | sqlite-vec 本地零服务;备 numpy 余弦兜底 |
 | 沙箱 / 隔离执行(Docker/microVM) | 中–难 | v2 | 最易拖时间;区别于 L1 的打包用 Docker |
 
-**风险点**:scope 过大(想一次全做)、差异化不够锐(沦为又一个脚手架)、沙箱与安全是深坑、生成产物在异构环境跑不起来。对策:MVP 收敛到**黄金路径**并按**垂直切片**推进(详见 [01-project-plan.md](./01-project-plan.md) §3/§9);可运行性靠 uv 契约 + 默认 Docker + 生成后冒烟自检(§7);沙箱 / 多范式 / HTTP-SSE MCP / RAG 等坚决推迟。
+**风险点**:scope 过大(想一次全做)、差异化不够锐(沦为又一个脚手架)、沙箱与安全是深坑、生成产物在异构环境跑不起来。对策:MVP 收敛到**黄金路径**并按**垂直切片**推进(详见 [01-project-plan.md](./01-project-plan.md) §3/§9);可运行性靠 uv 契约 + 默认 Docker + 生成后冒烟自检(§7);沙箱 / 多范式 / 联网 MCP registry / RAG 等坚决推迟。
 
 ## 5. 参考资料
 

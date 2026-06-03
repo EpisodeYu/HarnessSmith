@@ -2,7 +2,7 @@
 
 > 配套背景见 [00-research-and-feasibility.md](./00-research-and-feasibility.md)。
 >
-> 本版相对初稿做了三件事:**收敛 MVP 到一条端到端黄金路径**、**路线图改为垂直切片**、**明确关键技术决策**。RAG / Web 配置热重载 / HTTP-SSE MCP / keyring 等降级为 MVP 后续增强(本地自用阶段不需要)。
+> 本版相对初稿做了三件事:**收敛 MVP 到一条端到端黄金路径**、**路线图改为垂直切片**、**明确关键技术决策**。RAG / Web 配置热重载 / 联网 MCP registry / keyring 等降级为 MVP 后续增强(本地自用阶段不需要)。
 
 ## 1. 定位与差异化
 
@@ -45,7 +45,7 @@
 - **1 个 preset**(coding-assistant)+ 空白示例 spec。
 
 ### L2 — MVP 后半段(适合做,锦上添花)
-- **MCP 工具**:仅 **stdio(本地)** 传输 + 精选静态 catalog + allowlist。
+- **MCP 工具**:**stdio(本地)+ 远程 HTTP/SSE 传输**(人 2026-06-03 定向,取代原"仅 stdio")+ allowlist + 风险标记。**生成期只决定有无**(`spec.mcp.enabled` + `mcp` 依赖);**连哪些 server / 用哪些 tool / 用哪种传输全运行期** `config.yaml`(用户可自带 server)。catalog(预设便捷数据源)随 wizard(下条)做。**联网 MCP registry 仍推迟 v1+**。
 - **第 2 个 preset**(rag-research 骨架,RAG 实现可桩)。
 - **极简 Web chat**:FastAPI + SSE 流式聊天页(不含 `/config` 面板)。
 - **多 LLM profile + 角色路由**:命名 profile + `generation`/`compaction`/`embedding` 角色,`client_for(role)` 解析。
@@ -53,7 +53,7 @@
 - **生成期 Web wizard**:单页表单产出 spec(L1 先用 CLI + preset 顶替,这里再补 GUI)。
 
 ### L3 — 推迟到 v1+(明确不在 MVP)
-- Web `/config` 运行期热重载面板、密钥只写不回显面板、HTTP/SSE 远程 MCP、完整 HITL Web 交互时序、RAG 最小 ingest 闭环 + sqlite-vec、keyring 密钥后端、context offload(大输出落盘)。
+- Web `/config` 运行期热重载面板、密钥只写不回显面板、**联网 MCP registry / `/config` 改 MCP server 热重连 / `forge add` 增量接 server**、完整 HITL Web 交互时序、RAG 最小 ingest 闭环 + sqlite-vec、keyring 密钥后端、context offload(大输出落盘)。(注:**MCP 远程 HTTP/SSE 传输已于 2026-06-03 提前进 L2**,见 L2;此处仅余 registry / 热重连 / 增量接入。)
 - **多范式 + 一种 multi-agent**(候选,人已定向):wizard 扁平多选 + "生成期 spec 开关 → 渲染对应 `loop.py` 模板"。单 loop 范式 ReAct(默认)/ Plan(Ask-Plan)/ Reflection;**一种 supervisor multi-agent**——以"agent 即 tool"(子 agent = 再跑一个 `run()`)固定拓扑生成为**自有代码**,opt-in。**禁**:通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层(见 §6)。
 - **周期预算**(候选):per-run 4 维(步数/时间/token/费用)已在 L1;天/周/月配额做成 spec 勾选的可选**持久化**模块(本地 JSON,多进程/Web 再换 sqlite+锁),默认不生成。
 - 原 v2 项:沙箱、tracing UI、跨会话记忆、评测 harness、联网 MCP registry、`forge add/regenerate`。
@@ -95,7 +95,7 @@ flowchart LR
     config["harness/config.py"]
     loop["harness/loop.py function-calling + budget"]
     llm["harness/llm.py Chat Completions (+profiles L2)"]
-    tools["harness/tools.py (+MCP stdio L2)"]
+    tools["harness/tools.py (+mcp.py stdio+remote L2)"]
     trace["harness/trace.py JSONL + cost"]
     cli["interfaces/cli.py run"]
     web["interfaces/web.py chat SSE (L2)"]
@@ -122,7 +122,8 @@ flowchart LR
 - `src/<pkg>/harness/loop.py` — 原生 function-calling 循环(Chat Completions)+ Hooks 调用点 + 预算停止。
 - `src/<pkg>/harness/hooks.py` — 生命周期 hook 接口与默认空实现(扩展点)。
 - `src/<pkg>/harness/llm.py` — openai SDK 适配(base_url,provider-agnostic);profile 注册表 + `client_for(role)`(L2)。
-- `src/<pkg>/harness/tools.py` — 注册表(装饰器)+ 风险标记;MCP stdio client(L2)。
+- `src/<pkg>/harness/tools.py` — 注册表(装饰器)+ 风险标记。
+- `src/<pkg>/harness/mcp.py`(L2,Slice 4,opt-in)— MCP client(stdio + 远程 HTTP/SSE),把 MCP 工具注册进上面的注册表;仅 `spec.mcp.enabled` 时生成。
 - `src/<pkg>/harness/trace.py` — 每次 run 的 JSONL trace + token/成本计数。
 - `src/<pkg>/harness/prompts.py` — 系统提示拼装。
 - `src/<pkg>/harness/context.py`(L2)— truncate / summarize。
@@ -186,6 +187,8 @@ flowchart LR
 ## 9. 路线图(垂直切片)
 
 不按模块横向堆,按**端到端切片**纵向推进,每片都能跑通:
+
+> **以 `02-development/00-overview.md §2` 为准(2026-06 已重切为 S0–S6)**:下列原始 Slice 2/3/4 编号已被中粒度重切取代(S2 路由+上下文 / S3 产物 Web / S4 MCP / S5 wizard+范式 / S6+ v1+)。另:**MCP 远程 HTTP/SSE 传输已于 2026-06-03 从下方"Slice 4(v1+)"提前进 S4/L2**,仅余联网 registry 仍排 v1+。本节保留作历史轨迹。
 
 - **Slice 0 — 骨架**:`HarnessSpec` 最小字段 + Jinja2 生成引擎 + 写出仓库/拷 spec/git init + 渲染单测。产物:能生成一个空壳仓库。
 - **Slice 1 — 黄金路径(核心里程碑)**:薄模板核心(config/llm/loop/tools/trace/prompts)+ 原生 function-calling(Chat Completions)+ 工具注册表 + 1 个内置工具 + 预算停止 + CLI `run` + JSONL trace + mock LLM 测试 + coding-assistant preset + README/AGENTS;**可运行性保障同期落地**(uv 契约 `uv.lock`+`.python-version`、默认 `Dockerfile`/`.devcontainer`、生成后冒烟自检、`requirements.txt` 兜底,见 §7)。**到此立项假设已被验证**:能生成一个无框架、**在任意环境**可跑通一次工具调用、可读可改的 harness。
