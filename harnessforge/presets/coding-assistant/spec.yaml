@@ -1,7 +1,7 @@
-# Minimal HarnessSpec example — enough to generate a scaffold (Slice 0).
-# Secrets are NOT stored here: profiles reference env-var NAMES only.
+# coding-assistant preset — a minimal, runnable agent harness (HarnessForge L1).
+# Generates a thin function-calling loop with two safe built-in tools.
 version: "0.1"
-project_slug: agent_harness
+project_slug: coding_assistant
 
 llms:
   - name: default
@@ -13,7 +13,9 @@ roles:
   generation: default
 
 prompts:
-  system: "You are a helpful assistant."
+  system: >-
+    You are a focused coding assistant. Think step by step, use the available
+    tools when they help, and keep answers concise.
 
 tools:
   - name: get_current_time

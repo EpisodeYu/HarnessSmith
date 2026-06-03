@@ -1,0 +1,15 @@
+"""Assemble the system prompt from config (system + optional persona)."""
+
+from __future__ import annotations
+
+from .config import Config
+
+_DEFAULT_SYSTEM = "You are a helpful assistant. Use the available tools when they help."
+
+
+def build_system_prompt(config: Config) -> str:
+    prompts = config.prompts
+    parts = [prompts.system or _DEFAULT_SYSTEM]
+    if prompts.persona:
+        parts.append(prompts.persona)
+    return "\n\n".join(parts)

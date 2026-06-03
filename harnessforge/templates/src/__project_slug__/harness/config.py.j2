@@ -1,0 +1,157 @@
+"""Runtime configuration: load ``config.yaml`` + ``.env`` and validate it.
+
+Secrets are NEVER stored in ``config.yaml`` — it only holds env-var *names*
+(``api_key_env`` / ``base_url_env``). Real values live in ``.env`` (gitignored)
+or the process environment, and are resolved lazily here. This is the single
+entry point for configuration; edit freely.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_CONFIG_PATH = "config.yaml"
+DEFAULT_ENV_FILE = ".env"
+
+
+class ConfigError(Exception):
+    """Raised when configuration is missing or invalid."""
+
+
+class _EnvFile(BaseSettings):
+    """Loads every key in ``.env`` so secret env-vars resolve by name."""
+
+    model_config = SettingsConfigDict(
+        env_file=DEFAULT_ENV_FILE, env_file_encoding="utf-8", extra="allow"
+    )
+
+
+class LLMProfileConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    model: str
+    api_key_env: str = "OPENAI_API_KEY"
+    base_url_env: str | None = None
+    # Optional cost accounting (USD per 1K tokens). Set these to track spend in
+    # the trace and to enable a cost-based budget stop; defaults to free.
+    prompt_cost_per_1k: float = 0.0
+    completion_cost_per_1k: float = 0.0
+
+
+class PromptsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    system: str | None = None
+    persona: str | None = None
+
+
+class ToolConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    enabled: bool = True
+
+
+class ObservabilityConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace: bool = True
+    trace_dir: str = "traces"
+
+
+class BudgetConfig(BaseModel):
+    """Per-run guardrails. Any combination may be set; ``None`` means no limit.
+
+    The loop stops as soon as the *first* limit is reached. ``max_cost_usd``
+    only works if the active LLM profile has non-zero per-1K-token prices —
+    otherwise cost stays 0 and the cost limit never triggers.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_steps: int | None = Field(default=None, gt=0)
+    max_seconds: float | None = Field(default=None, gt=0)
+    max_tokens: int | None = Field(default=None, gt=0)
+    max_cost_usd: float | None = Field(default=None, gt=0)
+
+
+class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: str = "0.1"
+    project_slug: str = "agent_harness"
+    llms: list[LLMProfileConfig] = Field(default_factory=list)
+    roles: dict[str, str] = Field(default_factory=dict)
+    prompts: PromptsConfig = Field(default_factory=PromptsConfig)
+    tools: list[ToolConfig] = Field(default_factory=list)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
+
+    # Forward-compatible passthrough — declared so a richer spec still loads,
+    # but not interpreted in this slice.
+    context: dict[str, Any] | None = None
+    rag: dict[str, Any] | None = None
+    secrets: dict[str, Any] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_sections_to_defaults(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            empties: dict[str, Any] = {
+                "llms": [], "roles": {}, "tools": [],
+                "prompts": {}, "observability": {}, "budget": {},
+            }
+            for key, default in empties.items():
+                if key in data and data[key] is None:
+                    data[key] = default
+        return data
+
+    def profile_for(self, role: str = "generation") -> LLMProfileConfig:
+        """Return the LLM profile bound to ``role`` (single profile in Slice 1)."""
+        name = self.roles.get(role)
+        if name is None:
+            if self.llms:
+                return self.llms[0]
+            raise ConfigError(f"no LLM profile configured for role {role!r}")
+        for profile in self.llms:
+            if profile.name == name:
+                return profile
+        raise ConfigError(f"role {role!r} points at unknown profile {name!r}")
+
+    def enabled_tool_names(self) -> set[str]:
+        """The allowlist: only these tools are offered to the model."""
+        return {tool.name for tool in self.tools if tool.enabled}
+
+
+def _env_file_values() -> dict[str, str]:
+    try:
+        return {key.upper(): str(value) for key, value in _EnvFile().model_dump().items()}
+    except Exception:
+        return {}
+
+
+def resolve_env(name: str | None) -> str | None:
+    """Resolve an env-var by NAME from the process env, then ``.env``."""
+    if not name:
+        return None
+    if name in os.environ:
+        return os.environ[name]
+    return _env_file_values().get(name.upper())
+
+
+def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Config:
+    """Load and validate ``config.yaml``."""
+    path = Path(path)
+    if not path.exists():
+        raise ConfigError(f"config file not found: {path}")
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ConfigError("config.yaml must be a YAML mapping at the top level")
+    return Config.model_validate(data)

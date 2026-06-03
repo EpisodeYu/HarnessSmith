@@ -1,0 +1,83 @@
+"""LLM client: OpenAI SDK over Chat Completions (provider-agnostic via base_url).
+
+The loop talks to a tiny provider-neutral interface (``LLMClient``) returning
+plain dataclasses, so the same loop runs against any OpenAI-compatible endpoint
+— or the built-in ``MockLLM`` for offline tests and smoke runs. Chat Completions
++ ``tools`` is deliberate: it is the API third-party / local endpoints actually
+implement (vLLM, together, groq, ...).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+from .config import Config, LLMProfileConfig, resolve_env
+
+
+@dataclass
+class Usage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: str  # raw JSON string as returned by the model
+
+
+@dataclass
+class LLMResponse:
+    content: str | None = None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: Usage = field(default_factory=Usage)
+
+
+class LLMClient(Protocol):
+    """Anything that can turn messages (+tool schemas) into an LLMResponse."""
+
+    def complete(self, messages: list[dict], tools: list[dict] | None) -> LLMResponse:
+        ...
+
+
+class OpenAIClient:
+    """Thin adapter over the OpenAI SDK's Chat Completions endpoint."""
+
+    def __init__(self, profile: LLMProfileConfig) -> None:
+        from openai import OpenAI
+
+        api_key = resolve_env(profile.api_key_env) or "missing-api-key"
+        base_url = resolve_env(profile.base_url_env)
+        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        self.model = profile.model
+
+    def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
+        kwargs: dict[str, Any] = {"model": self.model, "messages": messages}
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        resp = self._client.chat.completions.create(**kwargs)
+        message = resp.choices[0].message
+        calls = [
+            ToolCall(id=tc.id, name=tc.function.name, arguments=tc.function.arguments)
+            for tc in (message.tool_calls or [])
+        ]
+        raw = resp.usage
+        usage = (
+            Usage(raw.prompt_tokens, raw.completion_tokens, raw.total_tokens)
+            if raw
+            else Usage()
+        )
+        return LLMResponse(content=message.content, tool_calls=calls, usage=usage)
+
+
+def make_client(config: Config, role: str = "generation", *, mock: bool = False) -> LLMClient:
+    """Build the LLM client for ``role``; ``mock=True`` returns an offline client."""
+    if mock:
+        from .mock import MockLLM
+
+        return MockLLM()
+    return OpenAIClient(config.profile_for(role))

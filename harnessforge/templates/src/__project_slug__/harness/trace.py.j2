@@ -1,0 +1,74 @@
+"""Per-run observability: a JSONL trace plus token / cost accounting.
+
+Each run writes one ``.jsonl`` file under the trace dir; every line is one event
+(``run_start``, ``llm_response``, ``tool_call``, ``tool_result``, ``run_end``).
+Token and USD totals accumulate on the :class:`Trace` so the loop can enforce a
+cost budget and the CLI can print a summary. No secrets are written — only
+message roles, tool names, arguments, and counts.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .config import LLMProfileConfig
+from .llm import Usage
+
+
+def compute_cost(usage: Usage, profile: LLMProfileConfig) -> float:
+    """USD cost of one response given the profile's per-1K-token prices."""
+    return (
+        usage.prompt_tokens / 1000 * profile.prompt_cost_per_1k
+        + usage.completion_tokens / 1000 * profile.completion_cost_per_1k
+    )
+
+
+@dataclass
+class Trace:
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    trace_dir: str | None = None
+    enabled: bool = True
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cost_usd: float = 0.0
+    _path: Path | None = field(default=None, init=False, repr=False)
+    _fh: Any = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.enabled and self.trace_dir:
+            directory = Path(self.trace_dir)
+            directory.mkdir(parents=True, exist_ok=True)
+            self._path = directory / f"run-{self.run_id}.jsonl"
+            self._fh = self._path.open("a", encoding="utf-8")
+
+    @property
+    def path(self) -> Path | None:
+        return self._path
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+    def event(self, kind: str, **data: Any) -> None:
+        record = {"ts": time.time(), "run_id": self.run_id, "event": kind, **data}
+        if self._fh is not None:
+            self._fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+            self._fh.flush()
+
+    def add_usage(self, usage: Usage, profile: LLMProfileConfig) -> float:
+        """Accumulate token counts and cost; return this response's cost."""
+        self.prompt_tokens += usage.prompt_tokens
+        self.completion_tokens += usage.completion_tokens
+        cost = compute_cost(usage, profile)
+        self.cost_usd += cost
+        return cost
+
+    def close(self) -> None:
+        if self._fh is not None:
+            self._fh.close()
+            self._fh = None

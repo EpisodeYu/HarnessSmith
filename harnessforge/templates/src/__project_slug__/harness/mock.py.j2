@@ -1,0 +1,65 @@
+"""A deterministic, offline LLM for tests, ``--mock`` runs, and smoke checks.
+
+It never touches the network. With no script it makes exactly one tool call (to
+the first tool the loop offers) and then returns a final answer — enough to
+exercise the whole function-calling loop without an API key. Pass a ``script``
+to drive specific tool calls in tests.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+from .llm import LLMResponse, ToolCall, Usage
+
+
+@dataclass
+class ScriptedCall:
+    """A scripted tool call: ``name`` is the tool, ``arguments`` its kwargs."""
+
+    name: str
+    arguments: dict
+
+
+class MockLLM:
+    """Replays a scripted sequence of responses.
+
+    Each ``script`` item is either a :class:`ScriptedCall` (emit a tool call) or
+    a ``str`` (emit a final answer and stop). With ``script=None`` it calls the
+    first offered tool once, then answers with ``final``.
+    """
+
+    def __init__(self, script: list | None = None, *, final: str = "Done (mock).") -> None:
+        self._script = list(script) if script is not None else None
+        self._final = final
+        self._step = 0
+        self._usage = Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+
+    def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
+        if self._script is None:
+            if self._step == 0 and tools:
+                self._step += 1
+                name = tools[0]["function"]["name"]
+                return LLMResponse(
+                    tool_calls=[ToolCall(id="call_0", name=name, arguments="{}")],
+                    usage=self._usage,
+                )
+            return LLMResponse(content=self._final, usage=self._usage)
+
+        if self._step >= len(self._script):
+            return LLMResponse(content=self._final, usage=self._usage)
+        item = self._script[self._step]
+        self._step += 1
+        if isinstance(item, str):
+            return LLMResponse(content=item, usage=self._usage)
+        return LLMResponse(
+            tool_calls=[
+                ToolCall(
+                    id=f"call_{self._step}",
+                    name=item.name,
+                    arguments=json.dumps(item.arguments),
+                )
+            ],
+            usage=self._usage,
+        )

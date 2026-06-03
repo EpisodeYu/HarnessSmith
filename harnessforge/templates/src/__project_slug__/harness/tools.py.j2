@@ -1,0 +1,147 @@
+"""Tool registry: register a function, expose it to the model — no loop changes.
+
+A tool = a Python function + a JSON-schema description + a risk level. Adding a
+tool is ``@registry.tool(...)`` over a function; the loop discovers it
+automatically. Risky tools (shell, file writes) are NEVER on by default: a tool
+is only offered to the model if it is enabled in ``config.yaml`` (the allowlist).
+The two built-ins below are safe and read-only.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Callable
+
+SAFE = "safe"
+HIGH = "high"
+
+
+class ToolError(Exception):
+    """Raised for unknown tools or bad arguments."""
+
+
+@dataclass
+class Tool:
+    name: str
+    description: str
+    parameters: dict
+    func: Callable[..., Any]
+    risk: str = SAFE
+
+    def schema(self) -> dict:
+        """OpenAI ``tools`` entry for this tool."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            },
+        }
+
+
+class Registry:
+    def __init__(self) -> None:
+        self._tools: dict[str, Tool] = {}
+
+    def register(self, tool: Tool) -> None:
+        self._tools[tool.name] = tool
+
+    def tool(
+        self,
+        *,
+        name: str | None = None,
+        description: str = "",
+        parameters: dict | None = None,
+        risk: str = SAFE,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Decorator that registers the wrapped function as a tool."""
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            self.register(
+                Tool(
+                    name=name or func.__name__,
+                    description=description or (func.__doc__ or "").strip(),
+                    parameters=parameters or {"type": "object", "properties": {}},
+                    func=func,
+                    risk=risk,
+                )
+            )
+            return func
+
+        return decorator
+
+    def get(self, name: str) -> Tool:
+        if name not in self._tools:
+            raise ToolError(f"unknown tool: {name}")
+        return self._tools[name]
+
+    def active_names(self, enabled: set[str]) -> list[str]:
+        """Tools offered to the model: registered AND allowlisted in config."""
+        return [name for name in self._tools if name in enabled]
+
+    def schemas(self, names: list[str]) -> list[dict]:
+        return [self._tools[name].schema() for name in names if name in self._tools]
+
+    def call(self, name: str, arguments: str) -> str:
+        """Execute a tool by name with JSON-encoded arguments; return a string."""
+        tool = self.get(name)
+        try:
+            kwargs = json.loads(arguments) if arguments else {}
+        except json.JSONDecodeError as exc:
+            raise ToolError(f"invalid JSON arguments for {name!r}: {exc}") from exc
+        result = tool.func(**kwargs)
+        return result if isinstance(result, str) else json.dumps(result)
+
+
+registry = Registry()
+
+
+@registry.tool(
+    name="get_current_time",
+    description="Return the current UTC date and time in ISO 8601 format.",
+    parameters={"type": "object", "properties": {}, "additionalProperties": False},
+)
+def get_current_time() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@registry.tool(
+    name="calculator",
+    description="Evaluate a basic arithmetic expression, e.g. '2 * (3 + 4)'.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "expression": {"type": "string", "description": "Arithmetic expression."}
+        },
+        "required": ["expression"],
+        "additionalProperties": False,
+    },
+)
+def calculator(expression: str) -> str:
+    import ast
+    import operator
+
+    ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Pow: operator.pow,
+        ast.Mod: operator.mod,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    def evaluate(node: ast.AST) -> float:
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in ops:
+            return ops[type(node.op)](evaluate(node.left), evaluate(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in ops:
+            return ops[type(node.op)](evaluate(node.operand))
+        raise ToolError(f"unsupported expression: {expression!r}")
+
+    return str(evaluate(ast.parse(expression, mode="eval").body))

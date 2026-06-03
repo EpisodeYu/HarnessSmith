@@ -26,11 +26,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["harnessforge"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"harnessforge/templates" = "harnessforge/templates"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not golden'"
+markers = [
+    "golden: slow end-to-end generation tests (uv lock/sync + pytest in the generated repo)",
+    "docker: requires a working Docker daemon",
+]
 
 [tool.pyright]
 venvPath = "."

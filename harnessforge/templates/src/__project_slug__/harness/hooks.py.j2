@@ -1,0 +1,29 @@
+"""Lifecycle hooks — the no-touch extension point.
+
+Subclass :class:`Hooks`, override only what you need, and pass an instance to
+``run()``. Guardrails, logging, redaction, and human-in-the-loop confirmation
+all live here without ever editing the loop.
+"""
+
+from __future__ import annotations
+
+from .llm import LLMResponse, ToolCall
+
+
+class Hooks:
+    """Default no-op hooks. Override methods in a subclass to extend behavior."""
+
+    def before_step(self, step: int, messages: list[dict]) -> None:
+        ...
+
+    def after_step(self, step: int, response: LLMResponse) -> None:
+        ...
+
+    def before_tool(self, call: ToolCall) -> None:
+        ...
+
+    def after_tool(self, call: ToolCall, result: str) -> None:
+        ...
+
+    def on_error(self, where: str, error: Exception) -> None:
+        ...

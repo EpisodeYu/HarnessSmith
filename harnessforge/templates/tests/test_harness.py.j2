@@ -1,0 +1,154 @@
+"""Generated harness tests: mock function-calling, tool+hook extension,
+budget stops, and trace structure. Run with ``uv run pytest``."""
+
+from __future__ import annotations
+
+import json
+
+from {{ project_slug }}.harness.config import Config
+from {{ project_slug }}.harness.hooks import Hooks
+from {{ project_slug }}.harness.llm import LLMResponse, ToolCall, Usage
+from {{ project_slug }}.harness.loop import run
+from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
+from {{ project_slug }}.harness.tools import Registry
+
+
+def _config(tmp_path, **overrides):
+    data = {
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "prompts": {"system": "You are a test agent."},
+        "tools": [
+            {"name": "get_current_time", "enabled": True},
+            {"name": "calculator", "enabled": True},
+        ],
+        "observability": {"trace": True, "trace_dir": str(tmp_path / "traces")},
+        "budget": {},
+    }
+    data.update(overrides)
+    return Config.model_validate(data)
+
+
+def _events(result):
+    return [json.loads(line) for line in result.trace.path.read_text().splitlines()]
+
+
+def test_mock_runs_one_tool_call(tmp_path):
+    config = _config(tmp_path)
+    result = run("hi", client=MockLLM(), config=config)
+
+    assert result.stop_reason == "final"
+    assert result.steps == 1
+    assert result.trace.total_tokens > 0
+
+    kinds = [event["event"] for event in _events(result)]
+    assert "run_start" in kinds
+    assert "tool_call" in kinds and "tool_result" in kinds
+    assert "run_end" in kinds
+
+
+def test_register_tool_and_hook_without_touching_core(tmp_path):
+    registry = Registry()
+
+    @registry.tool(
+        name="shout",
+        description="Uppercase the given text.",
+        parameters={
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+    )
+    def shout(text: str) -> str:
+        return text.upper()
+
+    calls = {"before": 0, "after": 0}
+
+    class MyHooks(Hooks):
+        def before_tool(self, call):
+            calls["before"] += 1
+
+        def after_tool(self, call, result):
+            calls["after"] += 1
+
+    config = _config(tmp_path, tools=[{"name": "shout", "enabled": True}])
+    client = MockLLM(script=[ScriptedCall("shout", {"text": "hello"}), "ok"])
+    result = run("go", client=client, config=config, registry=registry, hooks=MyHooks())
+
+    assert result.answer == "ok"
+    assert calls == {"before": 1, "after": 1}
+    assert any(event.get("result") == "HELLO" for event in _events(result))
+
+
+def test_high_risk_tool_is_off_unless_allowlisted(tmp_path):
+    registry = Registry()
+
+    @registry.tool(name="danger", description="High-risk demo tool.", risk="high")
+    def danger() -> str:
+        return "ran"
+
+    off = _config(tmp_path, tools=[])
+    assert registry.active_names(off.enabled_tool_names()) == []
+
+    on = _config(tmp_path, tools=[{"name": "danger", "enabled": True}])
+    assert registry.active_names(on.enabled_tool_names()) == ["danger"]
+
+
+class _AlwaysToolLLM:
+    """Always asks for a tool call (never finishes) so budgets must stop it."""
+
+    def __init__(self, sleep: float = 0.0) -> None:
+        self._sleep = sleep
+
+    def complete(self, messages, tools=None) -> LLMResponse:
+        if self._sleep:
+            import time
+
+            time.sleep(self._sleep)
+        return LLMResponse(
+            tool_calls=[ToolCall(id="c", name="get_current_time", arguments="{}")],
+            usage=Usage(1000, 1000, 2000),
+        )
+
+
+def test_budget_stop_on_max_steps(tmp_path):
+    config = _config(tmp_path, budget={"max_steps": 2})
+    result = run("x", client=_AlwaysToolLLM(), config=config)
+    assert result.stop_reason == "max_steps"
+    assert result.steps == 2
+
+
+def test_budget_stop_on_max_seconds(tmp_path):
+    config = _config(tmp_path, budget={"max_seconds": 0.01})
+    result = run("x", client=_AlwaysToolLLM(sleep=0.02), config=config)
+    assert result.stop_reason == "max_seconds"
+
+
+def test_budget_stop_on_max_tokens(tmp_path):
+    config = _config(tmp_path, budget={"max_tokens": 1500})
+    result = run("x", client=_AlwaysToolLLM(), config=config)
+    assert result.stop_reason == "max_tokens"
+    assert result.trace.total_tokens >= 1500
+
+
+def test_budget_stop_on_max_cost(tmp_path):
+    config = _config(tmp_path, budget={"max_cost_usd": 0.5})
+    config.llms[0].prompt_cost_per_1k = 1.0
+    config.llms[0].completion_cost_per_1k = 1.0
+    result = run("x", client=_AlwaysToolLLM(), config=config)
+    assert result.stop_reason == "max_cost"
+    assert result.trace.cost_usd >= 0.5
+
+
+def test_trace_records_tokens_and_cost(tmp_path):
+    config = _config(tmp_path)
+    config.llms[0].prompt_cost_per_1k = 2.0
+    config.llms[0].completion_cost_per_1k = 4.0
+    result = run("hi", client=MockLLM(), config=config)
+
+    assert result.trace.prompt_tokens > 0
+    assert result.trace.completion_tokens > 0
+    assert result.trace.cost_usd > 0
+    end = _events(result)[-1]
+    assert end["event"] == "run_end"
+    assert end["total_tokens"] == result.trace.total_tokens

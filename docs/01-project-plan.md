@@ -39,7 +39,7 @@
 - **工具注册表**:装饰器注册,新增 tool = 加函数 + 注册,不改循环;含 1–2 个内置安全示例工具。
 - **CLI(Typer)**:`run` 一问一答。
 - **JSONL trace + token/成本计数**。
-- **基础预算停止**:步数/时间/成本超限即停。
+- **基础预算停止**:步数(轮次)/时间/**token**/成本超限即停(4 维,任意组合,命中第一个即停)。预算与按 token 计的单价均为**运行期可配**(`config.yaml`),"按费用"需配对应 LLM 的输入/输出单价。
 - **mock LLM 测试** + README + AGENTS.md(扩展指南)+ LICENSE(MIT) + .env.example。
 - **可运行性保障(详见 §7)**:uv 契约(随仓库带 `uv.lock` + `.python-version`,uv 自动下载匹配 Python + 隔离 venv)+ **默认生成 `Dockerfile`/`.devcontainer`**(前期即纳入)+ `requirements.txt` pip 兜底 + 生成器对新仓库**冒烟自检**。
 - **1 个 preset**(coding-assistant)+ 空白示例 spec。
@@ -54,7 +54,8 @@
 
 ### L3 — 推迟到 v1+(明确不在 MVP)
 - Web `/config` 运行期热重载面板、密钥只写不回显面板、HTTP/SSE 远程 MCP、完整 HITL Web 交互时序、RAG 最小 ingest 闭环 + sqlite-vec、keyring 密钥后端、context offload(大输出落盘)。
-- 原 v2 项:沙箱、多 agent 范式、tracing UI、跨会话记忆、评测 harness、联网 MCP registry、`forge add/regenerate`。
+- **单 agent 多范式**(候选):仅以"生成期 spec 开关 → 渲染不同 `loop.py` 模板"实现(plan-execute、reflection 等),不引入运行期编排/范式抽象层(那是被禁的"框架抽象层")。
+- 原 v2 项:沙箱、多 agent 范式、tracing UI、跨会话记忆、评测 harness、联网 MCP registry、`forge add/regenerate`。**multi-agent 维持"明确不做"(见 §6)**;纳入需定位级变更 + 人审。
 
 > 说明:RAG / MCP 双传输 / Web 配置这些是竞品已有的"通用能力",做得再好也证明不了差异化;先用 L1 证明"无框架 + own-your-code"跑得通,再纵向叠。
 

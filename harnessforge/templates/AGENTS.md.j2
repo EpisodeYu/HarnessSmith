@@ -1,0 +1,94 @@
+# Extending {{ project_slug }}
+
+This harness is built to be edited. The three most common changes never require
+touching `loop.py`.
+
+## Add a tool
+
+Write a function and register it with the `@registry.tool(...)` decorator in
+`src/{{ project_slug }}/harness/tools.py` (or your own module that imports the
+shared `registry`):
+
+```python
+from {{ project_slug }}.harness.tools import registry
+
+@registry.tool(
+    name="word_count",
+    description="Count the words in a piece of text.",
+    parameters={
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+        "required": ["text"],
+    },
+)
+def word_count(text: str) -> str:
+    return str(len(text.split()))
+```
+
+Then allowlist it in `config.yaml` so the model is offered it:
+
+```yaml
+tools:
+  - name: word_count
+    enabled: true
+```
+
+A tool is only exposed to the model when it is **enabled in `config.yaml`** — the
+allowlist. Mark dangerous tools (shell, file writes) with `risk="high"` and keep
+them disabled until you explicitly opt in.
+
+## Swap the model / provider
+
+Everything is OpenAI Chat Completions over a `base_url`, so any compatible
+endpoint works (OpenAI, vLLM, together, groq, a local server, ...). Edit the
+profile in `config.yaml`:
+
+```yaml
+llms:
+  - name: default
+    model: your-model-name
+    api_key_env: YOUR_API_KEY        # the NAME of the env-var, not the value
+    base_url_env: YOUR_BASE_URL      # optional; omit for api.openai.com
+```
+
+Add the matching name(s) to `.env`. To track spend, set
+`prompt_cost_per_1k` / `completion_cost_per_1k` on the profile.
+
+## Plug in a hook
+
+Subclass `Hooks` to add logging, guardrails, redaction, or human-in-the-loop
+confirmation — without changing the loop:
+
+```python
+from {{ project_slug }}.harness.hooks import Hooks
+
+class AuditHooks(Hooks):
+    def before_tool(self, call):
+        print(f"about to call {call.name} with {call.arguments}")
+
+# pass an instance into run(..., hooks=AuditHooks())
+```
+
+Hook points: `before_step`, `after_step`, `before_tool`, `after_tool`,
+`on_error`.
+
+## Budgets & tracing
+
+`config.yaml`'s `budget` stops a runaway loop. Set any combination of four
+runtime limits — the loop stops at the first one reached:
+
+```yaml
+budget:
+  max_steps: 8         # max tool-using rounds
+  max_seconds: 30      # wall-clock seconds
+  max_tokens: 100000   # total prompt + completion tokens across the run
+  max_cost_usd: 1.00   # USD spend
+```
+
+`max_cost_usd` only works if the active LLM profile has non-zero
+`prompt_cost_per_1k` / `completion_cost_per_1k` — otherwise cost stays `0` and
+the limit never triggers. Pricing is a runtime knob (it lives in `config.yaml`,
+not the spec) so you can change provider rates without regenerating.
+
+Every run writes a JSONL trace under the configured `trace_dir` with per-step
+token counts and cost. Inspect a run with `cat traces/run-*.jsonl`.

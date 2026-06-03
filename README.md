@@ -3,10 +3,10 @@
 > **Forge your own agent harness.** A config-to-code generator that scaffolds a standalone agent harness you fully own — **no agent-framework lock-in** (no LangGraph, no LangChain, no ADK), and no dependency on HarnessForge after it's generated.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-![Status: Planning](https://img.shields.io/badge/status-planning-orange.svg)
+![Status: MVP golden path](https://img.shields.io/badge/status-golden_path-green.svg)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 
-> **Status:** Design / planning phase. The plan is finalized; implementation has not started yet. See [`docs/`](./docs/) for the full project plan and research.
+> **Status:** The MVP golden path (Slice 1) is implemented — `harnessforge new --preset coding-assistant` generates a thin, framework-free harness that locks its deps, smoke-tests itself, and runs a mock function-calling turn (CLI + Docker), pending human sign-off on the founding hypothesis. Web wizard / MCP / RAG (Slice 2+) are not built yet. See [`docs/`](./docs/) for the plan.
 
 ---
 
@@ -42,20 +42,22 @@ Secrets never touch `config.yaml`, the spec snapshot, or git — `config.yaml` h
 - **L2** — MCP tools (local `stdio`), multiple LLM profiles + role routing (`generation` / `compaction` / `embedding`), a minimal FastAPI + SSE web chat, context strategies (`truncate` / `summarize`).
 - **L3** — RAG ingest (chunk → embed → store → retrieve) on local `sqlite-vec`, a `/config` hot-reload panel, OS keyring secrets, full human-in-the-loop web flow, HTTP/SSE remote MCP, context offload.
 
-## Planned usage
-
-> Not yet implemented — this is the target developer experience.
+## Usage
 
 ```bash
 # One-shot, no install (like create-next-app)
-uvx harnessforge new my-agent
-
-# Or open the web wizard to configure interactively
-harnessforge wizard
+uvx harnessforge new my-agent --preset coding-assistant
 
 # Generate from a preset or an existing spec
 harnessforge new my-agent --preset coding-assistant
 harnessforge new my-agent --spec ./harness.spec.yaml
+
+# Skip the post-generation smoke check (e.g. offline); preflight your tooling
+harnessforge new my-agent --preset coding-assistant --no-verify
+harnessforge doctor
+
+# (Slice 2+, not yet built) open the web wizard
+# harnessforge wizard
 ```
 
 The generated `my-agent/` repo then runs on its own:

@@ -1,12 +1,18 @@
-"""Generator / rendering tests (Slice 0)."""
+"""Generator / rendering tests (Slice 0 + Slice 1 templates).
+
+These are fast: they render templates and inspect output without running uv,
+network, or Docker. End-to-end runnability lives in ``test_golden.py``.
+"""
 
 from __future__ import annotations
 
+import py_compile
 from pathlib import Path
 
 import pytest
 
 from harnessforge.generator import TargetExistsError, generate
+from harnessforge.presets import preset_spec_path
 from harnessforge.spec import load_spec
 
 EXAMPLE_SPEC = Path(__file__).resolve().parents[1] / "examples" / "spec.yaml"
@@ -15,6 +21,11 @@ EXAMPLE_SPEC = Path(__file__).resolve().parents[1] / "examples" / "spec.yaml"
 @pytest.fixture
 def spec():
     return load_spec(EXAMPLE_SPEC)
+
+
+@pytest.fixture
+def preset_spec():
+    return load_spec(preset_spec_path("coding-assistant"))
 
 
 def test_generates_expected_file_structure(tmp_path, spec):
@@ -105,3 +116,72 @@ def test_git_init_creates_repo(tmp_path, spec):
     result = generate(spec, out, git_init=True)
     assert result.git_initialized is True
     assert (out / ".git").is_dir()
+
+
+# --- Slice 1: harness core + runnability templates -------------------------
+
+
+def test_generates_harness_core_modules(tmp_path, preset_spec):
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    pkg = out / "src" / "coding_assistant"
+    for module in ("config", "llm", "loop", "tools", "hooks", "trace", "prompts", "mock"):
+        assert (pkg / "harness" / f"{module}.py").is_file(), module
+    assert (pkg / "interfaces" / "cli.py").is_file()
+    assert (out / "tests" / "test_harness.py").is_file()
+
+
+def test_generates_runnability_files(tmp_path, preset_spec):
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    for path in (
+        out / "config.yaml",
+        out / ".python-version",
+        out / "Dockerfile",
+        out / ".dockerignore",
+        out / ".devcontainer" / "devcontainer.json",
+        out / "AGENTS.md",
+    ):
+        assert path.is_file(), path
+    assert (out / ".python-version").read_text().strip() == "3.11"
+
+
+def test_rendered_python_modules_compile(tmp_path, preset_spec):
+    """Every generated .py file must be syntactically valid Python."""
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    py_files = sorted(out.rglob("*.py"))
+    assert py_files
+    for path in py_files:
+        py_compile.compile(str(path), doraise=True)
+
+
+def test_no_unrendered_jinja_in_text_files(tmp_path, preset_spec):
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    for path in sorted(out.rglob("*")):
+        if path.is_file() and path.suffix in {".py", ".toml", ".yaml", ".md", ".json"}:
+            text = path.read_text(encoding="utf-8")
+            assert "{{" not in text and "{%" not in text, f"unrendered jinja in {path}"
+
+
+def test_pyproject_has_runtime_deps_and_no_framework(tmp_path, preset_spec):
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    pyproject = (out / "pyproject.toml").read_text(encoding="utf-8")
+    for dep in ("openai", "pydantic", "pydantic-settings", "pyyaml", "typer"):
+        assert dep in pyproject, dep
+    lowered = pyproject.lower()
+    for forbidden in ("langchain", "langgraph", "adk"):
+        assert forbidden not in lowered, forbidden
+
+
+def test_config_yaml_renders_from_spec_without_secrets(tmp_path, preset_spec):
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    config = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "project_slug: coding_assistant" in config
+    assert "api_key_env: OPENAI_API_KEY" in config  # env NAME only
+    assert "get_current_time" in config and "calculator" in config
+    assert "max_steps: 8" in config
+    assert "sk-" not in config  # never a real secret value
