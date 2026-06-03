@@ -4,7 +4,7 @@
 >
 > 前置:Slice 2 门禁全绿(已 ✅)。
 >
-> **状态:✅ 已完成(退出门禁 §3 全绿;§4 人审项待人签字)。** `uv run pytest` 41 fast green(+3:条件渲染开/关 + web_index 无残留 jinja)+ `uv run pytest -m golden` 4 green(新增 web 端到端:生成 web 产物 → `uv lock` → `uv sync` 装 fastapi/uvicorn/httpx → `run --mock` → 产物 `pytest` 含 `test_web.py` 的 SSE + `/config` 全绿)。`ReadLints` clean。本片首次给生成器引入"**按 spec 条件渲染文件**"的能力(`web.py`/`web_index.html`/`test_web.py`/web 依赖随 `interfaces.web` 开关进出),为 Slice 4(MCP)、Slice 5(wizard)复用。`HarnessSpec.interfaces.web` 字段 Slice 0 已预留 → **未改 schema,未触发 `CLAUDE.md §6.1`**。
+> **状态:✅ 已完成(退出门禁 §3 全绿;§4 两项人审 2026-06-03 经真实 LLM 验收已签字通过)。** `uv run pytest` 41 fast green(+3:条件渲染开/关 + web_index 无残留 jinja)+ `uv run pytest -m golden` 4 green(新增 web 端到端:生成 web 产物 → `uv lock` → `uv sync` 装 fastapi/uvicorn/httpx → `run --mock` → 产物 `pytest` 含 `test_web.py` 的 SSE + `/config` 全绿)。`ReadLints` clean。本片首次给生成器引入"**按 spec 条件渲染文件**"的能力(`web.py`/`web_index.html`/`test_web.py`/web 依赖随 `interfaces.web` 开关进出),为 Slice 4(MCP)、Slice 5(wizard)复用。`HarnessSpec.interfaces.web` 字段 Slice 0 已预留 → **未改 schema,未触发 `CLAUDE.md §6.1`**。
 >
 > **实现说明(与计划的细化)**:① **Web 依赖落位**取方案 A——`web=true` 时 `fastapi`/`uvicorn` 直接进 `dependencies`(`uv sync`/Docker/`smoke_check` 零改动即装上),`web=false` 时整段不渲染;测试依赖 `httpx`(`fastapi.testclient` 需要)同样条件进 `[dependency-groups] dev`。② **`/config` 持久化**:本片只做"面板改 → 进程内 `app.state.config` 生效",**不回写 `config.yaml`**(保护用户带注释的配置文件;重启从盘重载),与初版"倾向回写"相比改为不回写,理由见 §4。③ **SSE = token 级流式 + 进度事件,且可选**(人 2026-06 追加要求,UX 关键):给 `LLMClient` 增 `stream(messages, tools, on_delta)`(Chat Completions `stream=True`,累积 content/tool_calls/usage 并逐 token 回调;仍是 Chat Completions,**未切 Responses / 未换 SDK**,不触发 `CLAUDE.md §6.4`);`loop.run()` 增可选 `on_delta`,有则走 `stream` 否则 `complete`(`loop.py` 仅 +4 行,实测 180 行仍在 150–300 薄区间)。流式开关在调用方:web `/chat?stream=`(默认开)+ 页面复选框、CLI `run --stream/--no-stream`(默认关,保留原行为)、库级传 `on_delta`。mock 端 `stream()` 复用 `complete()` 逐词发 token,离线可测。
 
@@ -76,8 +76,9 @@
 
 ## 4. 必须人审的决策点
 
-- [ ] **Web / UX 一眼是否可用(待人签字)**:单页 chat + config 面板的可用性与观感(`00-overview §2` 人审项)。供审:`uv run <pkg> serve [--mock]` 起服务,浏览器看 chat 进度事件流 + 切到 Config 标签改一项(如 `prompts.system`)保存后再 chat 验证生效。前端为 Tailwind CDN 单页 + 原生 `EventSource`,无构建。
-- [ ] **`/config` 可改字段范围(待人签字)**:边界已实现为——可改 `_EDITABLE_FIELDS = llms/roles/prompts/tools/context/observability/budget`;不可改结构性(`version`/`project_slug`)与 `secrets`(POST 中这些键被忽略,GET 不返回)。确认范围是否符合预期。
+- [x] **Web / UX 一眼是否可用(2026-06-03 人已签字通过)**:单页 chat + config 面板的可用性与观感(`00-overview §2` 人审项)。供审:`uv run <pkg> serve [--mock]` 起服务,浏览器看 chat 进度事件流 + 切到 Config 标签改一项(如 `prompts.system`)保存后再 chat 验证生效。前端为 Tailwind CDN 单页 + 原生 `EventSource`,无构建。**验收方式**:用本机 liteLLM 真实 LLM(`mimo-v2.5-pro`)经 SSH 端口转发在浏览器验证——token 流式 / 工具进度事件 / `/config` 改 `prompts.system` 当场生效均通过。
+- [x] **`/config` 可改字段范围(2026-06-03 人已签字通过)**:边界已实现为——可改 `_EDITABLE_FIELDS = llms/roles/prompts/tools/context/observability/budget`;不可改结构性(`version`/`project_slug`)与 `secrets`(POST 中这些键被忽略,GET 不返回)。真实端点验证:GET 仅回 env 名不回密钥真值,越权键(`project_slug`/`secrets`)被忽略,非法值(`budget.max_steps:-1`)返 400。**范围符合预期,确认通过**。
+- **v1+ 待办(2026-06-03 真实 LLM 验收发现)**:推理模型(如 `mimo-v2.5-pro`)在 reasoning 阶段会先沉默数秒才吐 content,流式下表现为"无反应等待",UX 差。**v1 新增模型"思考/reasoning"支持时,需显式提示**(如 `event: thinking` / 前端"思考中…"指示器,或把 `reasoning_content` 作为思考流推送),避免空白等待。已登记到 `00-overview §2` Slice 6+ backlog。
 - **软确认结论(Agent 已自主决定,`CLAUDE.md §5.3`;非阻塞,可一句话改判)**:
   - **SSE 粒度** = **token 级流式 + 进度事件,且可选**(人 2026-06 追加要求,已落地;见 §2.3 与头部实现说明③)。原"进度事件级、token 留 v1+"的方案已被取代。
   - **Web 依赖落位** = 方案 A(`web=true` 直接进 `dependencies`,不动冒烟/容器链路);"关掉不含"已三处(pyproject/lock/req)兑现 plan 的真实意图。
