@@ -1,0 +1,117 @@
+"""HarnessSpec — the minimal spec model that drives generation (Slice 0).
+
+Field names here become the field names of the generated ``config.yaml`` later,
+so they are deliberately conservative. Secrets are NEVER stored as values: LLM
+profiles reference environment-variable *names* (``api_key_env`` / ``base_url_env``),
+and real values live only in ``.env``.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+class LLMProfile(BaseModel):
+    """A named LLM configuration (placeholder in Slice 0; expanded in Slice 1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    model: str
+    api_key_env: str = "OPENAI_API_KEY"
+    base_url_env: str | None = None
+
+
+class ToolSpec(BaseModel):
+    """A tool entry (placeholder in Slice 0; real registration arrives in Slice 1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    enabled: bool = True
+
+
+class Interfaces(BaseModel):
+    """Which interfaces the generated repo should expose."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cli: bool = True
+    web: bool = False  # L2 (Slice 2)
+
+
+class Observability(BaseModel):
+    """Tracing / cost-accounting settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trace: bool = True
+    trace_dir: str = "traces"
+
+
+class HarnessSpec(BaseModel):
+    """Minimal HarnessSpec for Slice 0.
+
+    ``context`` / ``rag`` / ``secrets`` are declared for forward compatibility but
+    are not interpreted in Slice 0 — they are passed through untouched.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: str = "0.1"
+    project_slug: str = "agent_harness"
+    llms: list[LLMProfile] = Field(default_factory=list)
+    roles: dict[str, str] = Field(default_factory=dict)
+    interfaces: Interfaces = Field(default_factory=Interfaces)
+    tools: list[ToolSpec] = Field(default_factory=list)
+    observability: Observability = Field(default_factory=Observability)
+
+    # Reserved for later slices: declared so specs stay forward-compatible under
+    # extra="forbid", but not used by the Slice 0 generator.
+    context: dict[str, Any] | None = None
+    rag: dict[str, Any] | None = None
+    secrets: dict[str, Any] | None = None
+
+    @field_validator("project_slug")
+    @classmethod
+    def _validate_slug(cls, value: str) -> str:
+        if not _SLUG_RE.match(value):
+            raise ValueError(
+                "project_slug must be a snake_case Python identifier "
+                "(lowercase letters, digits, underscores; not starting with a digit), "
+                f"got {value!r}"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _validate_role_targets(self) -> "HarnessSpec":
+        if self.roles and self.llms:
+            known = {profile.name for profile in self.llms}
+            unknown = {target for target in self.roles.values() if target not in known}
+            if unknown:
+                raise ValueError(
+                    f"roles reference unknown LLM profile(s) {sorted(unknown)}; "
+                    f"known profiles are {sorted(known)}"
+                )
+        return self
+
+
+def load_spec(path: str | Path) -> HarnessSpec:
+    """Load and validate a HarnessSpec from a YAML file."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"spec file not found: {path}")
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError(
+            "spec file must contain a YAML mapping at the top level, "
+            f"got {type(data).__name__}"
+        )
+    return HarnessSpec.model_validate(data)

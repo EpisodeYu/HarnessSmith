@@ -1,0 +1,23 @@
+# Minimal HarnessSpec example — enough to generate a scaffold (Slice 0).
+# Secrets are NOT stored here: profiles reference env-var NAMES only.
+version: "0.1"
+project_slug: agent_harness
+
+llms:
+  - name: default
+    model: gpt-4o-mini
+    api_key_env: OPENAI_API_KEY
+    base_url_env: OPENAI_BASE_URL
+
+roles:
+  generation: default
+
+interfaces:
+  cli: true
+  web: false
+
+tools: []
+
+observability:
+  trace: true
+  trace_dir: traces
