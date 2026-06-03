@@ -25,18 +25,24 @@
 ```mermaid
 graph LR
     S0["Slice 0 骨架<br/>spec + 渲染引擎"] --> S1["Slice 1 黄金路径 ★<br/>生成可跑的薄 harness"]
-    S1 --> S2["Slice 2 接口与配置<br/>Web chat + profiles + context"]
-    S2 --> S3["Slice 3 工具生态<br/>MCP stdio + wizard"]
-    S3 --> S4["Slice 4 (v1+, 非 MVP)<br/>RAG / HTTP-SSE / hot-reload …"]
+    S1 --> S2["Slice 2 路由+上下文<br/>profiles/role + context"]
+    S2 --> S3["Slice 3 产物 Web<br/>chat SSE + /config 面板"]
+    S3 --> S4["Slice 4 MCP 工具<br/>stdio + catalog + allowlist"]
+    S4 --> S5["Slice 5 wizard+范式<br/>表单产 spec + 多范式渲染"]
+    S5 --> V["v1+ (非 MVP)<br/>multi-agent / 周期预算 / RAG / 远程 MCP / …"]
 ```
+
+> **切分说明(人已定向,2026-06)**:原"Slice 2 接口与配置 / Slice 3 工具生态"过胖(各捆了 3–4 件独立能力),已按中粒度重切为 S2–S5,每片 = 一个内聚能力。旧子文档 `03-slice-2-interfaces-and-config.md` / `04-slice-3-tools-ecosystem.md` 已被取代(内容拆入下表;细节见 git 历史)。
 
 | 切片 | 子文档 | 主交付物 | 完成门禁(全绿才算完成) | 必须人审的决策点 |
 |------|--------|----------|--------------------------|------------------|
 | **Slice 0** 骨架 | [`01-slice-0-scaffold.md`](./01-slice-0-scaffold.md) | `HarnessSpec` 最小字段 + Jinja2 生成引擎 + 写出仓库 / 拷 spec / `git init` / 重跑警告 | spec 校验 + 渲染单测绿;能生成一个空壳仓库;`ReadLints` clean | spec 最小字段集是否合理 |
 | **Slice 1** 黄金路径 ★核心里程碑 | [`02-slice-1-golden-path.md`](./02-slice-1-golden-path.md) | 薄模板核心(config/llm/loop/tools/hooks/trace/prompts/mock)+ 原生 function-calling(Chat Completions)+ 工具注册表 + 预算停止 + CLI `run` + JSONL trace + 可运行性保障(uv 契约 + 默认 Docker + 冒烟自检)+ coding-assistant preset。**状态:✅ 已完成(38 fast + 3 golden;ReadLints clean;§4 人审已签字)** | `01-project-plan.md §8` **全部 blocker** 通过(黄金快照、无框架断言、生成后冒烟、Docker 冒烟、CLI、tool+hook、trace、预算停止、密钥不入 git、`uvx` 冒烟、preset 生成并 pytest)✅ | **立项假设成立——人已签字 ✅** |
-| **Slice 2** 接口与配置 | [`03-slice-2-interfaces-and-config.md`](./03-slice-2-interfaces-and-config.md) | 极简 Web chat(FastAPI + SSE)+ 多 LLM profile 角色路由 + context(truncate,可选 summarize)+ 第 2 个 preset 骨架 | 对应 non-blocker 测试绿:`/chat` SSE 流式(mock)、`client_for(role)` 路由、context 策略单测、第 2 个 preset 生成并 pytest | Web / UX 一眼是否可用 |
-| **Slice 3** 工具生态 | [`04-slice-3-tools-ecosystem.md`](./04-slice-3-tools-ecosystem.md) | MCP **stdio** + 静态 catalog + allowlist;生成期 Web wizard(单页表单产 spec) | MCP stdio 工具调用测试绿;wizard 产出合法 spec 并能生成项目 | catalog 选哪些 server(安全审);wizard 字段是否齐 |
-| **Slice 4** v1+ | (暂不立子文档) | RAG ingest + sqlite-vec、HTTP/SSE 远程 MCP、`/config` 热重载、keyring、完整 HITL Web、context offload、**多范式 + supervisor multi-agent**(见下)、**周期预算**(见下) | 各项做到即验(见 `01 §7 Non-blocker`) | **不在 MVP**;进入前需人决定排期 |
+| **Slice 2** 路由 + 上下文 | [`03-slice-2-routing-and-context.md`](./03-slice-2-routing-and-context.md) | 多 LLM profile + `client_for(role)`(generation/compaction/embedding),loop 按角色取 client;context `truncate`(默认)+ 可选 `summarize`(走 compaction 角色) | non-blocker 测试绿:`client_for(role)` 路由(mock)、context 策略单测;关 summarize 时仍薄 | 角色集合/默认 context 策略是否合理 |
+| **Slice 3** 产物 Web(自持) | (开工时立子文档) | 产物 `interfaces/web.py`:FastAPI + **SSE 流式 chat** + **运行期 `/config` 配置面板**(决策④:行为性配置全可改);spec 开关,关掉则不含 fastapi/uvicorn 依赖 | `/chat` SSE 流式(mock)测试;`/config` 改运行期配置生效;关 Web 时 `pyproject` 不含 fastapi/uvicorn(薄验证) | Web/UX 一眼是否可用;配置面板可改字段范围 |
+| **Slice 4** MCP 工具 | (开工时立子文档) | `harnessforge/catalog/mcp_servers.yaml` 静态 catalog;产物 MCP client(**仅 stdio**)+ allowlist + 沿用 Slice 1 风险标记;spec 开关(关掉不含 `mcp`) | MCP stdio 工具调用测试(本地 stdio mock server);非 allowlist tool 不注册;关 MCP 时 `pyproject` 不含 `mcp` | catalog 收录哪些 server(安全审,优先 vendor 维护) |
+| **Slice 5** wizard + 范式 | (开工时立子文档) | `harnessforge/wizard/`(FastAPI + 单页静态表单,无构建)产合法 spec;**范式扁平多选** ReAct/Plan/Reflection → 渲染对应 `loop.py` 模板 | wizard 产出的 spec 校验通过并能 `generator` 生成;各范式渲染的产物 `uv sync && pytest` 绿 | wizard 字段是否齐/对外可读;范式默认集 |
+| **Slice 6+ (v1+)** | (暂不立子文档) | **supervisor multi-agent**(agent 即 tool,固定拓扑,opt-in)、**周期预算**(天/周/月,持久化可选模块)、RAG ingest + sqlite-vec、HTTP/SSE 远程 MCP、`/config` 热重载进阶、keyring、完整 HITL Web、context offload | 各项做到即验(见 `01 §7 Non-blocker`) | **不在 MVP**;进入前需人决定排期 |
 
 > **循环范式 / multi-agent(候选,v1+;人已定向)**:默认 loop 是单一原生 function-calling(ReAct/TAO),薄+无框架的核心卖点。扩展走 **wizard 扁平多选 + "生成期 spec 开关 → 渲染对应 `loop.py` 模板"**:① **单 loop 范式** ReAct(默认)/ Plan(Ask-Plan)/ Reflection;② **一种 supervisor multi-agent 模式**——以 "agent 即 tool"(子 agent = 再跑一个 `run()`)固定拓扑生成为**自有代码**,opt-in。**红线**:不做通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层(那是 `01 §6` 禁止的"框架抽象层")。multi-agent 定位措辞已按此细化(见 `01 §6`)。
 
