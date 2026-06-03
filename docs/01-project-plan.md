@@ -54,8 +54,9 @@
 
 ### L3 — 推迟到 v1+(明确不在 MVP)
 - Web `/config` 运行期热重载面板、密钥只写不回显面板、HTTP/SSE 远程 MCP、完整 HITL Web 交互时序、RAG 最小 ingest 闭环 + sqlite-vec、keyring 密钥后端、context offload(大输出落盘)。
-- **单 agent 多范式**(候选):仅以"生成期 spec 开关 → 渲染不同 `loop.py` 模板"实现(plan-execute、reflection 等),不引入运行期编排/范式抽象层(那是被禁的"框架抽象层")。
-- 原 v2 项:沙箱、多 agent 范式、tracing UI、跨会话记忆、评测 harness、联网 MCP registry、`forge add/regenerate`。**multi-agent 维持"明确不做"(见 §6)**;纳入需定位级变更 + 人审。
+- **多范式 + 一种 multi-agent**(候选,人已定向):wizard 扁平多选 + "生成期 spec 开关 → 渲染对应 `loop.py` 模板"。单 loop 范式 ReAct(默认)/ Plan(Ask-Plan)/ Reflection;**一种 supervisor multi-agent**——以"agent 即 tool"(子 agent = 再跑一个 `run()`)固定拓扑生成为**自有代码**,opt-in。**禁**:通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层(见 §6)。
+- **周期预算**(候选):per-run 4 维(步数/时间/token/费用)已在 L1;天/周/月配额做成 spec 勾选的可选**持久化**模块(本地 JSON,多进程/Web 再换 sqlite+锁),默认不生成。
+- 原 v2 项:沙箱、tracing UI、跨会话记忆、评测 harness、联网 MCP registry、`forge add/regenerate`。
 
 > 说明:RAG / MCP 双传输 / Web 配置这些是竞品已有的"通用能力",做得再好也证明不了差异化;先用 L1 证明"无框架 + own-your-code"跑得通,再纵向叠。
 
@@ -76,6 +77,7 @@
 - 单一 `config.yaml`(非密钥:llms/roles/context/tools/interfaces)+ `.env`(密钥真值,gitignored);`config.yaml` 只存 env 引用名(如 `api_key_env: OPENAI_API_KEY`)。
 - `harness/config.py` 启动加载 + Pydantic 校验,作为全局唯一入口。**运行期热重载推迟到 L3**(MVP 改配置后重启即可,本地自用足够)。
 - 生成期 `HarnessSpec` 与运行期 `config.yaml` 字段对齐,降低认知负担。
+- **配方 vs 活旗钮(控制面边界,人已定向)**:`spec` = 生成什么 + 初值;`config.yaml` = 运行期**权威**源,**行为性配置(模型/profile、prompt、预算数值、启用工具、context 参数、定价…)全部运行期可改**;**结构性配置**(有无某接口/模块、范式与拓扑 = 决定生成哪些**代码**)只能重新生成或将来 `forge add` 增量生成。运行期配置面板**生成进产物自身的 Web 接口**(产物自持),**HarnessForge 不做中心化配置管理/托管**——守"生成后不再依赖 HarnessForge"。故行为性字段尽量下沉到运行期,`spec` 仅作初值种子。
 
 ## 5. 架构
 
@@ -145,7 +147,9 @@ flowchart LR
 
 自主细节(实现时可调):模板引擎 Jinja2;spec 用 Pydantic v2 + YAML;运行期配置 pydantic-settings;Web 无构建单页(Tailwind CDN);context 默认 `truncate`(summarize 为 L2 可选)。
 
-**明确不做(保护定位)**:不做生产级权限系统、云托管、工作流编排 DSL、框架抽象层、在线 MCP registry、沙箱、多 agent、跨会话长期记忆。
+**明确不做(保护定位)**:不做生产级权限系统、云托管、**通用多 agent 编排框架 / 工作流编排 DSL / 动态图引擎 / 运行期范式抽象层**、在线 MCP registry、沙箱、跨会话长期记忆、**HarnessForge 侧的中心化配置管理/托管**(产物自持配置,守"生成后不再依赖 HarnessForge")。
+
+> **multi-agent 措辞细化(人已签,2026-06)**:红线是"**通用编排框架**",不是"≥2 个 agent"。**允许一个具体的、固定拓扑、生成为自有代码的 multi-agent 模式**(supervisor / "agent 即 tool",子 agent = 再跑一个 `run()`),**opt-in、排 v1+、不进默认产物**;它只是薄 loop 的组合,无运行期抽象层。详见 §3 L3 与 `02-development/00-overview.md §3` 决策表。
 
 ## 7. 生成产物可运行性保障
 

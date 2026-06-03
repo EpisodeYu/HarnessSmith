@@ -36,9 +36,11 @@ graph LR
 | **Slice 1** 黄金路径 ★核心里程碑 | [`02-slice-1-golden-path.md`](./02-slice-1-golden-path.md) | 薄模板核心(config/llm/loop/tools/hooks/trace/prompts/mock)+ 原生 function-calling(Chat Completions)+ 工具注册表 + 预算停止 + CLI `run` + JSONL trace + 可运行性保障(uv 契约 + 默认 Docker + 冒烟自检)+ coding-assistant preset。**状态:✅ 已完成(38 fast + 3 golden;ReadLints clean;§4 人审已签字)** | `01-project-plan.md §8` **全部 blocker** 通过(黄金快照、无框架断言、生成后冒烟、Docker 冒烟、CLI、tool+hook、trace、预算停止、密钥不入 git、`uvx` 冒烟、preset 生成并 pytest)✅ | **立项假设成立——人已签字 ✅** |
 | **Slice 2** 接口与配置 | [`03-slice-2-interfaces-and-config.md`](./03-slice-2-interfaces-and-config.md) | 极简 Web chat(FastAPI + SSE)+ 多 LLM profile 角色路由 + context(truncate,可选 summarize)+ 第 2 个 preset 骨架 | 对应 non-blocker 测试绿:`/chat` SSE 流式(mock)、`client_for(role)` 路由、context 策略单测、第 2 个 preset 生成并 pytest | Web / UX 一眼是否可用 |
 | **Slice 3** 工具生态 | [`04-slice-3-tools-ecosystem.md`](./04-slice-3-tools-ecosystem.md) | MCP **stdio** + 静态 catalog + allowlist;生成期 Web wizard(单页表单产 spec) | MCP stdio 工具调用测试绿;wizard 产出合法 spec 并能生成项目 | catalog 选哪些 server(安全审);wizard 字段是否齐 |
-| **Slice 4** v1+ | (暂不立子文档) | RAG ingest + sqlite-vec、HTTP/SSE 远程 MCP、`/config` 热重载、keyring、完整 HITL Web、context offload、**单 agent 多范式**(见下) | 各项做到即验(见 `01 §7 Non-blocker`) | **不在 MVP**;进入前需人决定排期 |
+| **Slice 4** v1+ | (暂不立子文档) | RAG ingest + sqlite-vec、HTTP/SSE 远程 MCP、`/config` 热重载、keyring、完整 HITL Web、context offload、**多范式 + supervisor multi-agent**(见下)、**周期预算**(见下) | 各项做到即验(见 `01 §7 Non-blocker`) | **不在 MVP**;进入前需人决定排期 |
 
-> **循环范式(候选,后续 slice)**:默认 loop 是单一原生 function-calling(ReAct/TAO),这是"薄 + 无框架"的核心卖点。若要支持多范式,**只走"生成期 spec 开关 → 渲染不同的 `loop.py` 模板"**(如 plan-execute、reflection/self-critique),用户拿到的仍是一份具体、可读、无运行期抽象层的 loop——不引入运行期"范式选择/编排策略"层(那会变成被定位红线禁止的"框架抽象层")。**multi-agent 维持"不做"**(`01 §6`、本文 §7):纳入它是定位级变更,须先改 `01-project-plan.md §6` 与路线图、经人审。
+> **循环范式 / multi-agent(候选,v1+;人已定向)**:默认 loop 是单一原生 function-calling(ReAct/TAO),薄+无框架的核心卖点。扩展走 **wizard 扁平多选 + "生成期 spec 开关 → 渲染对应 `loop.py` 模板"**:① **单 loop 范式** ReAct(默认)/ Plan(Ask-Plan)/ Reflection;② **一种 supervisor multi-agent 模式**——以 "agent 即 tool"(子 agent = 再跑一个 `run()`)固定拓扑生成为**自有代码**,opt-in。**红线**:不做通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层(那是 `01 §6` 禁止的"框架抽象层")。multi-agent 定位措辞已按此细化(见 `01 §6`)。
+
+> **周期预算(候选,v1+;人已定向)**:per-run 的 4 维上限(步数/时间/token/费用)已在 Slice 1 落地。"X/天·周·月"的周期配额需**跨 run 持久化用量账本**(本地 JSON,上 Web/多进程再换 sqlite+锁),**做成 spec 勾选的可选模块**(默认不生成,保持薄),与 Web/护栏一并做,不进当前 MVP 核心。
 
 **Agent 行为提示**:
 
@@ -63,6 +65,9 @@ graph LR
 | 安全(轻量,本地自用) | 密钥不入 git(`config.yaml`/`harness.spec.yaml` 只存 env 引用名,真值放 `.env`);高风险工具(shell/写文件)默认关,仅 allowlist 显式开;沙箱 / keyring / 全链路 redaction 推迟 |
 | MCP | MVP 仅 **stdio 本地**传输 + 手策静态 catalog;HTTP/SSE 远程 + 联网 registry 推迟到 L3/v2 |
 | context 默认 | `truncate`(summarize 为 L2 可选;offload 为 L3) |
+| 配置控制面 | **spec = 配方(生成什么 + 初值);`config.yaml` = 运行期权威活旋钮(行为性配置全可改)**;结构性变更(接口/模块/范式拓扑=代码)需重新生成或 `forge add`。运行期配置面板**生成进产物自身 Web**(产物自持),**HarnessForge 不做中心化配置/托管**(守"生成后不再依赖 HarnessForge") |
+| 范式 / multi-agent | 默认 ReAct;扩展走 wizard 扁平多选 + spec 渲染不同 `loop.py`:单 loop 范式(ReAct/Plan/Reflection)+ **一种 supervisor multi-agent(agent 即 tool,固定拓扑,生成为自有代码,opt-in)**;**禁**通用多 agent 编排框架 / 工作流 DSL / 动态图引擎。排 v1+ |
+| 预算 | per-run 4 维(步数/时间/token/费用)在核心;**周期配额(天/周/月)= spec 勾选的可选持久化模块**,默认不生成,排 v1+ |
 
 ## 4. 目录骨架
 
@@ -115,7 +120,9 @@ HarnessForge/                      # 生成器本体(本仓库)
 
 > 出现冲动时回看。来自 `01-project-plan.md §6`。
 
-不做:生产级权限系统、云托管、工作流编排 DSL、框架抽象层、在线 MCP registry、沙箱、多 agent、跨会话长期记忆;以及 L3 项(RAG / HTTP-SSE MCP / `/config` 热重载 / keyring / 完整 HITL Web / context offload)在 MVP 内不做。
+不做:生产级权限系统、云托管、**通用多 agent 编排框架 / 工作流编排 DSL / 动态图引擎 / 运行期范式抽象层**、在线 MCP registry、沙箱、跨会话长期记忆、**HarnessForge 侧中心化配置/托管**;以及 L3/v1+ 项(RAG / HTTP-SSE MCP / `/config` 热重载 / keyring / 完整 HITL Web / context offload / 多范式 + 一种 supervisor multi-agent / 周期预算)在 MVP 内不做。
+
+> **注**:multi-agent 不是一刀切禁掉——红线是"通用编排框架"。允许 v1+ 做**一个具体、固定拓扑、生成为自有代码的 supervisor 模式**(opt-in),详见 `01-project-plan.md §6`。
 
 ## 8. 完成报告模板(每个任务完成后输出)
 
