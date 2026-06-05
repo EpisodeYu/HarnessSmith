@@ -122,7 +122,7 @@ flowchart LR
 ```
 
 生成器目录(仓库根 `/home/s1yu/HarnessForge`,独立 git repo,MIT;支持 `uvx harnessforge new` 免安装一次性运行):
-- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/llms/roles/prompts/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/observability/budget;context/rag/secrets backend 字段预留但 MVP 不全实现)。
+- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/llms/roles/prompts(`system`/`persona`/**`rules_files`**(Slice 6B,全局 rule 文件种子,渲染进运行期 `config.yaml`))/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/observability/budget;context/rag/secrets backend 字段预留但 MVP 不全实现)。
 - `harnessforge/generator.py` — 渲染模板 → 写出仓库 + 拷入 `harness.spec.yaml` + `git init` + `uv lock` + 重跑警告不覆盖 + 生成后冒烟自检(`uv sync`+`pytest`+mock 跑一步)。
 - `harnessforge/cli.py` — Typer 入口(`new`、`--spec`、`--preset`、交互模式、`doctor` 预检、`--no-verify` 关闭冒烟自检)。
 - `harnessforge/catalog/mcp_servers.yaml` — 精选静态 MCP catalog(L2)。
@@ -143,7 +143,7 @@ flowchart LR
 - `src/<pkg>/harness/paradigms/`(Slice 5,**始终生成**)— 范式注册表(`@register_paradigm` + `PARADIGMS` + `Paradigm` 契约 + 共享 plumbing)+ 内置范式 `agent`(默认,ReAct 式)/`plan`/`ask`(各自自包含、互不 import,按 `spec.paradigms` 渲染);运行期 `--mode`/`config.yaml paradigms.enabled` 选,用户可自加。事后反思(Reflexion)作 `AGENTS.md` 用户扩展范例(需真实成功信号),非内置范式。
 - `src/<pkg>/harness/skills.py`(Slice 6,opt-in)— 标准 Agent Skills 支持(发现 `SKILL.md` + L1 元数据注入 + `read_skill` 读正文);仅 `spec.skills.enabled` 时生成。
 - `src/<pkg>/harness/trace.py` — 每次 run 的 JSONL trace + token/成本计数。
-- `src/<pkg>/harness/prompts.py` — 系统提示拼装。
+- `src/<pkg>/harness/prompts.py` — 系统提示拼装(system+persona + **全局 rule 文件注入**(Slice 6B,`prompts.rules_files` 列出的 markdown 每轮注入,开放 `AGENTS.md`/`CLAUDE.md`/`.cursor/rules` 模式;空=零效果)+ skills/environment L2)。
 - `src/<pkg>/harness/context.py`(L2)— truncate / summarize。
 - `src/<pkg>/harness/rag.py`(L3)。
 - `src/<pkg>/interfaces/cli.py` — `run`(L2 增 `ingest`)。

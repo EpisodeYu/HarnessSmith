@@ -1,11 +1,34 @@
-"""Assemble the system prompt from config (system + optional persona{% if spec.skills.enabled %} + skills{% endif %}{% if spec.mcp.enabled %} + environment{% endif %})."""
+"""Assemble the system prompt from config (system + optional persona + rules{% if spec.skills.enabled %} + skills{% endif %}{% if spec.mcp.enabled %} + environment{% endif %})."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from .config import Config
 {% if spec.skills.enabled %}from .skills import activate_skills, build_skills_prompt
 {% endif %}
 _DEFAULT_SYSTEM = "You are a helpful assistant. Use the available tools when they help."
+
+
+def _load_rules(config: Config) -> str:
+    """Read the always-apply project rule files and join them into one section.
+
+    This is the open AGENTS.md / CLAUDE.md / .cursor-rules pattern: every file
+    listed in ``config.prompts.rules_files`` is read and injected into the system
+    prompt verbatim. A path that doesn't exist (or is empty) is skipped, so a
+    rule file you haven't written yet is a no-op rather than an error. Add or
+    edit files and list them in ``config.yaml`` — no regeneration needed.
+    """
+    sections: list[str] = []
+    for path in config.prompts.rules_files:
+        candidate = Path(path)
+        if candidate.is_file():
+            text = candidate.read_text(encoding="utf-8").strip()
+            if text:
+                sections.append(text)
+    if not sections:
+        return ""
+    return "Project rules (always follow):\n\n" + "\n\n".join(sections)
 
 {% if spec.mcp.enabled %}
 def _environment_note(config: Config) -> str:
@@ -45,6 +68,9 @@ def _environment_note(config: Config) -> str:
     parts = [prompts.system or _DEFAULT_SYSTEM]
     if prompts.persona:
         parts.append(prompts.persona)
+    rules = _load_rules(config)
+    if rules:
+        parts.append(rules)
 {% if spec.skills.enabled %}    # Standard Agent Skills (L1): inject available skills' name+description so the
     # model knows they exist and can read the full SKILL.md on demand.
     activate_skills(config)

@@ -94,6 +94,13 @@ class Prompts(BaseModel):
 
     system: str | None = None
     persona: str | None = None
+    # Always-apply project rule files (the open AGENTS.md / CLAUDE.md / .cursor
+    # rules pattern): paths to markdown files whose text is injected into every
+    # system prompt. This is only a *seed* for the runtime knob — it is rendered
+    # into ``config.yaml`` (``prompts.rules_files``) where it stays editable
+    # without regenerating. Empty means no rule files (zero footprint). A listed
+    # ``RULES.md`` also gets a starter file generated into the repo.
+    rules_files: list[str] = Field(default_factory=list)
 
 
 class Budget(BaseModel):

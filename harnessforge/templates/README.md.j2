@@ -123,6 +123,11 @@ tools, budget, tracing). Secrets are referenced by **env-var name** only; the
 real values live in `.env` (gitignored) or the process environment — they never
 touch git, the trace, or `harness.spec.yaml`.
 
+**Always-apply project rules:** list markdown files under `prompts.rules_files`
+and their text is injected into every system prompt — the open `AGENTS.md` /
+`CLAUDE.md` / `.cursor/rules` pattern.{% if "RULES.md" in spec.prompts.rules_files %} A starter `RULES.md` ships here; edit
+it freely.{% endif %} See [`AGENTS.md`](./AGENTS.md).
+
 ## Extending
 
 See [`AGENTS.md`](./AGENTS.md): add a tool, swap the model/provider, and plug in

@@ -34,6 +34,10 @@ REQUIREMENTS_NAME = "requirements.txt"
 # the web interface now, MCP / wizard in later slices. Everything not listed
 # here is always rendered.
 CONDITIONAL_TEMPLATES: dict[str, Callable[[HarnessSpec], bool]] = {
+    # Always-apply project rules (the AGENTS.md/CLAUDE.md/.cursor-rules pattern):
+    # a starter RULES.md is generated only when the spec seeds it into
+    # prompts.rules_files; otherwise the repo stays free of an unused rule file.
+    "RULES.md.j2": lambda spec: "RULES.md" in spec.prompts.rules_files,
     "src/__project_slug__/interfaces/web.py.j2": lambda spec: spec.interfaces.web,
     "src/__project_slug__/interfaces/web_index.html.j2": lambda spec: spec.interfaces.web,
     "tests/test_web.py.j2": lambda spec: spec.interfaces.web,

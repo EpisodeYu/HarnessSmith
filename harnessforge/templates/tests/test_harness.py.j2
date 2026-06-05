@@ -13,6 +13,7 @@ from {{ project_slug }}.harness.hooks import Hooks
 from {{ project_slug }}.harness.llm import ClientRouter, LLMResponse, ToolCall, Usage
 from {{ project_slug }}.harness.loop import run
 from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
+from {{ project_slug }}.harness.prompts import build_system_prompt
 from {{ project_slug }}.harness.paradigms import (
     PARADIGMS,
     RunResult,
@@ -329,6 +330,30 @@ def test_ask_mode_is_read_only(tmp_path):
     assert result.stop_reason == "final"
     assert "danger_write" not in calls
 {% endif %}
+
+def test_rules_files_inject_into_system_prompt(tmp_path):
+    """Always-apply project rules (AGENTS.md/CLAUDE.md pattern): every listed
+    markdown file is injected into the system prompt; a missing one is skipped."""
+    rules = tmp_path / "RULES.md"
+    rules.write_text("Always cite your sources.", encoding="utf-8")
+    config = _config(
+        tmp_path,
+        prompts={
+            "system": "You are a test agent.",
+            "rules_files": [str(rules), str(tmp_path / "does_not_exist.md")],
+        },
+    )
+    prompt = build_system_prompt(config)
+    assert "You are a test agent." in prompt
+    assert "Always cite your sources." in prompt  # the rule file's text is injected
+
+
+def test_no_rules_files_means_no_rules_section(tmp_path):
+    config = _config(tmp_path, prompts={"system": "Base prompt."})
+    prompt = build_system_prompt(config)
+    assert prompt.startswith("Base prompt.")
+    assert "Project rules" not in prompt  # zero footprint when none are configured
+
 
 def test_context_truncate_is_noop_without_limit():
     messages = _conversation(8)

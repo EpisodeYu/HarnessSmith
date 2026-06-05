@@ -28,7 +28,7 @@
 
 ### 2.1 字段面(全覆盖 + 基础/高级分组,已定稿 §4①)
 - **基础组**:`project_slug`;1 个 llm profile(`model`/`api_key_env`/`base_url_env`);`prompts.system`;内置 tools 勾选(高风险标注、默认关);`interfaces.web`;`mcp.enabled`;`skills.enabled`;`paradigms` 多选 + 默认。
-- **高级折叠**:多 llm profile + 采样(`temperature`/`max_tokens`)+ 单价(`prompt_cost_per_1k`/`completion_cost_per_1k`);`roles`;`prompts.persona`;`budget` 四维(steps/seconds/tokens/cost);`context`(strategy/max_context_tokens/keep_last_turns);`observability`(trace/trace_dir);`mcp.enabled` 时从 catalog(Slice 6)多选 server。
+- **高级折叠**:多 llm profile + 采样(`temperature`/`max_tokens`)+ 单价(`prompt_cost_per_1k`/`completion_cost_per_1k`);`roles`;`prompts.persona`;`prompts.rules_files`(Slice 6B,全局 rule 文件列表种子);`budget` 四维(steps/seconds/tokens/cost);`context`(strategy/max_context_tokens/keep_last_turns);`observability`(trace/trace_dir);`mcp.enabled` 时从 catalog(Slice 6)多选 server。
 
 ### 2.2 后端校验 + 产出
 - `POST /spec`:Pydantic(`HarnessSpec`)校验 → 返回合法 spec YAML(可下载)+ 字段级错误回显。**密钥红线**:只采集 env 变量名、不回显真值。

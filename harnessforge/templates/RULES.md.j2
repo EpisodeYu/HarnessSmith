@@ -1,0 +1,10 @@
+# Project rules for {{ project_slug }}
+
+These rules are injected into **every** system prompt (see `config.yaml` →
+`prompts.rules_files`). Keep them short and imperative — they steer the agent on
+every turn, so each line costs tokens. Edit freely; no regeneration needed.
+
+- Be concise. Prefer a direct answer over a long preamble.
+- Use a tool when it genuinely helps; don't call tools for things you already know.
+- If a request is ambiguous, state your assumption and proceed rather than stalling.
+- Never invent file paths, APIs, or command output — say so when unsure.

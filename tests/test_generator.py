@@ -188,6 +188,32 @@ def test_config_yaml_renders_from_spec_without_secrets(tmp_path, preset_spec):
     assert "sk-" not in config  # never a real secret value
 
 
+def test_rules_injection_mechanism_is_always_generated(tmp_path, spec):
+    """Even with no rule files seeded, prompts.py carries the always-apply rules
+    mechanism and config.yaml exposes the (empty) runtime knob — but no unused
+    RULES.md is dropped into the repo."""
+    out = tmp_path / "thin"
+    generate(spec, out, git_init=False)
+    prompts_py = (out / "src" / "agent_harness" / "harness" / "prompts.py").read_text(
+        encoding="utf-8"
+    )
+    assert "_load_rules" in prompts_py and "rules_files" in prompts_py
+    assert "rules_files: []" in (out / "config.yaml").read_text(encoding="utf-8")
+    assert not (out / "RULES.md").exists()  # no rule file referenced -> none shipped
+
+
+def test_rules_starter_file_generated_when_seeded(tmp_path, preset_spec):
+    """The coding-assistant preset seeds prompts.rules_files: [RULES.md], so a
+    starter RULES.md is generated, the runtime knob points at it, and the seed
+    (a recipe input) lands in the committed spec snapshot."""
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    assert (out / "RULES.md").is_file()
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "rules_files:" in config_yaml and "RULES.md" in config_yaml
+    assert "RULES.md" in (out / "harness.spec.yaml").read_text(encoding="utf-8")
+
+
 # --- Slice 5: loop paradigms (registry always; built-ins conditional) ------
 
 

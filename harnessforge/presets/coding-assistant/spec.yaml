@@ -20,6 +20,11 @@ prompts:
   system: >-
     You are a focused coding assistant. Think step by step, use the available
     tools when they help, and keep answers concise.
+  # Always-apply project rules (AGENTS.md/CLAUDE.md/.cursor-rules pattern): a
+  # starter RULES.md is generated and injected into every system prompt. Edit it
+  # or list more files at runtime in config.yaml — no regeneration needed.
+  rules_files:
+    - RULES.md
 
 tools:
   - name: get_current_time
