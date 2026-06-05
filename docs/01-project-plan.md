@@ -54,7 +54,8 @@
 
 ### L3 — 推迟到 v1+(明确不在 MVP)
 - Web `/config` 运行期热重载面板、密钥只写不回显面板、**联网 MCP registry / `/config` 改 MCP server 热重连 / `forge add` 增量接 server**、完整 HITL Web 交互时序、RAG 最小 ingest 闭环 + sqlite-vec、keyring 密钥后端、context offload(大输出落盘)。(注:**MCP 远程 HTTP/SSE 传输已于 2026-06-03 提前进 L2**,见 L2;此处仅余 registry / 热重连 / 增量接入。)
-- **多范式 + 一种 multi-agent**(候选,人已定向):wizard 扁平多选 + "生成期 spec 开关 → 渲染对应 `loop.py` 模板"。单 loop 范式 ReAct(默认)/ Plan(Ask-Plan)/ Reflection;**一种 supervisor multi-agent**——以"agent 即 tool"(子 agent = 再跑一个 `run()`)固定拓扑生成为**自有代码**,opt-in。**禁**:通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层(见 §6)。
+- **多范式 + 范式可扩展 + 一种 multi-agent**(候选,人已定向):wizard **生成期多选** + 产物侧**薄范式注册表**。**单 loop 范式集 Agent(默认)/ Plan / Ask**(人 2026-06-05 定向并落地,Slice 5;对齐 Cursor 三件套——初版 ReAct/Plan/Ask/Reflection 当日修订:`react`→`agent`、删独立 `reflection`,因 Cursor/Claude 无 reflection 开关、reflection 靠真实成功信号条件触发或被推理模型内化,Reflexion 改作用户扩展范例,详见 `02-development/06-slice-5-paradigms.md §4②′`)——生成期**多选**进产物**共存**,**产物运行期每轮选一种**(类 Cursor agent/ask/plan;CLI `--mode` + Web 下拉;运行期 `enabled`+`default` 进 `config.yaml`、首项种默认);**Plan/Ask 只读**(只 offer 只读/低风险工具、禁 write/shell;Plan 对齐 Cursor 只产只读计划不动手,Plan→执行的 Build 切换推迟 v1+)。**范式可扩展(核心卖点)**:产物 `harness/paradigms/` 持**与 tools 同款的薄注册表 + `@register_paradigm` 装饰器**,**运行期用户可自加范式**(写函数+注册+配 `enabled`);**内置范式各自自包含、互不 import**(改 agent 不影响 ask);**注册表始终存在**(默认产物不再与 Slice 1–4 逐字一致,门禁改"行为一致");此处**扩展性/解耦优先于薄**(人已定向)。运行期"每轮选范式" + "范式注册表"**实现为已注册模式集的写死按名分发(自有代码),不是被禁的"运行期范式抽象层"/动态图/DSL/编排引擎**。**一种 supervisor multi-agent**——以"agent 即 tool"(子 agent = 再跑一个 `run()`)固定拓扑生成为**自有代码**,opt-in,**排 v1+**;用户自写 multi-agent 范式属其 own-code。**禁**:通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层(见 §6)。**2026-06-05 拆片**:范式=Slice 5、工具基线+SKILL=Slice 6、wizard=Slice 7。详见 `02-development/06-slice-5-paradigms.md`。
+- **工具基线(MCP 预设)+ 标准 SKILL**(Slice 6,人 2026-06-05 定向):产物无内置实用工具 → 基线能力**全由 MCP 预设提供、不自写 built-in**(`fetch` 默认开 / `git` 读开写关 / Desktop Commander 预填一键开,写/shell 默认关;离线靠生成期预热 + Docker 烤镜像;海量扩展走 marketplace 文档 + Composio 式 remote MCP,**不做联网 registry**)。并支持 **Agent Skills 开放标准**(`SKILL.md` 渐进披露:L1 发现+注入 → L2 文件工具/`read_skill` 读正文 → L3 脚本经工具跑),`spec.skills.enabled` 门控、不引框架、技能脚本=高风险默认关。详见 `02-development/07-slice-6-tools-and-skills.md`。
 - **周期预算**(候选):per-run 4 维(步数/时间/token/费用)已在 L1;天/周/月配额做成 spec 勾选的可选**持久化**模块(本地 JSON,多进程/Web 再换 sqlite+锁),默认不生成。
 - 原 v2 项:沙箱、tracing UI、跨会话记忆、评测 harness、联网 MCP registry、`forge add/regenerate`。
 
@@ -69,7 +70,9 @@
 **可扩展(核心卖点,与无框架同级)**:
 - 薄抽象、清晰模块边界:loop / llm / tools / context 各单一职责,可独立替换。
 - 工具用注册表(装饰器)注册;新增 tool = 加函数 + 注册。
+- **循环范式同走薄注册表(装饰器)**(Slice 5,人 2026-06-05 定向):新增范式 = 加函数 + `@register_paradigm` + 配 `config.yaml` 的 `enabled`,运行期经 `--mode`/Web 下拉每轮选;内置范式各自自包含、互不 import(改 agent 不影响 ask)。此扩展点**扩展性/解耦优先于薄**,但仍是 own-code 薄注册表,**非**运行期范式抽象层/编排引擎(守 §6 红线)。
 - 生命周期 Hooks:`before_step / after_step / before_tool / after_tool / on_error`,挂护栏/日志不动核心。
+- **标准 SKILL(Agent Skills 开放标准)**(Slice 6,人 2026-06-05 定向):放 `skills/<name>/SKILL.md`(渐进披露:L1 发现+注入 → L2 文件工具/`read_skill` 读正文 → L3 脚本经工具跑),`spec.skills.enabled` 门控、不引框架;与 Claude/Cursor 等 25+ 工具可移植。
 - LLM / embedding / 向量存储走 Protocol 接口,可替换实现。
 - 关键扩展点内联注释 + AGENTS.md 专章。
 
@@ -88,7 +91,9 @@
 - **两种威胁模型,决定该靠谁**:
   - **A 护栏(可信但会手滑)**:生成期能力天花板 + 危险工具默认不编译 / 默认关 + 预算上限即可。**生成器负责,贴合本定位。**
   - **B 强制(不可信 / 对手)**:harness 自身做不到,须靠**外部沙箱 / 容器**(已有 Docker 一等公民)、**自托管**或**后端凭证作用域**。**守"不做生产级权限系统"红线**(§6)——生成器最多生成"可被沙箱化的产物 + 按工具发作用域凭证",不在产物里造权限系统。
-- **分发场景**:管理员**不**为每人单独配权限——只把**一个统一的能力天花板**烤死进产物,人人同份;per-person 差异(各自 key / 数据目录)正是该可改、改了也安全的运行期值。拦不住"收件人改源码",那属模型 B,交容器 / 托管 / 凭证作用域。
+- **部署拓扑决定运行期配置安不安全(人 2026-06-05 补)** —— "运行期配置可改"是否安全,取决于产物怎么交付:
+  - **① 分发仓库**:把生成的仓库发给多人各自跑——每人都是代码所有者(模型 B),只有天花板没有地板。管理员**不**为每人单独配权限,只把**统一天花板**烤死进产物、人人同份;per-person 差异(各自 key / 数据目录)是该可改、改了也安全的运行期值。拦不住"收件人改源码",那属模型 B,交容器 / 托管 / 凭证作用域。
+  - **② 管理员托管 + 接口发布(更常见;运行期配置在此完全成立)**:管理员跑一个实例、配好运行期配置,终端用户只透过 `/chat` 等接口访问,**够不着代码与 `config.yaml`**。此时**边界 = 网络接口**,用户在 API 另一侧 → 管理员能对终端用户**强制地板**,运行期配置可改也安全(只有管理员够得着)。**前提:管理面(尤其 `/config`)必须与公开面隔离**(鉴权 / 绑 localhost / 生成期开关),否则终端用户能 POST `/config` 改掉配置;且为**单租户**(全局 config/预算,无 per-user 隔离),公网鉴权 / TLS / 限流属 harness 外运维。落地见 `00-overview §2` Slice 8+ backlog。
 
 ## 5. 架构
 
@@ -117,7 +122,7 @@ flowchart LR
 ```
 
 生成器目录(仓库根 `/home/s1yu/HarnessForge`,独立 git repo,MIT;支持 `uvx harnessforge new` 免安装一次性运行):
-- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/llms/roles/prompts/tools/interfaces/observability/budget;context/rag/secrets backend 字段预留但 MVP 不全实现)。
+- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/llms/roles/prompts/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/observability/budget;context/rag/secrets backend 字段预留但 MVP 不全实现)。
 - `harnessforge/generator.py` — 渲染模板 → 写出仓库 + 拷入 `harness.spec.yaml` + `git init` + `uv lock` + 重跑警告不覆盖 + 生成后冒烟自检(`uv sync`+`pytest`+mock 跑一步)。
 - `harnessforge/cli.py` — Typer 入口(`new`、`--spec`、`--preset`、交互模式、`doctor` 预检、`--no-verify` 关闭冒烟自检)。
 - `harnessforge/catalog/mcp_servers.yaml` — 精选静态 MCP catalog(L2)。
@@ -130,11 +135,13 @@ flowchart LR
 - `config.yaml` + `harness.spec.yaml` + `.env.example` + `LICENSE`(MIT)。
 - **可运行性文件(§7)**:`uv.lock` + `.python-version` + `requirements.txt`(uv 导出兜底)+ `Dockerfile` + `.dockerignore` + `.devcontainer/devcontainer.json`(基于官方 `ghcr.io/astral-sh/uv` 镜像)。
 - `src/<pkg>/harness/config.py` — 加载 `config.yaml`+`.env` + Pydantic 校验 + 密钥按 env 引用名解析。
-- `src/<pkg>/harness/loop.py` — 原生 function-calling 循环(Chat Completions)+ Hooks 调用点 + 预算停止。
+- `src/<pkg>/harness/loop.py` — 原生 function-calling 循环(Chat Completions)+ Hooks 调用点 + 预算停止。**(Slice 5 起收为薄分发入口,按 `mode` 调 `paradigms/` 下对应范式)**。
 - `src/<pkg>/harness/hooks.py` — 生命周期 hook 接口与默认空实现(扩展点)。
 - `src/<pkg>/harness/llm.py` — openai SDK 适配(base_url,provider-agnostic);profile 注册表 + `client_for(role)`(L2)。
 - `src/<pkg>/harness/tools.py` — 注册表(装饰器)+ 风险标记。
-- `src/<pkg>/harness/mcp.py`(L2,Slice 4,opt-in)— MCP client(stdio + 远程 HTTP/SSE),把 MCP 工具注册进上面的注册表;仅 `spec.mcp.enabled` 时生成。
+- `src/<pkg>/harness/mcp.py`(L2,Slice 4,opt-in)— MCP client(stdio + 远程 HTTP/SSE),把 MCP 工具注册进上面的注册表;仅 `spec.mcp.enabled` 时生成。Slice 6 起经 MCP 预设(`fetch`/`git`/Desktop Commander)做**工具基线**。
+- `src/<pkg>/harness/paradigms/`(Slice 5,**始终生成**)— 范式注册表(`@register_paradigm` + `PARADIGMS` + `Paradigm` 契约 + 共享 plumbing)+ 内置范式 `agent`(默认,ReAct 式)/`plan`/`ask`(各自自包含、互不 import,按 `spec.paradigms` 渲染);运行期 `--mode`/`config.yaml paradigms.enabled` 选,用户可自加。事后反思(Reflexion)作 `AGENTS.md` 用户扩展范例(需真实成功信号),非内置范式。
+- `src/<pkg>/harness/skills.py`(Slice 6,opt-in)— 标准 Agent Skills 支持(发现 `SKILL.md` + L1 元数据注入 + `read_skill` 读正文);仅 `spec.skills.enabled` 时生成。
 - `src/<pkg>/harness/trace.py` — 每次 run 的 JSONL trace + token/成本计数。
 - `src/<pkg>/harness/prompts.py` — 系统提示拼装。
 - `src/<pkg>/harness/context.py`(L2)— truncate / summarize。

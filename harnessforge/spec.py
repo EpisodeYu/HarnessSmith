@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -108,6 +108,18 @@ class HarnessSpec(BaseModel):
     roles: dict[str, str] = Field(default_factory=dict)
     prompts: Prompts = Field(default_factory=Prompts)
     tools: list[ToolSpec] = Field(default_factory=list)
+    # Which built-in loop paradigms to render into the repo (Slice 5). The set
+    # mirrors the modern product trio (cf. Cursor Agent/Ask/Plan): ``agent`` is
+    # the default tool-calling loop (ReAct-style, self-corrects on tool/error
+    # observations); ``plan``/``ask`` are read-only. The registry under
+    # harness/paradigms/ is ALWAYS generated; this list decides which built-in
+    # paradigm *files* exist (structural = generation-time). The first entry
+    # seeds the runtime default in config.yaml. Which are selectable at runtime,
+    # and any paradigm you add yourself, live in config.yaml's
+    # `paradigms.enabled` (behavioral = runtime).
+    paradigms: list[Literal["agent", "plan", "ask"]] = Field(
+        default_factory=lambda: ["agent"]
+    )
     interfaces: Interfaces = Field(default_factory=Interfaces)
     mcp: Mcp = Field(default_factory=Mcp)
     observability: Observability = Field(default_factory=Observability)
@@ -118,6 +130,17 @@ class HarnessSpec(BaseModel):
     context: dict[str, Any] | None = None
     rag: dict[str, Any] | None = None
     secrets: dict[str, Any] | None = None
+
+    @field_validator("paradigms")
+    @classmethod
+    def _validate_paradigms(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError("paradigms must list at least one paradigm")
+        deduped: list[str] = []
+        for name in value:
+            if name not in deduped:
+                deduped.append(name)
+        return deduped
 
     @field_validator("project_slug")
     @classmethod

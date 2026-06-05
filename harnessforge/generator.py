@@ -39,6 +39,10 @@ CONDITIONAL_TEMPLATES: dict[str, Callable[[HarnessSpec], bool]] = {
     "src/__project_slug__/harness/mcp.py.j2": lambda spec: spec.mcp.enabled,
     "tests/test_mcp.py.j2": lambda spec: spec.mcp.enabled,
     "tests/_mcp_dummy_server.py.j2": lambda spec: spec.mcp.enabled,
+    # Paradigms (Slice 5): the registry + agent are always rendered; the other
+    # built-in paradigm files appear only when selected in spec.paradigms.
+    "src/__project_slug__/harness/paradigms/plan.py.j2": lambda spec: "plan" in spec.paradigms,
+    "src/__project_slug__/harness/paradigms/ask.py.j2": lambda spec: "ask" in spec.paradigms,
 }
 
 
@@ -81,6 +85,7 @@ def _build_context(spec: HarnessSpec) -> dict:
         "roles": spec.roles,
         "interfaces": spec.interfaces,
         "tools": spec.tools,
+        "paradigms": spec.paradigms,
         "observability": spec.observability,
         "env_names": env_names,
     }

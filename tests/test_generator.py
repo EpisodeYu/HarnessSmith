@@ -187,6 +187,69 @@ def test_config_yaml_renders_from_spec_without_secrets(tmp_path, preset_spec):
     assert "sk-" not in config  # never a real secret value
 
 
+# --- Slice 5: loop paradigms (registry always; built-ins conditional) ------
+
+
+def test_paradigm_registry_and_agent_are_always_generated(tmp_path, preset_spec):
+    """Default (paradigms: [agent]) still ships the registry + agent, plus the
+    runtime paradigms config — but not the other built-ins."""
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    pdir = out / "src" / "coding_assistant" / "harness" / "paradigms"
+    assert (pdir / "__init__.py").is_file()
+    assert (pdir / "agent.py").is_file()
+    assert not (pdir / "plan.py").exists()
+    assert not (pdir / "ask.py").exists()
+
+    config_py = (out / "src" / "coding_assistant" / "harness" / "config.py").read_text()
+    assert "class ParadigmsConfig" in config_py
+    assert "paradigms: ParadigmsConfig" in config_py
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "paradigms:" in config_yaml
+    assert "enabled: [agent]" in config_yaml
+    assert "default: agent" in config_yaml
+
+
+def test_multi_paradigm_generates_all_builtin_files(tmp_path, spec):
+    spec.paradigms = ["agent", "plan", "ask"]
+    out = tmp_path / "multi"
+    generate(spec, out, git_init=False)
+    pdir = out / "src" / "agent_harness" / "harness" / "paradigms"
+    for name in ("__init__", "agent", "plan", "ask"):
+        assert (pdir / f"{name}.py").is_file(), name
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "enabled: [agent, plan, ask]" in config_yaml
+    assert "default: agent" in config_yaml
+
+
+def test_paradigm_files_do_not_import_each_other(tmp_path, spec):
+    """Decoupling gate: built-in paradigms must not import one another."""
+    spec.paradigms = ["agent", "plan", "ask"]
+    out = tmp_path / "multi"
+    generate(spec, out, git_init=False)
+    pdir = out / "src" / "agent_harness" / "harness" / "paradigms"
+    builtins = ["agent", "plan", "ask"]
+    for name in builtins:
+        text = (pdir / f"{name}.py").read_text(encoding="utf-8")
+        for other in builtins:
+            if other == name:
+                continue
+            assert f"from . import {other}" not in text, f"{name} imports {other}"
+            assert f"from .{other}" not in text, f"{name} imports {other}"
+            assert f"import {other}\n" not in text, f"{name} imports {other}"
+
+
+def test_loop_is_a_thin_dispatcher(tmp_path, preset_spec):
+    """loop.py no longer holds the loop body — it dispatches to a paradigm."""
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    loop = (out / "src" / "coding_assistant" / "harness" / "loop.py").read_text()
+    assert "get_paradigm" in loop
+    assert "from .paradigms import RunResult, get_paradigm" in loop
+
+
 # --- Slice 3: optional web interface (conditional generation) --------------
 
 

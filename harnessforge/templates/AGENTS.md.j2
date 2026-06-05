@@ -72,6 +72,74 @@ class AuditHooks(Hooks):
 Hook points: `before_step`, `after_step`, `before_tool`, `after_tool`,
 `on_error`.
 
+## Add a paradigm
+
+A *paradigm* is one way to run a turn. The built-ins live in
+`src/{{ project_slug }}/harness/paradigms/` — `agent` (default){% for p in paradigms %}{% if p == "plan" %}, `plan`{% elif p == "ask" %}, `ask`{% endif %}{% endfor %}.
+Each is a self-contained file with its own loop; **they never import each other**,
+so editing one can't affect the others. Adding your own is the same shape as
+adding a tool — write a function, register it, then enable it in `config.yaml`:
+
+```python
+# src/{{ project_slug }}/harness/paradigms/mymode.py
+from . import RunResult, register_paradigm
+from ..trace import Trace
+
+@register_paradigm("mymode")
+def run(user_input, *, config, trace=None, **kwargs):
+    # accept **kwargs (client/client_for/registry/hooks/on_delta/role) and use
+    # what you need; the easiest start is to copy agent.py and tweak its loop.
+    t = trace or Trace(enabled=False)
+    return RunResult(answer=f"echo: {user_input}", steps=0, stop_reason="final",
+                     trace=t, mode="mymode")
+```
+
+Import it so it registers (add `from . import mymode` at the bottom of
+`paradigms/__init__.py`), then list it in `config.yaml`:
+
+```yaml
+paradigms:
+  enabled: [agent, mymode]   # add your paradigm's name here
+  default: agent
+```
+
+Now `{{ project_slug }} run --mode mymode "..."` (or the web dropdown) routes to
+it. This is a written-out name→function dispatch over a fixed registry — **not** a
+runtime "paradigm engine" / dynamic graph / DSL. To make a read-only paradigm,
+filter tools with `registry.active_names(config.enabled_tool_names(),
+allow_high_risk=False)` (that's exactly how `plan`/`ask` stay safe).
+
+### Self-correction & reflection (do it with a real signal)
+
+The `agent` loop already self-corrects *online*: a failing tool comes back as an
+`ERROR: ...` observation and the model adapts on the next step. That covers the
+common case without any extra mode.
+
+For deliberate *post-hoc* reflection (Reflexion: critique → retry), gate it on a
+**real success signal** — run your tests / a validator and only loop back on
+failure — rather than asking the model to grade its own work blind (an
+unconditional self-critique mostly burns tokens and can't see its own blind
+spots). The clean way is your own paradigm that wraps `agent.run`:
+
+```python
+# critique-and-retry ONLY while an external check fails
+@register_paradigm("reflexion")
+def run(user_input, *, config, **kwargs):
+    from .agent import run as agent_run
+    result = agent_run(user_input, config=config, **kwargs)
+    for _ in range(2):                       # bounded retries
+        if check_passes(result.answer):      # YOUR signal: tests, schema, lint...
+            break
+        result = agent_run(
+            f"{user_input}\n\nYour previous answer failed: {why_it_failed}. Fix it.",
+            config=config, **kwargs,
+        )
+    return result
+```
+
+(Importing `agent.run` here is fine — that's reusing the base loop, not two
+built-in paradigms importing each other.)
+
 ## Budgets & tracing
 
 `config.yaml`'s `budget` stops a runaway loop. Set any combination of four

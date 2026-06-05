@@ -35,6 +35,11 @@ def run(
         Path("config.yaml"), "--config", "-c", help="Path to config.yaml."
     ),
     role: str = typer.Option("generation", "--role", help="LLM role to use."),
+    mode: str = typer.Option(
+        None,
+        "--mode",
+        help="Loop paradigm to use (default: config.paradigms.default).",
+    ),
     mock: bool = typer.Option(
         False, "--mock", help="Use the offline mock LLM (no API key / network)."
     ),
@@ -61,19 +66,24 @@ def run(
         printed = True
         typer.echo(text, nl=False)
 
-    result = run_loop(
-        prompt,
-        client_for=router.client_for,
-        config=config,
-        role=role,
-        on_delta=_on_delta if stream else None,
-    )
+    try:
+        result = run_loop(
+            prompt,
+            mode=mode,
+            client_for=router.client_for,
+            config=config,
+            role=role,
+            on_delta=_on_delta if stream else None,
+        )
+    except ValueError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
     if printed:
         typer.echo("")  # finish the streamed line
     else:
         typer.echo(result.answer)  # non-stream, or a budget-stop message
     typer.secho(
-        f"[{result.stop_reason}] steps={result.steps} "
+        f"[{result.mode}] [{result.stop_reason}] steps={result.steps} "
         f"tokens={result.trace.total_tokens} cost=${result.trace.cost_usd:.4f}",
         fg=typer.colors.BRIGHT_BLACK,
     )

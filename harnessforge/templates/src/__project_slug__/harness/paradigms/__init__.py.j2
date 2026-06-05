@@ -1,0 +1,121 @@
+"""Loop paradigms: a thin name->callable registry, exactly like the tool registry.
+
+A *paradigm* is one way to run a turn (agent, plan, ask, ...). Each built-in
+paradigm lives in its own self-contained file in this package and is registered
+here by name; ``loop.run`` resolves the chosen ``mode`` and dispatches to it. This is a written-out dispatch over a fixed set of registered functions —
+**not** a runtime "paradigm engine" / dynamic graph / DSL. Adding your own
+paradigm is the same shape as adding a tool: write a function, decorate it with
+``@register_paradigm("name")``, then list its name in ``config.yaml``'s
+``paradigms.enabled``.
+
+This module also holds the small, paradigm-agnostic plumbing the built-ins share
+(``RunResult`` + a couple of message/tool helpers) so the paradigms never import
+each other — they import only this contract and the stable infra modules
+(``llm`` / ``tools`` / ``trace`` / ``context`` / ``hooks``).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable, Protocol
+
+from ..hooks import Hooks
+from ..llm import LLMResponse, ToolCall
+from ..tools import Registry
+from ..trace import Trace
+
+
+@dataclass
+class RunResult:
+    answer: str
+    steps: int
+    # "final" | "max_steps" | "max_seconds" | "max_tokens" | "max_cost"
+    stop_reason: str
+    trace: Trace
+    mode: str = "agent"  # which paradigm produced this result
+
+
+class Paradigm(Protocol):
+    """The contract every paradigm satisfies: same shape as ``loop.run`` (minus
+    ``mode``), returning a :class:`RunResult`. Keyword args beyond what a given
+    paradigm uses may be ignored (accept ``**kwargs``)."""
+
+    def __call__(self, user_input: str, *, config, **kwargs) -> RunResult: ...
+
+
+PARADIGMS: dict[str, Paradigm] = {}
+
+
+def register_paradigm(name: str) -> Callable[[Paradigm], Paradigm]:
+    """Decorator: register ``func`` as the paradigm called ``name``."""
+
+    def decorator(func: Paradigm) -> Paradigm:
+        PARADIGMS[name] = func
+        return func
+
+    return decorator
+
+
+def get_paradigm(name: str) -> Paradigm:
+    if name not in PARADIGMS:
+        raise ValueError(
+            f"unknown paradigm {name!r}; registered: {sorted(PARADIGMS)}"
+        )
+    return PARADIGMS[name]
+
+
+# --- Shared loop plumbing (paradigm-agnostic; kept here so paradigms stay thin
+#     and never import one another) ------------------------------------------
+
+
+def assistant_message(response: LLMResponse) -> dict:
+    """The OpenAI-shaped assistant message carrying any requested tool calls."""
+    return {
+        "role": "assistant",
+        "content": response.content or "",
+        "tool_calls": [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {"name": call.name, "arguments": call.arguments},
+            }
+            for call in response.tool_calls
+        ],
+    }
+
+
+def run_tool(registry: Registry, call: ToolCall, hooks: Hooks, trace: Trace) -> str:
+    """Execute one tool call; tool errors are captured, never crash the loop."""
+    hooks.before_tool(call)
+    trace.event("tool_call", name=call.name, arguments=call.arguments)
+    try:
+        result = registry.call(call.name, call.arguments)
+    except Exception as exc:
+        hooks.on_error("tool", exc)
+        result = f"ERROR: {exc}"
+    trace.event("tool_result", name=call.name, result=result)
+    hooks.after_tool(call, result)
+    return result
+
+
+def limit_message(kind: str, limit: object) -> str:
+    return f"Stopped: {kind} budget ({limit}) reached before a final answer."
+
+
+# Importing each built-in registers it. ``agent`` is always present (the
+# default); the others appear only when selected in spec.paradigms. Kept at the
+# bottom so the names above are defined before registration runs.
+from . import agent  # noqa: E402,F401
+{% if "plan" in spec.paradigms %}from . import plan  # noqa: E402,F401
+{% endif %}{% if "ask" in spec.paradigms %}from . import ask  # noqa: E402,F401
+{% endif %}
+__all__ = [
+    "RunResult",
+    "Paradigm",
+    "PARADIGMS",
+    "register_paradigm",
+    "get_paradigm",
+    "assistant_message",
+    "run_tool",
+    "limit_message",
+]

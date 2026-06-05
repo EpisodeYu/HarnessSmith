@@ -20,6 +20,7 @@
       <div id="log" class="h-96 overflow-y-auto rounded-lg border bg-white p-4 text-sm space-y-2"></div>
       <form id="chat-form" class="flex items-center gap-2">
         <input id="msg" class="flex-1 rounded-lg border px-3 py-2" placeholder="Ask something…" autocomplete="off" />
+        <select id="mode" class="rounded-lg border px-2 py-2 text-sm" title="Loop paradigm"></select>
         <label class="flex items-center gap-1 text-sm text-slate-500">
           <input id="stream" type="checkbox" checked /> stream
         </label>
@@ -51,16 +52,33 @@
       return el;
     }
 
+    async function loadParadigms() {
+      try {
+        const data = await (await fetch("/paradigms")).json();
+        $("mode").innerHTML = "";
+        for (const name of data.enabled) {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          if (name === data.default) opt.selected = true;
+          $("mode").appendChild(opt);
+        }
+      } catch (err) { /* dropdown stays empty; chat still works with the default */ }
+    }
+    loadParadigms();
+
     $("chat-form").addEventListener("submit", (e) => {
       e.preventDefault();
       const message = $("msg").value.trim();
       if (!message) return;
       $("msg").value = "";
-      line("you: " + message, "font-semibold");
+      const mode = $("mode").value;
+      line("you" + (mode ? " (" + mode + ")" : "") + ": " + message, "font-semibold");
 
       const stream = $("stream").checked;
       let answer = null;  // the live assistant line, created on the first token
-      const url = "/chat?message=" + encodeURIComponent(message) + "&stream=" + stream;
+      let url = "/chat?message=" + encodeURIComponent(message) + "&stream=" + stream;
+      if (mode) url += "&mode=" + encodeURIComponent(mode);
       const es = new EventSource(url);
 
       es.addEventListener("token", (ev) => {
@@ -83,7 +101,7 @@
       es.addEventListener("final", (ev) => {
         const d = JSON.parse(ev.data);
         if (answer === null) line(d.answer, "text-slate-900 whitespace-pre-wrap");
-        line("[" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=$" + d.cost_usd, "text-xs text-slate-400");
+        line("[" + d.mode + "] [" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=$" + d.cost_usd, "text-xs text-slate-400");
         es.close();
       });
     });

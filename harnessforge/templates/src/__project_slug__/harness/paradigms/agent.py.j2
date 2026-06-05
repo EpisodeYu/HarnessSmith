@@ -1,0 +1,153 @@
+"""Agent paradigm (default): native function-calling Think -> Act -> Observe.
+
+This is the full-power loop (ReAct-style, the same primitive Cursor/Claude call
+"agent"): the model may call any allowlisted tool — including high-risk ones
+you've enabled — execute it, observe the result, and repeat until it answers or
+a budget stops it. It already **self-corrects online**: a failing tool comes back
+as an ``ERROR: ...`` observation the model reasons about on the next step, so you
+get error-driven correction without a separate "reflection" mode.
+
+For deliberate post-hoc self-review (Reflexion: critique-and-retry), the right
+shape is to gate it on a *real* success signal — run tests / a validator, and
+only loop back on failure — rather than letting the model grade its own work
+blind. That belongs in your own paradigm or a hook (see AGENTS.md), not baked
+into this core loop.
+
+Self-contained — read it, edit it, copy it to start your own paradigm. It shares
+only the stable infra modules and the small plumbing in ``paradigms/__init__``;
+it imports no other paradigm.
+"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Callable
+
+from ..config import Config
+from ..context import fit as fit_context
+from ..hooks import Hooks
+from ..llm import LLMClient
+from ..prompts import build_system_prompt
+from ..tools import Registry
+from ..tools import registry as default_registry
+from ..trace import Trace
+from . import (
+    RunResult,
+    assistant_message,
+    limit_message,
+    register_paradigm,
+    run_tool,
+)
+
+MODE = "agent"
+
+
+@register_paradigm(MODE)
+def run(
+    user_input: str,
+    *,
+    client: LLMClient | None = None,
+    client_for: Callable[[str], LLMClient] | None = None,
+    config: Config,
+    role: str = "generation",
+    registry: Registry = default_registry,
+    hooks: Hooks | None = None,
+    trace: Trace | None = None,
+    on_delta: Callable[[str], None] | None = None,
+) -> RunResult:
+    """Run one agent turn and return the final answer + telemetry."""
+    hooks = hooks or Hooks()
+    if client is None:
+        if client_for is None:
+            raise ValueError("run() needs either `client` or `client_for`")
+        client = client_for(role)
+    profile = config.profile_for(role)
+    if trace is None:
+        obs = config.observability
+        trace = Trace(trace_dir=obs.trace_dir if obs.trace else None, enabled=obs.trace)
+
+    context_cfg = config.context
+    summarizer: LLMClient | None = (
+        client_for("compaction")
+        if client_for is not None and context_cfg.strategy == "summarize"
+        else None
+    )
+
+    budget = config.budget
+    active = registry.active_names(config.enabled_tool_names())
+    tool_schemas = registry.schemas(active)
+
+    messages: list[dict] = [
+        {"role": "system", "content": build_system_prompt(config)},
+        {"role": "user", "content": user_input},
+    ]
+    trace.event("run_start", mode=MODE, role=role, model=profile.model, tools=active)
+    started = time.monotonic()
+
+    step = 0
+    stop_reason = "final"
+    answer = ""
+    while True:
+        if budget.max_steps is not None and step >= budget.max_steps:
+            stop_reason, answer = "max_steps", limit_message("step", budget.max_steps)
+            break
+        if (
+            budget.max_seconds is not None
+            and time.monotonic() - started >= budget.max_seconds
+        ):
+            stop_reason, answer = "max_seconds", limit_message("time", budget.max_seconds)
+            break
+
+        messages = fit_context(messages, context_cfg, summarizer=summarizer)
+        hooks.before_step(step, messages)
+        try:
+            if on_delta is not None:
+                response = client.stream(messages, tool_schemas or None, on_delta=on_delta)
+            else:
+                response = client.complete(messages, tool_schemas or None)
+        except Exception as exc:
+            hooks.on_error("llm", exc)
+            trace.event("error", where="llm", error=str(exc))
+            trace.close()
+            raise
+
+        cost = trace.add_usage(response.usage, profile)
+        trace.event(
+            "llm_response",
+            step=step,
+            has_tool_calls=bool(response.tool_calls),
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            step_cost_usd=cost,
+        )
+        hooks.after_step(step, response)
+
+        if budget.max_tokens is not None and trace.total_tokens >= budget.max_tokens:
+            stop_reason, answer = "max_tokens", limit_message("token", budget.max_tokens)
+            break
+        if budget.max_cost_usd is not None and trace.cost_usd >= budget.max_cost_usd:
+            stop_reason, answer = "max_cost", limit_message("cost", budget.max_cost_usd)
+            break
+
+        if not response.tool_calls:
+            answer, stop_reason = response.content or "", "final"
+            break
+
+        messages.append(assistant_message(response))
+        for call in response.tool_calls:
+            result = run_tool(registry, call, hooks, trace)
+            messages.append(
+                {"role": "tool", "tool_call_id": call.id, "content": result}
+            )
+        step += 1
+
+    trace.event(
+        "run_end",
+        mode=MODE,
+        stop_reason=stop_reason,
+        steps=step,
+        total_tokens=trace.total_tokens,
+        cost_usd=trace.cost_usd,
+    )
+    trace.close()
+    return RunResult(answer=answer, steps=step, stop_reason=stop_reason, trace=trace, mode=MODE)

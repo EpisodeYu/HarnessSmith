@@ -5,13 +5,22 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from {{ project_slug }}.harness.config import Config, ContextConfig
 from {{ project_slug }}.harness.context import estimate_tokens, fit
 from {{ project_slug }}.harness.hooks import Hooks
 from {{ project_slug }}.harness.llm import ClientRouter, LLMResponse, ToolCall, Usage
 from {{ project_slug }}.harness.loop import run
 from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
+from {{ project_slug }}.harness.paradigms import (
+    PARADIGMS,
+    RunResult,
+    get_paradigm,
+    register_paradigm,
+)
 from {{ project_slug }}.harness.tools import Registry
+from {{ project_slug }}.harness.trace import Trace
 
 
 def _config(tmp_path, **overrides):
@@ -217,6 +226,109 @@ def test_loop_on_delta_streams_final_answer(tmp_path):
     assert result.answer == "Streamed answer."
     assert "".join(deltas) == "Streamed answer."  # only assistant text, not tool output
 
+
+# --- Slice 5: loop paradigms (registry + runtime mode + extension) ---------
+
+
+def test_agent_is_the_default_paradigm(tmp_path):
+    config = _config(tmp_path)  # paradigms defaults to enabled=["agent"], default="agent"
+    result = run("hi", client=MockLLM(), config=config)
+    assert result.mode == "agent"
+    assert result.stop_reason == "final"
+
+
+def test_unknown_or_disabled_mode_raises(tmp_path):
+    config = _config(tmp_path)  # only "agent" is enabled by default
+    with pytest.raises(ValueError):
+        run("hi", client=MockLLM(), config=config, mode="not_enabled")
+
+
+def test_custom_paradigm_registers_and_runs_without_touching_builtins(tmp_path):
+    """Add a paradigm like you add a tool: a function + @register_paradigm, then
+    list its name in config.yaml's paradigms.enabled. No built-in paradigm file
+    or the registry core is edited."""
+
+    @register_paradigm("demo")
+    def demo(user_input, *, config, trace=None, **kwargs):
+        t = trace or Trace(enabled=False)
+        return RunResult(
+            answer=f"demo:{user_input}", steps=0, stop_reason="final", trace=t, mode="demo"
+        )
+
+    try:
+        config = _config(
+            tmp_path, paradigms={"enabled": ["agent", "demo"], "default": "agent"}
+        )
+        result = run("hello", client=MockLLM(), config=config, mode="demo")
+        assert result.mode == "demo"
+        assert result.answer == "demo:hello"
+        assert get_paradigm("demo") is demo
+    finally:
+        PARADIGMS.pop("demo", None)
+{% if "plan" in spec.paradigms %}
+
+def test_plan_mode_is_read_only(tmp_path):
+    registry = Registry()
+    calls = []
+
+    @registry.tool(name="danger_write", description="High-risk writer.", risk="high")
+    def danger_write() -> str:
+        calls.append("danger_write")
+        return "wrote"
+
+    @registry.tool(name="safe_read", description="Safe reader.")
+    def safe_read() -> str:
+        calls.append("safe_read")
+        return "data"
+
+    config = _config(
+        tmp_path,
+        paradigms={"enabled": ["agent", "plan"], "default": "agent"},
+        tools=[
+            {"name": "danger_write", "enabled": True},
+            {"name": "safe_read", "enabled": True},
+        ],
+    )
+
+    # agent offers the high-risk tool (registered first -> the mock calls it).
+    agent = run("do it", client=MockLLM(), config=config, registry=registry, mode="agent")
+    assert agent.mode == "agent" and "danger_write" in calls
+
+    calls.clear()
+    # plan must never offer/execute the high-risk tool — only the safe one.
+    plan = run("plan it", client=MockLLM(), config=config, registry=registry, mode="plan")
+    assert plan.mode == "plan"
+    assert plan.stop_reason == "final"
+    assert "danger_write" not in calls
+{% endif %}{% if "ask" in spec.paradigms %}
+
+def test_ask_mode_is_read_only(tmp_path):
+    registry = Registry()
+    calls = []
+
+    @registry.tool(name="danger_write", description="High-risk writer.", risk="high")
+    def danger_write() -> str:
+        calls.append("danger_write")
+        return "wrote"
+
+    @registry.tool(name="safe_read", description="Safe reader.")
+    def safe_read() -> str:
+        calls.append("safe_read")
+        return "data"
+
+    config = _config(
+        tmp_path,
+        paradigms={"enabled": ["agent", "ask"], "default": "agent"},
+        tools=[
+            {"name": "danger_write", "enabled": True},
+            {"name": "safe_read", "enabled": True},
+        ],
+    )
+    result = run("what is it?", client=MockLLM(), config=config, registry=registry, mode="ask")
+    assert result.mode == "ask"
+    assert result.stop_reason == "final"
+    assert "danger_write" not in calls
+{% endif %}
 
 def test_context_truncate_is_noop_without_limit():
     messages = _conversation(8)

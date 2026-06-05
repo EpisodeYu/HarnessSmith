@@ -99,6 +99,44 @@ class BudgetConfig(BaseModel):
     max_tokens: int | None = Field(default=None, gt=0)
     max_cost_usd: float | None = Field(default=None, gt=0)
 
+
+class ParadigmsConfig(BaseModel):
+    """Which loop paradigms are selectable at runtime, and which is the default.
+
+    Runtime-only (lives here + config.yaml). ``enabled`` may list any registered
+    paradigm — the built-ins generated into ``harness/paradigms/`` plus any you
+    add yourself with ``@register_paradigm``. ``default`` is used when no
+    ``--mode`` / dropdown choice is made and must be one of ``enabled``. You can
+    only narrow within what was generated (you can't enable a paradigm whose file
+    wasn't rendered) — that ceiling is set at generation time by ``spec.paradigms``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: list[str] = Field(default_factory=lambda: ["agent"])
+    default: str = "agent"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _seed_default(cls, data: Any) -> Any:
+        # If `default` is omitted, fall back to the first enabled paradigm.
+        if isinstance(data, dict) and not data.get("default"):
+            enabled = data.get("enabled") or ["agent"]
+            if enabled:
+                data = {**data, "default": enabled[0]}
+        return data
+
+    @model_validator(mode="after")
+    def _default_in_enabled(self) -> "ParadigmsConfig":
+        if not self.enabled:
+            raise ValueError("paradigms.enabled must list at least one paradigm")
+        if self.default not in self.enabled:
+            raise ValueError(
+                f"paradigms.default {self.default!r} must be one of enabled {self.enabled}"
+            )
+        return self
+
+
 {% if spec.mcp.enabled %}
 class McpServerConfig(BaseModel):
     """One MCP server. Set exactly one transport: ``command`` (stdio) or ``url``.
@@ -145,6 +183,7 @@ class Config(BaseModel):
     prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     tools: list[ToolConfig] = Field(default_factory=list)
     context: ContextConfig = Field(default_factory=ContextConfig)
+    paradigms: ParadigmsConfig = Field(default_factory=ParadigmsConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
 {% if spec.mcp.enabled %}    mcp: McpConfig = Field(default_factory=McpConfig)
@@ -160,7 +199,8 @@ class Config(BaseModel):
         if isinstance(data, dict):
             empties: dict[str, Any] = {
                 "llms": [], "roles": {}, "tools": [],
-                "prompts": {}, "context": {}, "observability": {}, "budget": {},
+                "prompts": {}, "context": {}, "paradigms": {},
+                "observability": {}, "budget": {},
             }
             for key, default in empties.items():
                 if key in data and data[key] is None:

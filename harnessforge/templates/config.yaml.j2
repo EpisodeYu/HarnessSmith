@@ -35,6 +35,14 @@ context:
   keep_last_turns: 6
   # max_context_tokens: 8000
 
+# Loop paradigms (runtime roster). `enabled` lists the selectable paradigms; pick
+# one per turn via `run --mode <name>` (CLI) or the web dropdown. `default` is
+# used when none is chosen. To add your own: write a function decorated with
+# @register_paradigm("name") under harness/paradigms/, then add "name" here.
+paradigms:
+  enabled: [{{ spec.paradigms | join(", ") }}]
+  default: {{ spec.paradigms[0] }}
+
 observability:
   trace: {{ observability.trace | tojson }}
   trace_dir: {{ observability.trace_dir }}

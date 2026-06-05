@@ -92,6 +92,28 @@ def test_golden_mcp_enabled_generates_locks_and_smoke_passes(tmp_path):
 
 
 @pytest.mark.golden
+def test_golden_multi_paradigm_generates_locks_and_smoke_passes(tmp_path):
+    """paradigms=[agent,plan,ask] -> generate -> lock -> sync + import + mock step
+    + pytest (each paradigm exercised by the generated test_harness)."""
+    spec = load_spec(preset_spec_path("coding-assistant"))
+    spec.paradigms = ["agent", "plan", "ask"]
+    out = tmp_path / "ca_paradigms"
+    result = generate(spec, out, git_init=False)
+
+    lock_dependencies(out)
+    lock_text = (out / "uv.lock").read_text(encoding="utf-8").lower()
+    for forbidden in FORBIDDEN:
+        assert forbidden not in lock_text, f"{forbidden} in uv.lock"
+
+    pdir = out / "src" / result.project_slug / "harness" / "paradigms"
+    for name in ("__init__", "agent", "plan", "ask"):
+        assert (pdir / f"{name}.py").is_file(), name
+
+    # Runs the generated pytest, including the plan/ask + custom-paradigm tests.
+    smoke_check(out, result.project_slug)
+
+
+@pytest.mark.golden
 def test_uvx_harnessforge_new_smoke(tmp_path):
     """`uvx --from <repo> harnessforge new ...` builds + runs the CLI one-shot."""
     if shutil.which("uv") is None:

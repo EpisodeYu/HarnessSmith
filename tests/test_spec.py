@@ -32,12 +32,38 @@ def test_defaults_fill_in_minimal_spec():
     assert spec.prompts.system is None and spec.prompts.persona is None
     assert spec.budget.max_steps is None
     assert spec.mcp.enabled is False  # MCP capability is opt-in (Slice 4)
+    assert spec.paradigms == ["agent"]  # only the agent loop by default (Slice 5)
     assert spec.context is None and spec.rag is None and spec.secrets is None
 
 
 def test_mcp_enabled_is_accepted():
     spec = HarnessSpec.model_validate({"mcp": {"enabled": True}})
     assert spec.mcp.enabled is True
+
+
+def test_paradigms_default_is_agent():
+    spec = HarnessSpec()
+    assert spec.paradigms == ["agent"]
+
+
+def test_paradigms_multiselect_is_accepted():
+    spec = HarnessSpec.model_validate({"paradigms": ["agent", "plan", "ask"]})
+    assert spec.paradigms == ["agent", "plan", "ask"]
+
+
+def test_paradigms_are_deduped_preserving_order():
+    spec = HarnessSpec.model_validate({"paradigms": ["plan", "agent", "plan", "ask"]})
+    assert spec.paradigms == ["plan", "agent", "ask"]
+
+
+def test_empty_paradigms_is_rejected():
+    with pytest.raises(ValidationError):
+        HarnessSpec.model_validate({"paradigms": []})
+
+
+def test_unknown_paradigm_is_rejected():
+    with pytest.raises(ValidationError):
+        HarnessSpec.model_validate({"paradigms": ["agent", "reflection"]})
 
 
 def test_mcp_unknown_field_is_rejected():

@@ -1,40 +1,36 @@
-"""The agent loop: native function-calling (Think -> Act -> Observe), no framework.
+"""The loop entry point: pick a paradigm by name and run it.
 
-One :func:`run` drives a whole turn: ask the model, execute any tool calls it
-requests, feed results back, repeat until it answers or a budget/limit is hit.
-Hooks fire around each step and tool; the trace records everything; budgets
-(steps / seconds / cost) stop a runaway loop. This is the heart of the harness
-and it is intentionally small — read it, edit it, own it.
+Slice 5 turned the single loop into a small **paradigm registry** under
+``harness/paradigms/`` (agent / plan / ask, each self-contained). This module is
+now a thin dispatcher: resolve the requested ``mode`` (defaulting to
+``config.paradigms.default``), check it is enabled, and hand off to the
+registered paradigm. It is a written-out name->callable dispatch over a fixed,
+already-registered set — not a runtime "paradigm engine".
+
+``from .loop import run`` is the stable entry the CLI / web / tests use, and
+``RunResult`` is re-exported here so existing imports keep working. The actual
+loop you want to read/edit lives in ``harness/paradigms/<name>.py``.
 """
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
-from dataclasses import dataclass
 
 from .config import Config
-from .context import fit as fit_context
 from .hooks import Hooks
-from .llm import LLMClient, LLMResponse, ToolCall
-from .prompts import build_system_prompt
+from .llm import LLMClient
+from .paradigms import RunResult, get_paradigm
 from .tools import Registry
 from .tools import registry as default_registry
 from .trace import Trace
 
-
-@dataclass
-class RunResult:
-    answer: str
-    steps: int
-    # "final" | "max_steps" | "max_seconds" | "max_tokens" | "max_cost"
-    stop_reason: str
-    trace: Trace
+__all__ = ["run", "RunResult"]
 
 
 def run(
     user_input: str,
     *,
+    mode: str | None = None,
     client: LLMClient | None = None,
     client_for: Callable[[str], LLMClient] | None = None,
     config: Config,
@@ -44,137 +40,27 @@ def run(
     trace: Trace | None = None,
     on_delta: Callable[[str], None] | None = None,
 ) -> RunResult:
-    """Run one turn of the agent loop and return the final answer + telemetry.
+    """Run one turn using paradigm ``mode`` (defaults to ``config.paradigms.default``).
 
-    Provide either ``client`` (single profile) or ``client_for`` (role router,
-    enables context summarization via the ``compaction`` role). Pass ``on_delta``
-    to stream assistant text tokens as they arrive (e.g. for a live web UI); the
-    loop logic is identical either way.
+    Raises ``ValueError`` if ``mode`` is not in ``config.paradigms.enabled`` or is
+    not a registered paradigm. Every other argument is forwarded unchanged to the
+    selected paradigm, so the call site is identical to the old single loop.
     """
-    hooks = hooks or Hooks()
-    if client is None:
-        if client_for is None:
-            raise ValueError("run() needs either `client` or `client_for`")
-        client = client_for(role)
-    profile = config.profile_for(role)
-    if trace is None:
-        obs = config.observability
-        trace = Trace(trace_dir=obs.trace_dir if obs.trace else None, enabled=obs.trace)
-
-    context_cfg = config.context
-    summarizer: LLMClient | None = (
-        client_for("compaction")
-        if client_for is not None and context_cfg.strategy == "summarize"
-        else None
-    )
-
-    budget = config.budget
-    active = registry.active_names(config.enabled_tool_names())
-    tool_schemas = registry.schemas(active)
-
-    messages: list[dict] = [
-        {"role": "system", "content": build_system_prompt(config)},
-        {"role": "user", "content": user_input},
-    ]
-    trace.event("run_start", role=role, model=profile.model, tools=active)
-    started = time.monotonic()
-
-    step = 0
-    stop_reason = "final"
-    answer = ""
-    while True:
-        if budget.max_steps is not None and step >= budget.max_steps:
-            stop_reason, answer = "max_steps", _limit_message("step", budget.max_steps)
-            break
-        if (
-            budget.max_seconds is not None
-            and time.monotonic() - started >= budget.max_seconds
-        ):
-            stop_reason, answer = "max_seconds", _limit_message("time", budget.max_seconds)
-            break
-
-        messages = fit_context(messages, context_cfg, summarizer=summarizer)
-        hooks.before_step(step, messages)
-        try:
-            if on_delta is not None:
-                response = client.stream(messages, tool_schemas or None, on_delta=on_delta)
-            else:
-                response = client.complete(messages, tool_schemas or None)
-        except Exception as exc:
-            hooks.on_error("llm", exc)
-            trace.event("error", where="llm", error=str(exc))
-            trace.close()
-            raise
-
-        cost = trace.add_usage(response.usage, profile)
-        trace.event(
-            "llm_response",
-            step=step,
-            has_tool_calls=bool(response.tool_calls),
-            prompt_tokens=response.usage.prompt_tokens,
-            completion_tokens=response.usage.completion_tokens,
-            step_cost_usd=cost,
+    paradigms = config.paradigms
+    name = mode or paradigms.default
+    if name not in paradigms.enabled:
+        raise ValueError(
+            f"paradigm {name!r} is not enabled; enabled paradigms: {paradigms.enabled}"
         )
-        hooks.after_step(step, response)
-
-        if budget.max_tokens is not None and trace.total_tokens >= budget.max_tokens:
-            stop_reason, answer = "max_tokens", _limit_message("token", budget.max_tokens)
-            break
-        if budget.max_cost_usd is not None and trace.cost_usd >= budget.max_cost_usd:
-            stop_reason, answer = "max_cost", _limit_message("cost", budget.max_cost_usd)
-            break
-
-        if not response.tool_calls:
-            answer, stop_reason = response.content or "", "final"
-            break
-
-        messages.append(_assistant_message(response))
-        for call in response.tool_calls:
-            result = _run_tool(registry, call, hooks, trace)
-            messages.append(
-                {"role": "tool", "tool_call_id": call.id, "content": result}
-            )
-        step += 1
-
-    trace.event(
-        "run_end",
-        stop_reason=stop_reason,
-        steps=step,
-        total_tokens=trace.total_tokens,
-        cost_usd=trace.cost_usd,
+    paradigm = get_paradigm(name)
+    return paradigm(
+        user_input,
+        client=client,
+        client_for=client_for,
+        config=config,
+        role=role,
+        registry=registry,
+        hooks=hooks,
+        trace=trace,
+        on_delta=on_delta,
     )
-    trace.close()
-    return RunResult(answer=answer, steps=step, stop_reason=stop_reason, trace=trace)
-
-
-def _assistant_message(response: LLMResponse) -> dict:
-    return {
-        "role": "assistant",
-        "content": response.content or "",
-        "tool_calls": [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {"name": call.name, "arguments": call.arguments},
-            }
-            for call in response.tool_calls
-        ],
-    }
-
-
-def _run_tool(registry: Registry, call: ToolCall, hooks: Hooks, trace: Trace) -> str:
-    """Execute one tool call; tool errors are captured, never crash the loop."""
-    hooks.before_tool(call)
-    trace.event("tool_call", name=call.name, arguments=call.arguments)
-    try:
-        result = registry.call(call.name, call.arguments)
-    except Exception as exc:
-        hooks.on_error("tool", exc)
-        result = f"ERROR: {exc}"
-    trace.event("tool_result", name=call.name, result=result)
-    hooks.after_tool(call, result)
-    return result
-
-
-def _limit_message(kind: str, limit: object) -> str:
-    return f"Stopped: {kind} budget ({limit}) reached before a final answer."

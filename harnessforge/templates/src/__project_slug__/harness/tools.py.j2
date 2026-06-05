@@ -78,9 +78,18 @@ class Registry:
             raise ToolError(f"unknown tool: {name}")
         return self._tools[name]
 
-    def active_names(self, enabled: set[str]) -> list[str]:
-        """Tools offered to the model: registered AND allowlisted in config."""
-        return [name for name in self._tools if name in enabled]
+    def active_names(self, enabled: set[str], *, allow_high_risk: bool = True) -> list[str]:
+        """Tools offered to the model: registered AND allowlisted in config.
+
+        With ``allow_high_risk=False`` (used by read-only paradigms like plan/ask)
+        any tool marked ``risk="high"`` is dropped, so the model is never even
+        offered a mutating tool.
+        """
+        return [
+            name
+            for name, tool in self._tools.items()
+            if name in enabled and (allow_high_risk or tool.risk != HIGH)
+        ]
 
     def schemas(self, names: list[str]) -> list[dict]:
         return [self._tools[name].schema() for name in names if name in self._tools]

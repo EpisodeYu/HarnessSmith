@@ -35,6 +35,24 @@ docker build -t {{ project_slug }} .
 docker run --rm {{ project_slug }}                          # mock one step
 docker run --rm -e OPENAI_API_KEY=sk-... {{ project_slug }} run "hello"
 ```
+
+## Loop paradigms
+
+This harness can run a turn in different **paradigms**, picked per turn:
+
+{% for p in paradigms %}{% if p == "agent" %}- **agent** (default) — full Think → Act → Observe tool-calling loop; may call any allowlisted tool and self-corrects on tool errors.
+{% elif p == "plan" %}- **plan** — read-only: investigates with low-risk tools and outputs a step-by-step plan; never makes changes.
+{% elif p == "ask" %}- **ask** — read-only: answers questions, may use low-risk tools, never makes changes.
+{% endif %}{% endfor %}
+```bash
+uv run {{ project_slug }} run --mode plan "add a retry to the API client"
+```
+
+The selectable roster + default live in `config.yaml` under `paradigms:` (a
+runtime knob). Each paradigm is a small, self-contained file under
+`src/{{ project_slug }}/harness/paradigms/` — read it, edit it, or add your own
+(see [`AGENTS.md`](./AGENTS.md)). It's a plain name→function registry, not a
+framework.
 {% if interfaces.web %}
 ## Web chat + config panel
 
@@ -65,7 +83,12 @@ src/{{ project_slug }}/
   harness/
     config.py               # load config.yaml + .env, validate
     llm.py                  # OpenAI Chat Completions client (+ provider-neutral types)
-    loop.py                 # the function-calling loop (the core — read this first)
+    loop.py                 # thin dispatcher: pick a paradigm by mode and run it
+    paradigms/              # the function-calling loops you own (read these first)
+      __init__.py           #   paradigm registry + shared RunResult/plumbing
+      agent.py              #   agent (default; ReAct-style tool-calling loop){% for p in paradigms %}{% if p == "plan" %}
+      plan.py               #   read-only planning{% elif p == "ask" %}
+      ask.py                #   read-only Q&A{% endif %}{% endfor %}
     tools.py                # tool registry + built-in safe tools
     hooks.py                # lifecycle hooks (extend without touching the loop)
     trace.py                # JSONL trace + token/cost accounting
