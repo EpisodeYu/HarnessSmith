@@ -179,6 +179,19 @@ class McpConfig(BaseModel):
     connect_timeout_seconds: float = Field(default=30.0, gt=0)
 
 
+{% endif %}{% if spec.skills.enabled %}class SkillsConfig(BaseModel):
+    """Where to discover standard Agent Skills (``<dir>/<name>/SKILL.md``).
+
+    Runtime-only (this slice's only spec field is ``skills.enabled``). Defaults to
+    ``["skills"]``; add ``.claude/skills`` / ``.cursor/skills`` / ``.agents/skills``
+    to share portable skills with those tools.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    dirs: list[str] = Field(default_factory=lambda: ["skills"])
+
+
 {% endif %}
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -194,6 +207,7 @@ class Config(BaseModel):
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
 {% if spec.mcp.enabled %}    mcp: McpConfig = Field(default_factory=McpConfig)
+{% endif %}{% if spec.skills.enabled %}    skills: SkillsConfig = Field(default_factory=SkillsConfig)
 {% endif %}
     # Forward-compatible passthrough — declared so a richer spec still loads,
     # but not interpreted in this slice.

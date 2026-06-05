@@ -436,3 +436,52 @@ def test_mcp_disabled_ignores_prefill(tmp_path, spec):
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8").lower()
     assert "mcp" not in config_yaml
     assert "fetch__fetch" not in config_yaml
+
+
+# --- Slice 6: standard Agent Skills (opt-in, skills.enabled) ----------------
+
+
+def test_skills_disabled_omits_skills_footprint(tmp_path, preset_spec):
+    """Default (skills.enabled=false) repo has zero skills footprint — stays thin."""
+    out = tmp_path / "noskills"
+    generate(preset_spec, out, git_init=False)
+    pkg = out / "src" / "coding_assistant"
+    assert not (pkg / "harness" / "skills.py").exists()
+    assert not (out / "tests" / "test_skills.py").exists()
+    assert not (out / "skills").exists()
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "skills:" not in config_yaml and "read_skill" not in config_yaml
+
+    config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
+    assert "SkillsConfig" not in config_py
+
+    prompts_py = (pkg / "harness" / "prompts.py").read_text(encoding="utf-8")
+    assert "skill" not in prompts_py.lower()
+
+
+def test_skills_enabled_generates_support(tmp_path, spec):
+    spec.skills.enabled = True
+    out = tmp_path / "skills"
+    generate(spec, out, git_init=False)
+    pkg = out / "src" / "agent_harness"
+
+    assert (pkg / "harness" / "skills.py").is_file()
+    assert (out / "tests" / "test_skills.py").is_file()
+    assert (out / "skills" / "example-skill" / "SKILL.md").is_file()
+
+    config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
+    assert "class SkillsConfig" in config_py and "skills: SkillsConfig" in config_py
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "skills:" in config_yaml and 'dirs: ["skills"]' in config_yaml
+    assert "read_skill" in config_yaml  # the L2 tool is allowlisted on by default
+
+    prompts_py = (pkg / "harness" / "prompts.py").read_text(encoding="utf-8")
+    assert "build_skills_prompt" in prompts_py
+
+    # skills.py is valid Python and the spec snapshot only records the enable flag
+    py_compile.compile(str(pkg / "harness" / "skills.py"), doraise=True)
+    snapshot = (out / "harness.spec.yaml").read_text(encoding="utf-8")
+    assert "enabled: true" in snapshot
+    assert "dirs" not in snapshot  # dirs is a runtime knob, not in the spec

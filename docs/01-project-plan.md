@@ -122,7 +122,7 @@ flowchart LR
 ```
 
 生成器目录(仓库根 `/home/s1yu/HarnessForge`,独立 git repo,MIT;支持 `uvx harnessforge new` 免安装一次性运行):
-- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/llms/roles/prompts/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/observability/budget;context/rag/secrets backend 字段预留但 MVP 不全实现)。
+- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/llms/roles/prompts/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/observability/budget;context/rag/secrets backend 字段预留但 MVP 不全实现)。
 - `harnessforge/generator.py` — 渲染模板 → 写出仓库 + 拷入 `harness.spec.yaml` + `git init` + `uv lock` + 重跑警告不覆盖 + 生成后冒烟自检(`uv sync`+`pytest`+mock 跑一步)。
 - `harnessforge/cli.py` — Typer 入口(`new`、`--spec`、`--preset`、交互模式、`doctor` 预检、`--no-verify` 关闭冒烟自检)。
 - `harnessforge/catalog/mcp_servers.yaml` — 精选静态 MCP catalog(L2)。

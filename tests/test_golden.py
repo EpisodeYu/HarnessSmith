@@ -153,6 +153,24 @@ def test_golden_mcp_baseline_prefill_smoke(tmp_path):
 
 
 @pytest.mark.golden
+def test_golden_skills_enabled_generates_and_smoke_passes(tmp_path):
+    """skills.enabled -> generate -> lock -> sync + import + mock step + pytest
+    (the generated test_skills.py + a mock turn that discovers the example skill)."""
+    spec = load_spec(EXAMPLE_SPEC)
+    spec.skills.enabled = True
+    out = tmp_path / "skills"
+    result = generate(spec, out, git_init=False)
+
+    assert (out / "skills" / "example-skill" / "SKILL.md").is_file()
+    lock_dependencies(out)
+    lock_text = (out / "uv.lock").read_text(encoding="utf-8").lower()
+    for forbidden in FORBIDDEN:
+        assert forbidden not in lock_text, f"{forbidden} in uv.lock"
+
+    smoke_check(out, result.project_slug)
+
+
+@pytest.mark.golden
 def test_uvx_harnessforge_new_smoke(tmp_path):
     """`uvx --from <repo> harnessforge new ...` builds + runs the CLI one-shot."""
     if shutil.which("uv") is None:

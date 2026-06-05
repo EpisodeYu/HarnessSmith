@@ -30,7 +30,9 @@ tools:
   # the model. Read tools are on; mutating/shell tools are off — flip to enable.
 {% for entry in mcp_tool_allowlist %}  - name: {{ entry.name }}
     enabled: {{ entry.enabled | tojson }}
-{% endfor %}{% endif %}
+{% endfor %}{% endif %}{% if spec.skills.enabled %}  - name: read_skill
+    enabled: true   # standard Agent Skills: read a SKILL.md body on demand (low-risk)
+{% endif %}
 # Context-window management (runtime knob). truncate = keep system + recent turns;
 # summarize = fold older turns via the `compaction` role; none = off.
 # Unset max_context_tokens means no limit (default behaves like a plain loop).
@@ -80,4 +82,11 @@ mcp:
   # Add more from the catalog (`harnessforge new --mcp-server <name>`) or paste any
   # MCP marketplace block here (Smithery / Glama / MCP.so / official Registry).
   # Remote (SaaS, e.g. Composio) servers use `url` + `auth_env` instead of command.
+{% endif %}{% if spec.skills.enabled %}
+# Standard Agent Skills (SKILL.md). `dirs` is where to discover <dir>/<name>/SKILL.md.
+# A skill's name+description is injected into the system prompt; the model reads the
+# full SKILL.md on demand (the read_skill tool above, or a file tool). Drop a skill in
+# skills/<name>/SKILL.md to add one. Add .claude/skills / .cursor/skills to share.
+skills:
+  dirs: ["skills"]
 {% endif %}

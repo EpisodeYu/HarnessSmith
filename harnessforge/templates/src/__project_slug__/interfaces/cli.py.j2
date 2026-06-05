@@ -51,7 +51,18 @@ def run(
     config = load_config(config_path)
     if prompt is None:
         prompt = typer.prompt("You")
-{% if spec.mcp.enabled %}    from ..harness.mcp import McpManager, register_mcp_tools
+{% if spec.skills.enabled %}    # `/skill-name rest...` manually loads a skill's full instructions — including
+    # skills marked `disable-model-invocation` that aren't auto-injected.
+    if prompt.startswith("/"):
+        from ..harness.skills import load_skill_body
+
+        skill_name, _, rest = prompt[1:].partition(" ")
+        body = load_skill_body(config, skill_name)
+        if body.startswith("ERROR"):
+            typer.secho(body, fg=typer.colors.YELLOW, err=True)
+        else:
+            prompt = f"{body}\n\n{rest}".strip()
+{% endif %}{% if spec.mcp.enabled %}    from ..harness.mcp import McpManager, register_mcp_tools
 
     # Only launch servers with at least one allowlisted (enabled) tool, so a
     # predefined-but-off server (e.g. Desktop Commander) stays dormant until you

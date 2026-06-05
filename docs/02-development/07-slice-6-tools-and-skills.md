@@ -6,7 +6,7 @@
 >
 > 前置:Slice 4(MCP opt-in,已 ✅)+ Slice 5(范式,见 `06-slice-5-paradigms.md`)。
 >
-> **状态:🚧 进行中。Part A(MCP 工具基线)✅ 已完成(2026-06-05);Part B(标准 SKILL)📝 待开工**。方向 + 决策①–⑥经人 2026-06-05 定稿(MCP 预设做基线 / 不自写 built-in / fetch 默认开 / git 预置 / DC 预填默认关 / 生成期预热 + Docker 烤镜像 / 风险按工具分级 B / `spec.skills` 仅 enabled、dirs 走运行期 B / split 推进,见 §4)。门禁见 §3(Part A 项已勾)。
+> **状态:✅ 已完成(2026-06-05)。Part A(MCP 工具基线)+ Part B(标准 SKILL)均门禁全绿**。方向 + 决策①–⑥经人 2026-06-05 定稿(MCP 预设做基线 / 不自写 built-in / fetch 默认开 / git 预置 / DC 预填默认关 / 生成期预热 + Docker 烤镜像 / 风险按工具分级 B / `spec.skills` 仅 enabled、dirs 走运行期 B / split 推进,见 §4)。门禁见 §3(全勾)。
 >
 > **红线提醒**:① 能力来自成熟 MCP 生态,**不自写 built-in**(免造轮子+维护);**不做联网 MCP registry / `forge add`**(v1+);marketplace 只走"文档 + 粘贴式 config";SaaS 平台(Composio 等)只作 **remote MCP**(`url`+`auth_env`,落 Slice 4 已支持的远程传输),**不引其框架包**。② SKILL = 提示注入 + 文件读 + 用工具跑脚本,**不引框架**;高风险(脚本/写/shell)默认关(`01 §6`)。
 
@@ -71,17 +71,19 @@
 
 ## 3. 退出门禁(对应 `01 §8` Non-blocker,做到即验;实现后回填)
 
-> **Part A(工具基线)状态:✅ 已完成(2026-06-05)**。生成器快测 68(新增 catalog/prefill/preset/Dockerfile bake 用例);coding-assistant 产物自带测试 25(含 MCP 风险分级 `safe`/`high` + 只读范式可用 `fetch`/`git` 读);golden 非 docker 7 全绿(thin example / MCP 基线 prefill 真实启动 fetch+git / web / 多范式 / `uvx` 冒烟);docker golden 2 全绿(基线 `docker build` + `docker run --network none` 离线跑通 mock 一步)。Part B(SKILL)未开工。
+> **Part A(工具基线)状态:✅ 已完成(2026-06-05,commit `d83a85a`)**。生成器快测含 catalog/prefill/preset/Dockerfile bake 用例;coding-assistant 产物自带测试 25(含 MCP 风险分级 `safe`/`high` + 只读范式可用 `fetch`/`git` 读);golden 非 docker(thin example / MCP 基线 prefill 真实启动 fetch+git / web / 多范式 / `uvx` 冒烟);docker golden(基线 `docker build` + `docker run --network none` 离线跑通 mock 一步)。
+>
+> **Part B(标准 SKILL)状态:✅ 已完成(2026-06-05)**。新增 `spec.skills.enabled`(§6.1 schema,人签 B);`skills.py`(≈130 行:发现/解析 frontmatter/L1 注入/`read_skill` L2 工具)+ `prompts.py` 注入 + CLI `/name` 手动触发 + `config.yaml skills.dirs`/`read_skill` allowlist + 样例 skill。门禁全绿:生成器快测 70 / 产物自带(skills repo)24(含 `test_skills.py`)/ golden 非 docker 8(新增 skills 端到端)/ docker 2 / ReadLints clean。
 
 - [x] **基线开箱可用**:`coding-assistant` 生成 → `fetch`/`git` 读类默认 allowlist 开、mock 可调;Desktop Commander 预填但 allowlist 默认关(全 high、未被 offer,且因无启用工具**不被启动**);`uv sync && pytest`(含 `test_mcp.py`)绿。
 - [x] **离线/Docker**:生成期 `prewarm_mcp_servers`(`uvx <pkg> --help` 暖 uv 缓存,可 `--no-prewarm`)后产物可离线用已缓存 server;Docker build 暖缓存 + `ENV UV_OFFLINE=1`,`docker run --network none` 离线跑通 mock 一步(已 golden 验证)。
 - [x] **catalog 落 `config.yaml`**:选中 server → 产物 `config.yaml mcp.servers` 含条目(env/auth 仅名、写类默认关、`safe_tools` 标读类),**不进 spec/快照**(`test_mcp_prefill_servers_do_not_leak_into_spec_snapshot`)。
 - [x] **极薄 example 仍薄**:`examples/spec.yaml`(无 MCP)→ 不含 `mcp` 依赖、与 Slice 4 薄基线一致(`test_golden_thin_example_stays_thin_and_smoke_passes`)。
-- [ ] **SKILL 发现 + 注入**(Part B):放样例 skill → L1 `name+description` 进系统提示;`disable-model-invocation` 的不自动注入正文(只 `/name` 触发)。
-- [ ] **SKILL 加载并遵循(mock)**(Part B):模型读 `SKILL.md` 正文(经文件工具或 `read_skill`)→ 按其指令完成一步;非 allowlist 工具不被技能调用。
-- [ ] **SKILL 关掉零痕迹**(Part B):`skills.enabled=false` 产物无 `skills.py`/`read_skill`/提示注入。
-- [x] `ReadLints` clean(Part A)。
-- [x] (大改动 §5)全量黄金 + Docker + `uvx` 冒烟全绿(动 `Dockerfile`/`generator`/`catalog`/presets;`spec` 未动,Part A 无 schema 变更)。
+- [x] **SKILL 发现 + 注入**:样例 skill `skills/example-skill/SKILL.md` → L1 `name+description` 进系统提示;`disable-model-invocation` 的不自动注入(只 `/name` 触发)——`test_discovers_skills_and_injects_l1`。
+- [x] **SKILL 加载并遵循(mock)**:模型 `read_skill(name)` 读 `SKILL.md` 正文 → 按其指令完成一步(`test_mock_reads_skill_then_follows`);`read_skill` 低风险且经 allowlist 门控,非 allowlist 工具不被技能调用。
+- [x] **SKILL 关掉零痕迹**:`skills.enabled=false` 产物无 `skills.py`/`read_skill`/`SkillsConfig`/提示注入/样例(`test_skills_disabled_omits_skills_footprint`)。
+- [x] `ReadLints` clean(Part A + B)。
+- [x] (大改动 §5)全量黄金 + Docker + `uvx` 冒烟全绿(Part A 动 `Dockerfile`/`generator`/`catalog`/presets;Part B 动 `spec`(+`skills.enabled`)/`config`/`prompts`/`cli`/新增 `skills.py`)。
 
 ## 4. 必须人审的决策点
 

@@ -233,4 +233,37 @@ paste a block from a marketplace (Smithery / Glama / MCP.so / the official MCP
 Registry) straight into `config.yaml` — the format is the same. SaaS catalogs
 (e.g. Composio) are reached as **remote** servers (`url` + `auth_env`), no extra
 package. The `mcp` dependency exists only because this repo was generated with
-MCP enabled.{% endif %}
+MCP enabled.{% endif %}{% if spec.skills.enabled %}
+## Add a Skill
+
+This harness supports the open [Agent Skills](https://modelcontextprotocol.io)
+standard (`SKILL.md` + progressive disclosure) — `harness/skills.py`. The same
+skill works with Claude, Cursor, and other Agent Skills tools. Drop a folder
+under `skills/` (see `config.yaml` → `skills.dirs`):
+
+```
+skills/
+  commit-helper/
+    SKILL.md          # frontmatter: name + description (+ optional scripts/, references/)
+```
+
+```markdown
+---
+name: commit-helper
+description: Write a conventional-commit message from a staged git diff. Use when asked to commit.
+---
+
+# Commit helper
+
+1. Read the staged diff (e.g. the git MCP server's git_diff_staged).
+2. Write a one-line conventional-commit subject, then a short body.
+```
+
+**Progressive disclosure:** only each skill's `name` + `description` is injected
+into the system prompt (~100 tokens). When a skill is relevant the model loads
+its full `SKILL.md` on demand with the `read_skill` tool (low-risk, allowlisted)
+or any file tool. Heavier skills ship `scripts/` (run with a shell tool) and
+`references/`/`assets/` (read with a file tool) — scripts are high-risk, so the
+tool stays off until you enable it. Set `disable-model-invocation: true` in the
+frontmatter to keep a skill out of the auto-prompt; reach it manually with
+`{{ project_slug }} run "/skill-name ..."`.{% endif %}

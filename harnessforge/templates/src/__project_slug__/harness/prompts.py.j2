@@ -1,9 +1,10 @@
-"""Assemble the system prompt from config (system + optional persona)."""
+"""Assemble the system prompt from config (system + optional persona{% if spec.skills.enabled %} + skills{% endif %})."""
 
 from __future__ import annotations
 
 from .config import Config
-
+{% if spec.skills.enabled %}from .skills import activate_skills, build_skills_prompt
+{% endif %}
 _DEFAULT_SYSTEM = "You are a helpful assistant. Use the available tools when they help."
 
 
@@ -12,4 +13,10 @@ def build_system_prompt(config: Config) -> str:
     parts = [prompts.system or _DEFAULT_SYSTEM]
     if prompts.persona:
         parts.append(prompts.persona)
-    return "\n\n".join(parts)
+{% if spec.skills.enabled %}    # Standard Agent Skills (L1): inject available skills' name+description so the
+    # model knows they exist and can read the full SKILL.md on demand.
+    activate_skills(config)
+    skills_section = build_skills_prompt(config)
+    if skills_section:
+        parts.append(skills_section)
+{% endif %}    return "\n\n".join(parts)

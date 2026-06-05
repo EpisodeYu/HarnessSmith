@@ -40,6 +40,11 @@ CONDITIONAL_TEMPLATES: dict[str, Callable[[HarnessSpec], bool]] = {
     "src/__project_slug__/harness/mcp.py.j2": lambda spec: spec.mcp.enabled,
     "tests/test_mcp.py.j2": lambda spec: spec.mcp.enabled,
     "tests/_mcp_dummy_server.py.j2": lambda spec: spec.mcp.enabled,
+    # Standard Agent Skills (Slice 6): skills.py + a sample skill + its test are
+    # generated only when opted in; disabled leaves zero skills footprint.
+    "src/__project_slug__/harness/skills.py.j2": lambda spec: spec.skills.enabled,
+    "tests/test_skills.py.j2": lambda spec: spec.skills.enabled,
+    "skills/example-skill/SKILL.md.j2": lambda spec: spec.skills.enabled,
     # Paradigms (Slice 5): the registry + agent are always rendered; the other
     # built-in paradigm files appear only when selected in spec.paradigms.
     "src/__project_slug__/harness/paradigms/plan.py.j2": lambda spec: "plan" in spec.paradigms,

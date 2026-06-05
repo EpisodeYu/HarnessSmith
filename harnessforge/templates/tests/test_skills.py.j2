@@ -1,0 +1,91 @@
+"""Standard Agent Skills tests: discovery, L1 injection, read_skill (L2), and the
+mock model reading a SKILL.md then following it. Generated only when
+``skills.enabled`` — no network, no API key."""
+
+from __future__ import annotations
+
+from {{ project_slug }}.harness.config import Config
+from {{ project_slug }}.harness.loop import run
+from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
+from {{ project_slug }}.harness.prompts import build_system_prompt
+from {{ project_slug }}.harness.skills import (
+    activate_skills,
+    build_skills_prompt,
+    discover_skills,
+    load_skill_body,
+    read_skill,
+)
+from {{ project_slug }}.harness.tools import SAFE, registry
+
+
+def _skill(skills_dir, name, description, *, body="Follow these steps.", disable=False):
+    folder = skills_dir / name
+    folder.mkdir(parents=True)
+    front = f"name: {name}\ndescription: {description}\n"
+    if disable:
+        front += "disable-model-invocation: true\n"
+    (folder / "SKILL.md").write_text(f"---\n{front}---\n\n{body}\n", encoding="utf-8")
+
+
+def _config(skills_dirs):
+    return Config.model_validate(
+        {
+            "llms": [{"name": "default", "model": "m"}],
+            "roles": {"generation": "default"},
+            "prompts": {"system": "You are a test agent."},
+            "tools": [{"name": "read_skill", "enabled": True}],
+            "observability": {"trace": False},
+            "skills": {"dirs": [str(d) for d in skills_dirs]},
+        }
+    )
+
+
+def test_discovers_skills_and_injects_l1(tmp_path):
+    sk = tmp_path / "skills"
+    _skill(sk, "summarize", "Summarize text in one line.")
+    _skill(sk, "secret", "Internal only.", disable=True)
+    config = _config([sk])
+
+    found = {s.name: s for s in discover_skills(config)}
+    assert "summarize" in found and "secret" in found
+    assert found["secret"].model_invocable is False
+
+    prompt = build_system_prompt(config)
+    assert "summarize" in prompt and "Summarize text in one line." in prompt
+    # disable-model-invocation skills are NOT auto-injected (only reachable via /name)
+    assert "secret" not in prompt
+
+
+def test_read_skill_loads_body_including_disabled(tmp_path):
+    sk = tmp_path / "skills"
+    _skill(sk, "summarize", "Summarize.", body="Reply with one sentence only.")
+    _skill(sk, "secret", "Internal.", body="Top secret steps.", disable=True)
+    config = _config([sk])
+    activate_skills(config)
+
+    assert "Reply with one sentence only." in read_skill("summarize")
+    # the /name manual path uses the same loader and can reach disabled skills
+    assert "Top secret steps." in load_skill_body(config, "secret")
+    assert load_skill_body(config, "nope").startswith("ERROR")
+
+
+def test_read_skill_is_registered_low_risk(tmp_path):
+    # read_skill is a low-risk built-in so even read-only paradigms may use it.
+    assert registry.get("read_skill").risk == SAFE
+
+
+def test_mock_reads_skill_then_follows(tmp_path):
+    sk = tmp_path / "skills"
+    _skill(sk, "summarize", "Summarize text.", body="Reply starting with 'Summary:'.")
+    config = _config([sk])
+    # The model loads the SKILL.md body via read_skill, then answers following it.
+    client = MockLLM(script=[ScriptedCall("read_skill", {"name": "summarize"}), "Summary: ok"])
+    result = run("summarize this", client=client, config=config)
+    assert result.stop_reason == "final"
+    assert result.answer == "Summary: ok"
+
+
+def test_no_skills_means_no_injection(tmp_path):
+    config = _config([tmp_path / "missing"])  # dir doesn't exist
+    assert build_skills_prompt(config) == ""
+    assert discover_skills(config) == []

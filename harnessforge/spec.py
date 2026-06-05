@@ -62,6 +62,22 @@ class Mcp(BaseModel):
     enabled: bool = False
 
 
+class Skills(BaseModel):
+    """Opt-in standard Agent Skills support (L2/L3, Slice 6).
+
+    Like :class:`Mcp`, generation-time decides ONLY whether the capability
+    exists: ``enabled`` renders ``harness/skills.py`` (SKILL.md discovery + L1
+    system-prompt injection + a ``read_skill`` tool) and a ``skills`` block in
+    ``config.yaml``. *Where* to discover skills is a runtime knob
+    (``config.yaml`` ``skills.dirs``), not a spec field. Disabled leaves the
+    generated repo with zero skills footprint.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+
+
 class Observability(BaseModel):
     """Tracing / cost-accounting settings."""
 
@@ -122,6 +138,7 @@ class HarnessSpec(BaseModel):
     )
     interfaces: Interfaces = Field(default_factory=Interfaces)
     mcp: Mcp = Field(default_factory=Mcp)
+    skills: Skills = Field(default_factory=Skills)
     observability: Observability = Field(default_factory=Observability)
     budget: Budget = Field(default_factory=Budget)
 

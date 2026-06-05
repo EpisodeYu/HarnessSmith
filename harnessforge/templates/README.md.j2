@@ -76,6 +76,14 @@ offline. Add more with `harnessforge new --mcp-server <name>` or by pasting a
 marketplace block into `config.yaml`. Allowlist tools as `<server>__<tool>`;
 read-only tools (`safe_tools`) are also offered to `plan`/`ask`. Secrets are
 referenced by env-var name only. See [`AGENTS.md`](./AGENTS.md).
+{% endif %}{% if spec.skills.enabled %}
+## Skills
+
+Supports the open [Agent Skills](https://modelcontextprotocol.io) standard
+(`SKILL.md`). Each skill's name + description is injected into the system prompt;
+the model loads the full instructions on demand with the `read_skill` tool. Drop
+a folder under `skills/<name>/SKILL.md` to add one (see `config.yaml` →
+`skills.dirs`); a sample lives in `skills/example-skill/`. See [`AGENTS.md`](./AGENTS.md).
 {% endif %}
 ## Layout
 
@@ -99,6 +107,7 @@ src/{{ project_slug }}/
     prompts.py              # system-prompt assembly
     mock.py                 # offline MockLLM for tests / --mock
 {% if spec.mcp.enabled %}    mcp.py                  # optional MCP tool bridge (stdio + remote)
+{% endif %}{% if spec.skills.enabled %}    skills.py               # standard Agent Skills (SKILL.md discovery + read_skill)
 {% endif %}  interfaces/
     cli.py                  # `run` — one question, one answer
 {% if interfaces.web %}    web.py                  # `serve` — FastAPI SSE chat + live /config panel
