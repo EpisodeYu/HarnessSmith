@@ -60,7 +60,7 @@
 - 读:`GET /config` 返回当前 `Config` 的**行为性字段**(脱敏:只给 env 引用名,不给密钥真值)。
 - 改:`POST /config` 用 Pydantic 重新校验后**更新进程内 `Config`**,**当场生效**(后续 `/chat` 用新值)。是否回写 `config.yaml` 持久化见 §4。
 - **范围**:可改 = prompts / budget(steps/seconds/tokens/cost)/ tools.enabled(allowlist;高风险工具仍受 `tools.py` 风险标记约束)/ context(strategy/max_context_tokens/keep_last_turns)/ profile 采样(temperature/max_tokens)/ 定价。不可改 = 结构性(有无接口/模块、范式拓扑 = 代码,需重新生成)。
-- **进阶热重载**(watch 文件、多进程一致性)= v1+(`00-overview §2` Slice 6+ 行),本片只做"面板改 → 进程内生效"。
+- **进阶热重载**(watch 文件、多进程一致性)= v1+(`00-overview §2` Slice 8+ 行),本片只做"面板改 → 进程内生效"。
 
 ## 3. 退出门禁(对应 `01 §8` Non-blocker,做到即验)
 
@@ -78,7 +78,8 @@
 
 - [x] **Web / UX 一眼是否可用(2026-06-03 人已签字通过)**:单页 chat + config 面板的可用性与观感(`00-overview §2` 人审项)。供审:`uv run <pkg> serve [--mock]` 起服务,浏览器看 chat 进度事件流 + 切到 Config 标签改一项(如 `prompts.system`)保存后再 chat 验证生效。前端为 Tailwind CDN 单页 + 原生 `EventSource`,无构建。**验收方式**:用本机 liteLLM 真实 LLM(`mimo-v2.5-pro`)经 SSH 端口转发在浏览器验证——token 流式 / 工具进度事件 / `/config` 改 `prompts.system` 当场生效均通过。
 - [x] **`/config` 可改字段范围(2026-06-03 人已签字通过)**:边界已实现为——可改 `_EDITABLE_FIELDS = llms/roles/prompts/tools/context/observability/budget`;不可改结构性(`version`/`project_slug`)与 `secrets`(POST 中这些键被忽略,GET 不返回)。真实端点验证:GET 仅回 env 名不回密钥真值,越权键(`project_slug`/`secrets`)被忽略,非法值(`budget.max_steps:-1`)返 400。**范围符合预期,确认通过**。
-- **v1+ 待办(2026-06-03 真实 LLM 验收发现)**:推理模型(如 `mimo-v2.5-pro`)在 reasoning 阶段会先沉默数秒才吐 content,流式下表现为"无反应等待",UX 差。**v1 新增模型"思考/reasoning"支持时,需显式提示**(如 `event: thinking` / 前端"思考中…"指示器,或把 `reasoning_content` 作为思考流推送),避免空白等待。已登记到 `00-overview §2` Slice 6+ backlog。
+- **v1+ 待办(2026-06-03 真实 LLM 验收发现)**:推理模型(如 `mimo-v2.5-pro`)在 reasoning 阶段会先沉默数秒才吐 content,流式下表现为"无反应等待",UX 差。**v1 新增模型"思考/reasoning"支持时,需显式提示**(如 `event: thinking` / 前端"思考中…"指示器,或把 `reasoning_content` 作为思考流推送),避免空白等待。已登记到 `00-overview §2` Slice 8+ backlog。
+- **v1+ 待办(2026-06-05 部署拓扑讨论发现):`/config` 须与公开面隔离**。现状:`/chat` 与 `/config`(读 + 改运行期行为性配置)挂在**同一 FastAPI app、同端口、无鉴权**(`web.py` `create_app`)。在"**管理员托管 + 接口发布**"拓扑(`01 §4` 拓扑②,实际更常见)下,把 web 接口发布给终端用户 = 用户也能 POST `/config` 改掉管理员配好的 prompt / 预算 / tool allowlist——**配置即接口的安全面被击穿**。此拓扑下运行期配置本应安全(用户在网络接口另一侧、够不着 `config.yaml`),但前提是**管理面与公开面隔离**。**v1+ 落地候选**:① `/config` 加鉴权(token / 管理员凭证);② `/config` 仅绑 `127.0.0.1`、`/chat` 对外;③ **生成期开关**让发布实例不渲染 / 只读 `/config`(即 `01 §4` "`/config` 存在性 = 结构轴开关",会动 `HarnessSpec` → 触发 `CLAUDE.md §6.1`)。会动代码、③ 还动 spec,实现前请人签字。已登记到 `00-overview §2` Slice 8+ backlog。
 - **软确认结论(Agent 已自主决定,`CLAUDE.md §5.3`;非阻塞,可一句话改判)**:
   - **SSE 粒度** = **token 级流式 + 进度事件,且可选**(人 2026-06 追加要求,已落地;见 §2.3 与头部实现说明③)。原"进度事件级、token 留 v1+"的方案已被取代。
   - **Web 依赖落位** = 方案 A(`web=true` 直接进 `dependencies`,不动冒烟/容器链路);"关掉不含"已三处(pyproject/lock/req)兑现 plan 的真实意图。
@@ -92,4 +93,4 @@
 - **密钥红线**(`CLAUDE.md §6.5`):`/config` 面板、SSE 事件、trace、日志任一路径出现明文 key 即失败。面板只可见 env 引用名;"密钥只写不回显面板" = L3,本片不做密钥编辑。
 - **不绑框架**:FastAPI/uvicorn 是通用 Web 库,**不是 agent 编排框架**,不违反定位红线(`01-project-plan §1` 措辞);但仅在 `web=true` 时进产物。
 - **配方 vs 活旋钮**(决策④,`01 §4`):`/config` 改的是运行期行为性配置(`config.yaml` 域);接口有无 / 模块 / 范式拓扑是结构性的,只能重新生成。Web 面板属**产物自持**,HarnessForge 不做中心化配置/托管。
-- **MCP 工具**(stdio + 远程 HTTP/SSE)挪到 Slice 4(2026-06-03 定向);**`/config` 热重载进阶、完整 HITL Web、联网 MCP registry** 仍为 v1+,均不在本片(`00-overview §2` Slice 4 / Slice 6+)。
+- **MCP 工具**(stdio + 远程 HTTP/SSE)挪到 Slice 4(2026-06-03 定向);**`/config` 热重载进阶、完整 HITL Web、联网 MCP registry** 仍为 v1+,均不在本片(`00-overview §2` Slice 4 / Slice 8+)。
