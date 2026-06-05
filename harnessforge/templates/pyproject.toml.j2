@@ -18,6 +18,9 @@ dependencies = [
     # libraries, NOT an agent framework. Absent entirely when web is disabled.
     "fastapi>=0.110",
     "uvicorn>=0.29",
+{% endif %}{% if spec.mcp.enabled %}    # MCP tools (mcp.enabled): the official Model Context Protocol SDK — a
+    # protocol client, NOT an agent framework. Absent when MCP is disabled.
+    "mcp>=1.16,<2",
 {% endif %}]
 
 # Test dependencies, installed by `uv sync` (uv-native dependency group). They

@@ -46,7 +46,13 @@ def run(
     config = load_config(config_path)
     if prompt is None:
         prompt = typer.prompt("You")
-    router = ClientRouter(config, mock=mock)
+{% if spec.mcp.enabled %}    from ..harness.mcp import McpManager, register_mcp_tools
+
+    mcp_manager = McpManager(config.mcp)
+    if config.mcp.servers:
+        mcp_manager.start()
+        register_mcp_tools(config, mcp_manager)
+{% endif %}    router = ClientRouter(config, mock=mock)
 
     printed = False
 
@@ -71,6 +77,9 @@ def run(
         f"tokens={result.trace.total_tokens} cost=${result.trace.cost_usd:.4f}",
         fg=typer.colors.BRIGHT_BLACK,
     )
+{% if spec.mcp.enabled %}    if config.mcp.servers:
+        mcp_manager.close()
+{% endif %}
 {% if interfaces.web %}
 
 @app.command()
@@ -91,7 +100,14 @@ def serve(
 
     from .web import create_app
 
-    uvicorn.run(create_app(load_config(config_path), mock=mock), host=host, port=port)
+    config = load_config(config_path)
+{% if spec.mcp.enabled %}    from ..harness.mcp import McpManager, register_mcp_tools
+
+    if config.mcp.servers:
+        mcp_manager = McpManager(config.mcp)
+        mcp_manager.start()
+        register_mcp_tools(config, mcp_manager)
+{% endif %}    uvicorn.run(create_app(config, mock=mock), host=host, port=port)
 {% endif %}
 
 if __name__ == "__main__":

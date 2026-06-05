@@ -99,7 +99,42 @@ class BudgetConfig(BaseModel):
     max_tokens: int | None = Field(default=None, gt=0)
     max_cost_usd: float | None = Field(default=None, gt=0)
 
+{% if spec.mcp.enabled %}
+class McpServerConfig(BaseModel):
+    """One MCP server. Set exactly one transport: ``command`` (stdio) or ``url``.
 
+    Runtime-only (this slice adds no spec fields). Secrets are referenced by
+    env-var NAME (``env`` / ``auth_env``), never stored as values.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    # stdio transport (launched as a subprocess):
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: list[str] = Field(default_factory=list)  # env-var NAMES to inject
+    # remote (Streamable HTTP) transport:
+    url: str | None = None
+    auth_env: str | None = None  # env-var NAME holding a bearer token
+
+    @model_validator(mode="after")
+    def _one_transport(self) -> "McpServerConfig":
+        if bool(self.command) == bool(self.url):
+            raise ValueError(
+                f"mcp server {self.name!r} must set exactly one of "
+                "`command` (stdio) or `url` (remote HTTP/SSE)"
+            )
+        return self
+
+
+class McpConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    servers: list[McpServerConfig] = Field(default_factory=list)
+
+
+{% endif %}
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -112,7 +147,8 @@ class Config(BaseModel):
     context: ContextConfig = Field(default_factory=ContextConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
-
+{% if spec.mcp.enabled %}    mcp: McpConfig = Field(default_factory=McpConfig)
+{% endif %}
     # Forward-compatible passthrough — declared so a richer spec still loads,
     # but not interpreted in this slice.
     rag: dict[str, Any] | None = None

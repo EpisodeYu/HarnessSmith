@@ -36,6 +36,9 @@ CONDITIONAL_TEMPLATES: dict[str, Callable[[HarnessSpec], bool]] = {
     "src/__project_slug__/interfaces/web.py.j2": lambda spec: spec.interfaces.web,
     "src/__project_slug__/interfaces/web_index.html.j2": lambda spec: spec.interfaces.web,
     "tests/test_web.py.j2": lambda spec: spec.interfaces.web,
+    "src/__project_slug__/harness/mcp.py.j2": lambda spec: spec.mcp.enabled,
+    "tests/test_mcp.py.j2": lambda spec: spec.mcp.enabled,
+    "tests/_mcp_dummy_server.py.j2": lambda spec: spec.mcp.enabled,
 }
 
 

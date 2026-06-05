@@ -47,3 +47,18 @@ budget:
 {% endif %}{% if spec.budget.max_cost_usd is not none %}  max_cost_usd: {{ spec.budget.max_cost_usd }}
 {% endif %}  # max_tokens: 100000      # total prompt+completion tokens across the run
   # max_cost_usd: 1.00       # needs per-1K-token prices on the llm profile above
+{% if spec.mcp.enabled %}
+# MCP tool servers (runtime knob — add/remove without regenerating). Each server
+# uses stdio (set `command`) OR remote Streamable HTTP (set `url`). Secrets are
+# referenced by env-var NAME only, never values. A discovered tool is offered to
+# the model only when allowlisted in `tools:` above as `<server>__<tool>`.
+mcp:
+  servers: []
+  # - name: filesystem          # stdio: launched as a subprocess
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+  #   env: []                    # env-var NAMES to inject into the subprocess
+  # - name: github               # remote Streamable HTTP
+  #   url: https://api.example.com/mcp/
+  #   auth_env: GITHUB_MCP_TOKEN  # env-var NAME holding a bearer token
+{% endif %}

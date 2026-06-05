@@ -1,0 +1,183 @@
+"""Optional MCP tool bridge (generated only when ``mcp.enabled``).
+
+MCP tools register into the SAME :class:`~{{ project_slug }}.harness.tools.Registry`
+as built-in tools and run through the SAME loop/trace — ``loop.py`` is untouched.
+*Which* servers to connect to and *which* tools to allowlist are runtime
+``config.yaml`` knobs; transport is chosen per server by shape (``command`` ->
+stdio subprocess, ``url`` -> remote Streamable HTTP).
+
+The MCP SDK is asyncio; all of it hides behind a synchronous ``McpManager.call``.
+One background thread owns one event loop and the whole session lifecycle —
+sessions are entered and exited in the *same* task, as anyio requires.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import concurrent.futures
+import threading
+from contextlib import AsyncExitStack
+from typing import TYPE_CHECKING, Any
+
+from .tools import HIGH, Registry, Tool
+from .tools import registry as default_registry
+
+if TYPE_CHECKING:
+    from .config import Config, McpConfig, McpServerConfig
+
+
+def _bearer_headers(server: McpServerConfig) -> dict[str, str]:
+    """Build request headers for a remote server, resolving the token by NAME."""
+    from .config import resolve_env
+
+    token = resolve_env(server.auth_env) if server.auth_env else None
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _open_streams(server: McpServerConfig):
+    """Return the (read, write) stream context manager for ``server``'s transport."""
+    from .config import resolve_env
+
+    if server.command:
+        import os
+
+        from mcp import StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        env = dict(os.environ)
+        for name in server.env:  # inject named secrets from .env into the child
+            value = resolve_env(name)
+            if value is not None:
+                env[name] = value
+        return stdio_client(
+            StdioServerParameters(command=server.command, args=server.args, env=env)
+        )
+
+    from mcp.client import streamable_http as sh
+
+    headers = _bearer_headers(server)
+    if hasattr(sh, "streamablehttp_client"):  # SDK <2.x
+        return sh.streamablehttp_client(server.url, headers=headers)
+    import httpx  # SDK >=2.x: headers go on a pre-built client
+
+    return sh.streamable_http_client(server.url, http_client=httpx.AsyncClient(headers=headers))
+
+
+def _result_text(result: Any) -> str:
+    """Flatten an MCP CallToolResult's content blocks into a plain string."""
+    parts = [getattr(b, "text", "") for b in (getattr(result, "content", None) or [])]
+    text = "\n".join(p for p in parts if p)
+    return f"ERROR: {text}" if getattr(result, "isError", False) else text
+
+
+class McpManager:
+    """Owns one background event loop + the full MCP session lifecycle.
+
+    ``start()`` connects every configured server (failures are isolated: a
+    server that won't start is skipped and recorded in ``errors``, not fatal)
+    and lists its tools into ``discovered``. ``call()`` is synchronous and
+    thread-safe; ``close()`` shuts the sessions down cleanly.
+    """
+
+    def __init__(self, config: McpConfig) -> None:
+        self._config = config
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._thread_main, daemon=True)
+        self._ready: concurrent.futures.Future = concurrent.futures.Future()
+        self._inbox: asyncio.Queue | None = None
+        self._sessions: dict[str, Any] = {}
+        self.discovered: dict[str, list] = {}
+        self.errors: dict[str, str] = {}
+
+    def _thread_main(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        try:
+            self._loop.run_until_complete(self._main())
+        except Exception as exc:  # surface startup failures to start()
+            if not self._ready.done():
+                self._ready.set_exception(exc)
+        finally:
+            self._loop.close()
+
+    async def _main(self) -> None:
+        from mcp import ClientSession
+
+        self._inbox = asyncio.Queue()
+        async with AsyncExitStack() as stack:
+            for server in self._config.servers:
+                try:
+                    streams = await stack.enter_async_context(_open_streams(server))
+                    session = await stack.enter_async_context(
+                        ClientSession(streams[0], streams[1])
+                    )
+                    await session.initialize()
+                    self._sessions[server.name] = session
+                    self.discovered[server.name] = list((await session.list_tools()).tools)
+                except Exception as exc:  # failure isolation
+                    self.errors[server.name] = str(exc)
+            self._ready.set_result(True)
+            await self._serve()
+
+    async def _serve(self) -> None:
+        assert self._inbox is not None
+        while True:
+            req = await self._inbox.get()
+            if req is None:
+                return
+            server, tool, arguments, fut = req
+            try:
+                fut.set_result(_result_text(await self._sessions[server].call_tool(tool, arguments)))
+            except Exception as exc:
+                fut.set_exception(exc)
+
+    def start(self) -> None:
+        self._thread.start()
+        self._ready.result()  # block until every server is connected (or skipped)
+
+    def call(self, server: str, tool: str, arguments: dict) -> str:
+        fut: concurrent.futures.Future = concurrent.futures.Future()
+        self._loop.call_soon_threadsafe(self._inbox.put_nowait, (server, tool, arguments, fut))
+        return fut.result()
+
+    def close(self) -> None:
+        if self._loop.is_closed() or self._inbox is None:
+            return
+        self._loop.call_soon_threadsafe(self._inbox.put_nowait, None)
+        self._thread.join(timeout=10)
+
+
+def register_mcp_tools(
+    config: "Config", manager: McpManager, registry: Registry | None = None
+) -> list[str]:
+    """Register allowlisted MCP tools into ``registry`` (default: the shared one).
+
+    Only tools whose ``{server}__{tool}`` name is enabled in ``config.tools`` are
+    registered — a non-allowlisted MCP tool is never connected to the model. MCP
+    tools default to ``risk=high`` (external code; opt in deliberately).
+    """
+    registry = registry or default_registry
+    allowed = config.enabled_tool_names()
+    registered: list[str] = []
+    for server, tools in manager.discovered.items():
+        for tool in tools:
+            name = f"{server}__{tool.name}"
+            if name not in allowed:
+                continue
+            registry.register(
+                Tool(
+                    name=name,
+                    description=tool.description or "",
+                    parameters=tool.inputSchema or {"type": "object", "properties": {}},
+                    func=_make_caller(manager, server, tool.name),
+                    risk=HIGH,
+                )
+            )
+            registered.append(name)
+    return registered
+
+
+def _make_caller(manager: McpManager, server: str, tool: str):
+    def _call(**kwargs: Any) -> str:
+        return manager.call(server, tool, kwargs)
+
+    return _call

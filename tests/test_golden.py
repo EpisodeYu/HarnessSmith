@@ -70,6 +70,28 @@ def test_golden_web_enabled_generates_locks_and_smoke_passes(tmp_path):
 
 
 @pytest.mark.golden
+def test_golden_mcp_enabled_generates_locks_and_smoke_passes(tmp_path):
+    """mcp=true -> generate -> lock -> sync + import + mock step + pytest (test_mcp).
+
+    The generated test_mcp.py spins up a local stdio MCP server (no network, no
+    key) and exercises discovery + a real tool call + allowlist filtering.
+    """
+    spec = load_spec(preset_spec_path("coding-assistant"))
+    spec.mcp.enabled = True
+    out = tmp_path / "ca_mcp"
+    result = generate(spec, out, git_init=False)
+
+    lock_dependencies(out)
+    lock_text = (out / "uv.lock").read_text(encoding="utf-8").lower()
+    assert "name = \"mcp\"" in lock_text or "mcp" in lock_text
+    for forbidden in FORBIDDEN:
+        assert forbidden not in lock_text, f"{forbidden} in uv.lock"
+
+    # Runs the generated pytest, which includes tests/test_mcp.py (stdio + allowlist).
+    smoke_check(out, result.project_slug)
+
+
+@pytest.mark.golden
 def test_uvx_harnessforge_new_smoke(tmp_path):
     """`uvx --from <repo> harnessforge new ...` builds + runs the CLI one-shot."""
     if shutil.which("uv") is None:

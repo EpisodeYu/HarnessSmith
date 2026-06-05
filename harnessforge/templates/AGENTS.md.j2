@@ -112,4 +112,30 @@ The CLI streams too: `{{ project_slug }} run --stream "..."`. To stream from you
 own code, pass `on_delta` (a `Callable[[str], None]`) to `run()`.
 
 To add a structural change (a new endpoint, a new module), edit `web.py`
-directly — it's yours. Behavioral knobs belong in `config.yaml` / the panel.{% endif %}
+directly — it's yours. Behavioral knobs belong in `config.yaml` / the panel.{% endif %}{% if spec.mcp.enabled %}
+## MCP tools
+
+`harness/mcp.py` connects [MCP](https://modelcontextprotocol.io) servers and
+registers their tools into the same registry as built-in tools — the loop is
+untouched. Add servers in `config.yaml` (a runtime knob; no regeneration):
+
+```yaml
+mcp:
+  servers:
+    - name: filesystem            # stdio: launched as a subprocess
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+    - name: github                # remote Streamable HTTP
+      url: https://api.example.com/mcp/
+      auth_env: GITHUB_MCP_TOKEN  # env-var NAME; the value lives in .env
+tools:
+  - name: filesystem__list_directory   # allowlist as <server>__<tool>
+    enabled: true
+```
+
+Transport is chosen per server: `command` -> stdio, `url` -> remote. A discovered
+tool is offered to the model **only** when allowlisted in `tools:` as
+`<server>__<tool>`; MCP tools default to `risk="high"`, so opt in deliberately.
+Secrets (`env` / `auth_env`) are referenced by env-var **name** and resolved from
+`.env` at runtime — never stored in `config.yaml`. The `mcp` dependency exists
+only because this repo was generated with MCP enabled.{% endif %}

@@ -1,0 +1,80 @@
+"""MCP bridge tests: a real stdio tool call, allowlist filtering, transport
+selection. Spins up the local stdio dummy server — no network, no API key.
+Generated only when ``mcp.enabled``."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+from {{ project_slug }}.harness.config import Config, McpConfig, McpServerConfig
+from {{ project_slug }}.harness.mcp import McpManager, _bearer_headers, register_mcp_tools
+from {{ project_slug }}.harness.tools import HIGH, Registry, ToolError
+
+DUMMY = str(Path(__file__).parent / "_mcp_dummy_server.py")
+
+
+def _config(tools):
+    return Config.model_validate(
+        {
+            "llms": [{"name": "default", "model": "m"}],
+            "roles": {"generation": "default"},
+            "tools": tools,
+            "observability": {"trace": False},
+        }
+    )
+
+
+@pytest.fixture
+def manager():
+    mgr = McpManager(
+        McpConfig(servers=[McpServerConfig(name="dummy", command=sys.executable, args=[DUMMY])])
+    )
+    mgr.start()
+    yield mgr
+    mgr.close()
+
+
+def test_stdio_discovers_and_calls_tool(manager):
+    assert "dummy" in manager.discovered, manager.errors
+    names = {tool.name for tool in manager.discovered["dummy"]}
+    assert {"echo", "add"} <= names
+
+    registry = Registry()
+    registered = register_mcp_tools(_config([{"name": "dummy__echo", "enabled": True}]), manager, registry)
+
+    assert registered == ["dummy__echo"]
+    assert registry.get("dummy__echo").risk == HIGH  # MCP tools default to high-risk
+    assert "hello" in registry.call("dummy__echo", json.dumps({"text": "hello"}))
+
+
+def test_non_allowlisted_tool_is_not_registered(manager):
+    registry = Registry()
+    # `add` is discovered but not in the allowlist -> it must not be registered.
+    register_mcp_tools(_config([{"name": "dummy__echo", "enabled": True}]), manager, registry)
+
+    assert "add" in {tool.name for tool in manager.discovered["dummy"]}
+    with pytest.raises(ToolError):
+        registry.get("dummy__add")
+
+
+def test_disabled_allowlist_entry_is_not_registered(manager):
+    registry = Registry()
+    registered = register_mcp_tools(_config([{"name": "dummy__echo", "enabled": False}]), manager, registry)
+    assert registered == []
+
+
+def test_remote_server_injects_bearer_header(monkeypatch):
+    monkeypatch.setenv("MY_MCP_TOKEN", "secret-123")
+    server = McpServerConfig(name="r", url="https://example.com/mcp", auth_env="MY_MCP_TOKEN")
+    assert _bearer_headers(server) == {"Authorization": "Bearer secret-123"}
+
+
+def test_server_requires_exactly_one_transport():
+    with pytest.raises(Exception):
+        McpServerConfig(name="bad")  # neither command nor url
+    with pytest.raises(Exception):
+        McpServerConfig(name="bad", command="x", url="https://y")  # both

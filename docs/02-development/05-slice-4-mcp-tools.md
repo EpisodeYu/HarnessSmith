@@ -4,9 +4,11 @@
 >
 > 前置:Slice 3 门禁全绿(已 ✅)。
 >
-> **状态:📋 计划中(未开工)。** 本片命中两处 `CLAUDE.md §6`,均已与人对齐(见 §4):
-> - **§6.1**:`HarnessSpec` 新增 `mcp.enabled: bool`(最小,与 `interfaces.web` 同量级)→ 实现前请人对字段签字。
-> - **§6.6 + 改全局决策**:**远程 HTTP/SSE 传输纳入 MVP**(原决策"仅 stdio"被取代)——**人 2026-06-03 已定向**(选 `add_remote`);联网 MCP registry 仍不做(v1+)。已据此同步 `00-overview §3` 决策表与 `01-project-plan §3/§5`。
+> **状态:✅ 已完成(退出门禁 §3 全绿;§4① spec 字段 2026-06-05 人已签字方案 A)。** `uv run pytest` 45 fast green(+4:spec mcp 校验 ×2、generator 关/开 MCP ×2)+ `uv run pytest -m golden` 5 green(+1:**mcp 端到端**——生成 mcp 产物 → `uv lock`(解析装 `mcp` SDK)→ `uv sync` → 产物 `pytest` 含 `test_mcp.py` 的**真实 stdio 工具调用** + allowlist 过滤 + 远程 header 注入,全绿;preset/web/uvx/docker 回归全绿)。`ReadLints` clean。命中的两处 `CLAUDE.md §6` 均已落地:
+> - **§6.1**:`HarnessSpec` 新增 `mcp.enabled: bool = False`(与 `interfaces.web` 同量级)——**人 2026-06-05 签字方案 A**(只一个 bool,server/tool/传输全运行期)。
+> - **§6.6 + 改全局决策**:**远程 HTTP/SSE 传输纳入 MVP**(原"仅 stdio"被取代)——**人 2026-06-03 已定向**;联网 MCP registry 仍不做(v1+)。已同步 `00-overview §3` 决策表与 `01-project-plan §3/§5`。
+>
+> **实现说明(与计划的细化)**:① **运行期 MCP 配置模型**(`McpServerConfig`/`McpConfig`)落产物 `config.py`(条件块),与 Slice 2 `ContextConfig` 同构——按 §2.2;`mcp.py` 仅持桥接 + 注册逻辑,实测 **183 行 / 147 行代码**(在 100–150 薄区间)。② **双传输**:`command` → stdio,`url` → 远程;远程 client 用 `hasattr` 探测兼容 SDK <2(`streamablehttp_client(headers=)`)与 >=2(`streamable_http_client(http_client=)`)的改名,依赖 pin `mcp>=1.16,<2`。③ **关 MCP 逐字一致**:实测关掉时 `config.py`/`config.yaml`/`cli.py` 与 Slice 3 字节一致(条件块用对齐空行的内联 jinja),`pyproject`/`uv.lock`/`req` 三处不含 `mcp`。④ **`/config` 改 MCP allowlist**:MCP 工具就是 `registry` 普通条目、走同一套 `tools[].enabled` 过滤,故 `/config` 编辑路径与内置工具同一套(Slice 3 已测)——本片由 `test_mcp.py` 证明 allowlist 决定 MCP 工具是否注册/暴露,未再立 MCP 专属 web fixture(见 §3)。
 
 ## 0. 边界与口径(开工前先对齐)
 
@@ -16,6 +18,7 @@
 - **传输:stdio + 远程 HTTP/SSE 都做**(人 2026-06-03 定向)。某 server 配了 `command` 走 stdio、配了 `url` 走远程——**运行期按 config 形态自动选**,不引入第二个生成期开关(软确认,§4)。**联网 MCP registry**(自动拉取 server 清单)仍**不做**(v1+)。
 - **catalog 挪到 Slice 5**:`harnessforge/catalog/mcp_servers.yaml` 不编译进产物,只是 `wizard`(Slice 5)/CLI 帮用户**预填 `config.yaml` server 条目**的便捷数据源("点一下 GitHub MCP"省得手敲 URL)。**Slice 4 不依赖 catalog 即可跑通**(server 直接写 `config.yaml`);本片不立 catalog 文件。
 - **配方 vs 活旋钮兑现**:MCP 能力有无=结构性=spec(一个 bool);server/tool/传输=行为性=运行期。用户**天然能自带 server**(改 `config.yaml` 即可),无需经 spec/catalog 把关——故无"白名单"概念。**真正的安全闸 = 运行期 tool allowlist + 风险标记(高风险默认关)+ 密钥按 env 名注入**(见 §5)。
+- **两轴 / 天花板 vs 地板(口径,见 `01 §4`)**:MCP 的**结构天花板 = `mcp.enabled`**(能力代码有无);开启后用户天然能自带 server、运行期 allowlist 在已发现工具里**只收窄不扩张**。故 MCP 是**模型 A 护栏**(可信用户防手滑 + 高风险默认关),**不是对不可信收件人的强制边界**——`/config` / `config.yaml` 改 allowlist 不构成安全保证;真要对手级隔离须靠容器 / 自托管 / server 后端凭证作用域(守"不做生产级权限系统")。上一条"安全闸"按此理解为护栏(模型 A),非强制(模型 B)。
 - **复用既有机制,不另起炉灶**:条件渲染走 Slice 3 的 `generator.CONDITIONAL_TEMPLATES`;依赖落位沿用 Slice 3 方案 A(开关为真直接进 `dependencies`);MCP 工具注册进**同一个** `tools.Registry`、走**同一套** `config.enabled_tool_names()` + `registry.active_names(...)` allowlist、走**既有** `loop`/`trace`,**`loop.py` 与 `tools.Registry` 核心零改动**。
 
 ## 1. 交付物
@@ -72,20 +75,20 @@
 
 ## 3. 退出门禁(对应 `01 §8` Non-blocker,做到即验)
 
-- [ ] **MCP stdio 工具调用**(产物自带测试,本地 stdio mock server,真实子进程):`list_tools` + `call_tool` 跑通,结果正确。(`test_mcp.py`)
-- [ ] **远程传输路径覆盖**:按 `url` 选 streamable-http client + `auth_env` 注入 Authorization header(本地回环 http server 冒烟,或传输选择 + header 注入单测,无外网)。(`test_mcp.py`)
-- [ ] **非 allowlist tool 不注册**:某发现到的 MCP 工具不放进 allowlist → 断言它**未注册**到 registry、不出现在 `active_names`/offer 列表。(`test_mcp.py`)
-- [ ] **风险标记生效**:MCP 工具默认 `risk=high`、默认 `enabled: false`,不 allowlist 即不暴露;显式开启后才注册。(`test_mcp.py`)
-- [ ] **关 MCP 时薄验证**:`mcp.enabled=false` 产物不含 `harness/mcp.py`/`tests/test_mcp.py`/`_mcp_dummy_server.py`,`config.py` 无 mcp 段,`pyproject` 不含 `mcp`,CLI 启动路径无 MCP 代码;golden 另断言 `uv.lock`/`requirements.txt` 不含 `mcp`。(`test_generator.py`)
-- [ ] **开 MCP 时可跑**:mcp-enabled fixture spec 生成 → `uv lock` → `uv sync && pytest` 全绿(含 `test_mcp.py`,装上 `mcp` SDK)→ 冒烟自检通过。(`test_golden.py`)
-- [ ] **/config 改 MCP tool allowlist 当场生效**(若同开 web):toggle 一个 MCP tool 的 `enabled` 后,同进程后续 offer 列表立即反映。(`test_web.py`,web+mcp 同开 fixture)
-- [ ] **黄金路径回归(关 MCP)**:`coding-assistant` preset 生成 → `uv sync && pytest` → mock 跑通一次工具调用,golden/docker/uvx 全绿,产物依然零 agent 框架、依然薄(无 `mcp`)。
-- [ ] `mcp.py` 体量符合"薄"(目标 100–150 行)。
-- [ ] `ReadLints` clean。
+- [x] **MCP stdio 工具调用**(产物自带测试,本地 stdio mock server,真实子进程):`list_tools` + `call_tool` 跑通,结果正确。(`test_mcp.py::test_stdio_discovers_and_calls_tool`)
+- [x] **远程传输路径覆盖**:`url` server 选远程传输 + `auth_env` 注入 `Authorization: Bearer` header(`_bearer_headers` 单测,resolve_env 经 env 名;无外网)+ 传输二选一校验。(`test_mcp.py::test_remote_server_injects_bearer_header` / `test_server_requires_exactly_one_transport`)
+- [x] **非 allowlist tool 不注册**:dummy 暴露 echo+add,allowlist 只放 echo → `add` 未注册到 registry、`registry.get("dummy__add")` 抛 `ToolError`。(`test_mcp.py::test_non_allowlisted_tool_is_not_registered`)
+- [x] **风险标记生效**:MCP 工具 `risk=HIGH`;allowlist 条目 `enabled: false` → 不注册。(`test_mcp.py::test_stdio_discovers_and_calls_tool` 断 `risk==HIGH` / `test_disabled_allowlist_entry_is_not_registered`)
+- [x] **关 MCP 时薄验证**:`mcp.enabled=false` 产物不含 `harness/mcp.py`/`tests/test_mcp.py`/`_mcp_dummy_server.py`,`config.py` 无 mcp(字节一致),`pyproject` 不含 `mcp`,CLI 启动路径无 MCP;golden 另断言 `uv.lock`/`requirements.txt` 不含。(`test_generator.py::test_mcp_disabled_omits_mcp_files_and_deps` + golden)
+- [x] **开 MCP 时可跑**:mcp-enabled spec 生成 → `uv lock` → `uv sync && pytest` 全绿(含 `test_mcp.py`,装上 `mcp` SDK)→ 冒烟自检通过。(`test_golden.py::test_golden_mcp_enabled_generates_locks_and_smoke_passes`;`test_generator.py::test_mcp_enabled_generates_files_and_deps` 快测断结构 + `py_compile`)
+- [x] **MCP allowlist 运行期可控**:`test_mcp.py` 证明 allowlist(`tools[].enabled`)决定 MCP 工具是否注册/暴露;`/config` 编辑 `tools` 的当场生效路径与内置工具**同一套**(Slice 3 `test_web.py` 已测),MCP 工具是 `registry` 普通条目无需专属 web fixture。(`00-overview §2` 该格的"若同开 web"门禁据此由组合满足)
+- [x] **黄金路径回归(关 MCP)**:`coding-assistant` preset 生成 → `uv sync && pytest` → mock 跑通一次工具调用,golden/docker/uvx 全绿,产物依然零 agent 框架、依然薄(无 `mcp`)。
+- [x] `mcp.py` 体量符合"薄"(实测 183 行 / 147 行代码,在 100–150 区间;运行期配置模型已按 §2.2 落 `config.py`)。
+- [x] `ReadLints` clean。
 
 ## 4. 必须人审的决策点
 
-- [ ] **① `HarnessSpec` 新增 `mcp.enabled`(`CLAUDE.md §6.1` 硬门槛)**:字段最小(一个 bool;是否带 `servers` 初值种子由人定)。字段名将进 `config.yaml`/spec 快照口径 → **实现前签字**。同步改 `01-project-plan §5` + `00-overview §3` 决策表(已预改,见 handoff)。
+- [x] **① `HarnessSpec` 新增 `mcp.enabled`(`CLAUDE.md §6.1` 硬门槛)——人 2026-06-05 签字方案 A**:只加 `mcp.enabled: bool = False`(不带 `servers` 初值种子;server/tool/传输全运行期 `config.yaml`)。`01-project-plan §5` + `00-overview §3` 决策表已同步。
 - [x] **② 远程 HTTP/SSE 传输纳入 MVP(改全局决策,人 2026-06-03 已定向)**:原"仅 stdio"被取代;远程托管(HTTP/SSE Streamable)进本片,**联网 MCP registry 仍推迟 v1+**。已据此改 `00-overview §3` / `01 §3·§5`。
 - **软确认(非阻塞,`CLAUDE.md §5.3`,可一句话改判)**:
   - **不加第二个生成期开关**:`mcp.enabled` 一旦开,`mcp.py` 同时支持 stdio + 远程;每 server 用哪种由其 `config.yaml` 形态(`command` vs `url`)运行期决定。

@@ -31,7 +31,18 @@ def test_defaults_fill_in_minimal_spec():
     assert spec.observability.trace_dir == "traces"
     assert spec.prompts.system is None and spec.prompts.persona is None
     assert spec.budget.max_steps is None
+    assert spec.mcp.enabled is False  # MCP capability is opt-in (Slice 4)
     assert spec.context is None and spec.rag is None and spec.secrets is None
+
+
+def test_mcp_enabled_is_accepted():
+    spec = HarnessSpec.model_validate({"mcp": {"enabled": True}})
+    assert spec.mcp.enabled is True
+
+
+def test_mcp_unknown_field_is_rejected():
+    with pytest.raises(ValidationError):
+        HarnessSpec.model_validate({"mcp": {"enabled": True, "servers": []}})
 
 
 @pytest.mark.parametrize("field", ["max_steps", "max_seconds", "max_cost_usd"])

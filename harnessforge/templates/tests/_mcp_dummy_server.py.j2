@@ -1,0 +1,26 @@
+"""A tiny local MCP server over stdio, used by tests/test_mcp.py (no network).
+
+Exposes two safe tools so tests can exercise discovery, allowlist filtering, and
+a real stdio tool call. Launched as a subprocess by the tests. The leading
+underscore keeps pytest from collecting it as a test module.
+"""
+
+from mcp.server.fastmcp import FastMCP
+
+server = FastMCP("dummy")
+
+
+@server.tool()
+def echo(text: str) -> str:
+    """Return the given text unchanged."""
+    return text
+
+
+@server.tool()
+def add(a: int, b: int) -> int:
+    """Add two integers."""
+    return a + b
+
+
+if __name__ == "__main__":
+    server.run()

@@ -44,7 +44,22 @@ class Interfaces(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cli: bool = True
-    web: bool = False  # L2 (Slice 2)
+    web: bool = False  # L2 (Slice 3)
+
+
+class Mcp(BaseModel):
+    """Opt-in MCP tool capability (L2, Slice 4).
+
+    Generation-time decides ONLY whether the capability exists: ``enabled``
+    renders ``harness/mcp.py`` and adds the ``mcp`` dependency. *Which* servers
+    to connect to, which tools to allowlist, and which transport (stdio vs
+    remote HTTP/SSE) are runtime knobs in ``config.yaml`` — they are NOT part of
+    the spec. Disabled leaves the generated repo with zero MCP footprint.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
 
 
 class Observability(BaseModel):
@@ -94,6 +109,7 @@ class HarnessSpec(BaseModel):
     prompts: Prompts = Field(default_factory=Prompts)
     tools: list[ToolSpec] = Field(default_factory=list)
     interfaces: Interfaces = Field(default_factory=Interfaces)
+    mcp: Mcp = Field(default_factory=Mcp)
     observability: Observability = Field(default_factory=Observability)
     budget: Budget = Field(default_factory=Budget)
 

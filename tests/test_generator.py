@@ -242,3 +242,50 @@ def test_web_index_has_no_unrendered_jinja(tmp_path, spec):
     )
     assert "{{" not in html and "{%" not in html
     assert "agent_harness" in html  # project_slug was rendered into the title
+
+
+# --- Slice 4: optional MCP tools (conditional generation) ------------------
+
+
+def test_mcp_disabled_omits_mcp_files_and_deps(tmp_path, preset_spec):
+    """Default (mcp.enabled: false) repo has zero MCP footprint — stays thin."""
+    out = tmp_path / "nomcp"
+    generate(preset_spec, out, git_init=False)
+    pkg = out / "src" / "coding_assistant"
+    assert not (pkg / "harness" / "mcp.py").exists()
+    assert not (out / "tests" / "test_mcp.py").exists()
+    assert not (out / "tests" / "_mcp_dummy_server.py").exists()
+
+    pyproject = (out / "pyproject.toml").read_text(encoding="utf-8").lower()
+    assert "mcp" not in pyproject
+
+    config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
+    assert "McpConfig" not in config_py and "mcp" not in config_py.lower()
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8").lower()
+    assert "mcp" not in config_yaml
+
+
+def test_mcp_enabled_generates_files_and_deps(tmp_path, spec):
+    spec.mcp.enabled = True
+    out = tmp_path / "mcp"
+    generate(spec, out, git_init=False)
+    pkg = out / "src" / "agent_harness"
+
+    assert (pkg / "harness" / "mcp.py").is_file()
+    assert (out / "tests" / "test_mcp.py").is_file()
+    assert (out / "tests" / "_mcp_dummy_server.py").is_file()
+
+    pyproject = (out / "pyproject.toml").read_text(encoding="utf-8")
+    assert "mcp>=" in pyproject
+    lowered = pyproject.lower()
+    for forbidden in ("langchain", "langgraph", "adk"):
+        assert forbidden not in lowered  # never an agent framework, even with MCP
+
+    config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
+    assert "mcp: McpConfig" in config_py
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "mcp:" in config_yaml and "servers: []" in config_yaml
+
+    # mcp.py is valid Python even though the mcp SDK isn't installed in this dev env
+    py_compile.compile(str(pkg / "harness" / "mcp.py"), doraise=True)
