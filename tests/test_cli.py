@@ -31,6 +31,15 @@ def test_new_unknown_preset_exits_2(tmp_path):
     assert "Invalid spec" in result.output
 
 
+def test_new_unknown_mcp_server_exits_2(tmp_path):
+    result = runner.invoke(
+        app,
+        ["new", str(tmp_path / "out"), "--preset", "coding-assistant", "--mcp-server", "nope"],
+    )
+    assert result.exit_code == 2
+    assert "Invalid spec" in result.output
+
+
 def test_doctor_runs_and_reports_uv():
     result = runner.invoke(app, ["doctor"])
     # uv is installed in this dev environment; doctor should report it.

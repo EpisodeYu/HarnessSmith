@@ -20,12 +20,14 @@ from harnessforge.generator import (
     REQUIREMENTS_NAME,
     generate,
     lock_dependencies,
+    prewarm_mcp_servers,
     smoke_check,
 )
-from harnessforge.presets import preset_spec_path
+from harnessforge.presets import preset_mcp_servers, preset_spec_path
 from harnessforge.spec import load_spec
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+EXAMPLE_SPEC = REPO_ROOT / "examples" / "spec.yaml"
 FORBIDDEN = ("langchain", "langgraph", "adk")
 
 
@@ -114,6 +116,43 @@ def test_golden_multi_paradigm_generates_locks_and_smoke_passes(tmp_path):
 
 
 @pytest.mark.golden
+def test_golden_thin_example_stays_thin_and_smoke_passes(tmp_path):
+    """The plain example spec (no MCP) is the thin anchor: no mcp dep, smoke green."""
+    spec = load_spec(EXAMPLE_SPEC)
+    out = tmp_path / "thin"
+    result = generate(spec, out, git_init=False)
+
+    lock_dependencies(out)
+    lock_text = (out / "uv.lock").read_text(encoding="utf-8").lower()
+    assert 'name = "mcp"' not in lock_text  # stays thin: no MCP dependency
+    for forbidden in FORBIDDEN:
+        assert forbidden not in lock_text, f"{forbidden} in uv.lock"
+
+    smoke_check(out, result.project_slug)
+
+
+@pytest.mark.golden
+def test_golden_mcp_baseline_prefill_smoke(tmp_path):
+    """coding-assistant baseline: prefill fetch/git/DC into config.yaml, prewarm
+    the uvx servers, then smoke. fetch+git actually launch (read tools enabled);
+    Desktop Commander stays dormant (all tools off)."""
+    spec = load_spec(preset_spec_path("coding-assistant"))
+    servers = preset_mcp_servers("coding-assistant")
+    out = tmp_path / "ca_baseline"
+    # git_init so the git MCP server has a real repository to connect to.
+    result = generate(spec, out, git_init=True, mcp_servers=servers)
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "fetch__fetch" in config_yaml and "mcp-server-git" in config_yaml
+
+    lock_dependencies(out)
+    prewarm_mcp_servers(servers)  # warm uvx cache so the smoke launch is fast
+    # smoke runs `<pkg> run --mock` which starts fetch+git; a slow/failing server
+    # is skipped (connect timeout + failure isolation), never hangs the run.
+    smoke_check(out, result.project_slug)
+
+
+@pytest.mark.golden
 def test_uvx_harnessforge_new_smoke(tmp_path):
     """`uvx --from <repo> harnessforge new ...` builds + runs the CLI one-shot."""
     if shutil.which("uv") is None:
@@ -122,7 +161,7 @@ def test_uvx_harnessforge_new_smoke(tmp_path):
     proc = subprocess.run(
         [
             "uvx", "--from", str(REPO_ROOT), "harnessforge", "new", str(out),
-            "--preset", "coding-assistant", "--no-git", "--no-verify",
+            "--preset", "coding-assistant", "--no-git", "--no-verify", "--no-prewarm",
         ],
         capture_output=True,
         text=True,
@@ -131,6 +170,8 @@ def test_uvx_harnessforge_new_smoke(tmp_path):
     assert (out / "pyproject.toml").is_file()
     assert (out / "uv.lock").is_file()
     assert (out / "src" / "coding_assistant" / "harness" / "loop.py").is_file()
+    # The CLI applied the preset's MCP prefill into the runtime config.
+    assert "fetch__fetch" in (out / "config.yaml").read_text(encoding="utf-8")
 
 
 @pytest.mark.golden
@@ -151,6 +192,40 @@ def test_docker_build_and_run_mock_step(tmp_path):
     try:
         run = subprocess.run(
             ["docker", "run", "--rm", tag], capture_output=True, text=True
+        )
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert "mock" in run.stdout.lower()
+    finally:
+        subprocess.run(["docker", "rmi", "-f", tag], capture_output=True, text=True)
+
+
+@pytest.mark.golden
+@pytest.mark.docker
+def test_docker_mcp_baseline_bakes_and_runs_offline(tmp_path):
+    """The MCP baseline bakes uvx servers into the image so a no-network
+    `docker run` still boots (servers launch from the warmed cache; mock step)."""
+    if shutil.which("docker") is None:
+        pytest.skip("docker not on PATH")
+    spec = load_spec(preset_spec_path("coding-assistant"))
+    servers = preset_mcp_servers("coding-assistant")
+    out = tmp_path / "ca_mcp_docker"
+    generate(spec, out, git_init=False, mcp_servers=servers)
+    lock_dependencies(out)
+
+    dockerfile = (out / "Dockerfile").read_text(encoding="utf-8")
+    assert "uvx mcp-server-fetch --help" in dockerfile and "UV_OFFLINE=1" in dockerfile
+
+    tag = "harnessforge_golden_mcp_baseline"
+    build = subprocess.run(
+        ["docker", "build", "-t", tag, str(out)], capture_output=True, text=True
+    )
+    assert build.returncode == 0, build.stdout + build.stderr
+    try:
+        # --network none proves the baked image runs with zero network.
+        run = subprocess.run(
+            ["docker", "run", "--rm", "--network", "none", tag],
+            capture_output=True,
+            text=True,
         )
         assert run.returncode == 0, run.stdout + run.stderr
         assert "mock" in run.stdout.lower()

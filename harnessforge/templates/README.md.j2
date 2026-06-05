@@ -65,13 +65,17 @@ uv run {{ project_slug }} serve                 # http://127.0.0.1:8000
 uv run {{ project_slug }} serve --mock          # offline, no API key
 ```
 {% endif %}{% if spec.mcp.enabled %}
-## MCP tools
+## MCP tools (capability baseline)
 
-This repo can connect [MCP](https://modelcontextprotocol.io) servers (local
-stdio or remote Streamable HTTP) and expose their tools to the model. Configure
-servers in `config.yaml` and allowlist their tools as `<server>__<tool>`; see
-[`AGENTS.md`](./AGENTS.md). MCP tools default to high-risk and are off until
-allowlisted; secrets are referenced by env-var name only.
+This harness has no built-in productivity tools — its capabilities come from
+[MCP](https://modelcontextprotocol.io) servers, prefilled in `config.yaml`:
+**`fetch`** (web) and **`git`** read tools are on; mutating `git` and
+**Desktop Commander** (terminal + files) are predefined but off (flip to enable).
+uvx servers are prewarmed and baked into the Docker image so `docker run` works
+offline. Add more with `harnessforge new --mcp-server <name>` or by pasting a
+marketplace block into `config.yaml`. Allowlist tools as `<server>__<tool>`;
+read-only tools (`safe_tools`) are also offered to `plan`/`ask`. Secrets are
+referenced by env-var name only. See [`AGENTS.md`](./AGENTS.md).
 {% endif %}
 ## Layout
 

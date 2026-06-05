@@ -6,7 +6,7 @@
 >
 > 前置:Slice 4(MCP opt-in,已 ✅)+ Slice 5(范式,见 `06-slice-5-paradigms.md`)。
 >
-> **状态:📝 规划中(子文档已立)。方向经人 2026-06-05 定稿**(MCP 预设做基线 / 不自写 built-in / fetch 默认开 / git 预置 / Desktop Commander 预填默认关 / 生成期预热 + Docker 烤镜像 / 标准 SKILL 放本片,见 §4)。退出门禁(§3)暂全空,实现且自验证全绿后回填。
+> **状态:🚧 进行中。Part A(MCP 工具基线)✅ 已完成(2026-06-05);Part B(标准 SKILL)📝 待开工**。方向 + 决策①–⑥经人 2026-06-05 定稿(MCP 预设做基线 / 不自写 built-in / fetch 默认开 / git 预置 / DC 预填默认关 / 生成期预热 + Docker 烤镜像 / 风险按工具分级 B / `spec.skills` 仅 enabled、dirs 走运行期 B / split 推进,见 §4)。门禁见 §3(Part A 项已勾)。
 >
 > **红线提醒**:① 能力来自成熟 MCP 生态,**不自写 built-in**(免造轮子+维护);**不做联网 MCP registry / `forge add`**(v1+);marketplace 只走"文档 + 粘贴式 config";SaaS 平台(Composio 等)只作 **remote MCP**(`url`+`auth_env`,落 Slice 4 已支持的远程传输),**不引其框架包**。② SKILL = 提示注入 + 文件读 + 用工具跑脚本,**不引框架**;高风险(脚本/写/shell)默认关(`01 §6`)。
 
@@ -71,23 +71,27 @@
 
 ## 3. 退出门禁(对应 `01 §8` Non-blocker,做到即验;实现后回填)
 
-- [ ] **基线开箱可用**:`coding-assistant` 生成 → `fetch`/`git` 读类默认 allowlist 开、mock 可调;Desktop Commander 预填但 allowlist 默认关(写/shell 未被 offer);`uv sync && pytest`(含 `test_mcp.py`)绿。
-- [ ] **离线/Docker**:生成期**预热**后产物可 `--offline` 用已缓存 server;Docker 镜像烤入 server、`docker run` 离线跑通 mock 一步。
-- [ ] **catalog 落 `config.yaml`**:选中 server → 产物 `config.yaml mcp.servers` 含该条目(env 仅名、高风险默认关),不进 spec/快照。
-- [ ] **极薄 example 仍薄**:保留的无 MCP example → 不含 `mcp` 依赖、与 Slice 4 薄基线一致(golden)。
-- [ ] **SKILL 发现 + 注入**:放样例 skill → L1 `name+description` 进系统提示;`disable-model-invocation` 的不自动注入正文(只 `/name` 触发)。
-- [ ] **SKILL 加载并遵循(mock)**:模型读 `SKILL.md` 正文(经文件工具或 `read_skill`)→ 按其指令完成一步;非 allowlist 工具不被技能调用。
-- [ ] **SKILL 关掉零痕迹**:`skills.enabled=false` 产物无 `skills.py`/`read_skill`/提示注入。
-- [ ] `ReadLints` clean。
-- [ ] (大改动 §5)全量黄金 + Docker + `uvx` 冒烟全绿(动 `Dockerfile`/`generator`/`spec` + presets)。
+> **Part A(工具基线)状态:✅ 已完成(2026-06-05)**。生成器快测 68(新增 catalog/prefill/preset/Dockerfile bake 用例);coding-assistant 产物自带测试 25(含 MCP 风险分级 `safe`/`high` + 只读范式可用 `fetch`/`git` 读);golden 非 docker 7 全绿(thin example / MCP 基线 prefill 真实启动 fetch+git / web / 多范式 / `uvx` 冒烟);docker golden 2 全绿(基线 `docker build` + `docker run --network none` 离线跑通 mock 一步)。Part B(SKILL)未开工。
+
+- [x] **基线开箱可用**:`coding-assistant` 生成 → `fetch`/`git` 读类默认 allowlist 开、mock 可调;Desktop Commander 预填但 allowlist 默认关(全 high、未被 offer,且因无启用工具**不被启动**);`uv sync && pytest`(含 `test_mcp.py`)绿。
+- [x] **离线/Docker**:生成期 `prewarm_mcp_servers`(`uvx <pkg> --help` 暖 uv 缓存,可 `--no-prewarm`)后产物可离线用已缓存 server;Docker build 暖缓存 + `ENV UV_OFFLINE=1`,`docker run --network none` 离线跑通 mock 一步(已 golden 验证)。
+- [x] **catalog 落 `config.yaml`**:选中 server → 产物 `config.yaml mcp.servers` 含条目(env/auth 仅名、写类默认关、`safe_tools` 标读类),**不进 spec/快照**(`test_mcp_prefill_servers_do_not_leak_into_spec_snapshot`)。
+- [x] **极薄 example 仍薄**:`examples/spec.yaml`(无 MCP)→ 不含 `mcp` 依赖、与 Slice 4 薄基线一致(`test_golden_thin_example_stays_thin_and_smoke_passes`)。
+- [ ] **SKILL 发现 + 注入**(Part B):放样例 skill → L1 `name+description` 进系统提示;`disable-model-invocation` 的不自动注入正文(只 `/name` 触发)。
+- [ ] **SKILL 加载并遵循(mock)**(Part B):模型读 `SKILL.md` 正文(经文件工具或 `read_skill`)→ 按其指令完成一步;非 allowlist 工具不被技能调用。
+- [ ] **SKILL 关掉零痕迹**(Part B):`skills.enabled=false` 产物无 `skills.py`/`read_skill`/提示注入。
+- [x] `ReadLints` clean(Part A)。
+- [x] (大改动 §5)全量黄金 + Docker + `uvx` 冒烟全绿(动 `Dockerfile`/`generator`/`catalog`/presets;`spec` 未动,Part A 无 schema 变更)。
 
 ## 4. 必须人审的决策点
 
 - [x] **① MCP 预设做基线(不自写 built-in)——人 2026-06-05 定稿**:`fetch` 默认开 + Desktop Commander 预填默认关;离线靠生成期预热 + Docker 烤镜像;海量扩展走 marketplace 文档 + Composio 式 remote MCP。
 - [x] **② 官方 `git` 预置——人 2026-06-05**:`uvx mcp-server-git` 进基线;读类默认开、写类(commit/push)默认关。
 - [x] **③ 标准 SKILL 支持放本片(与工具基线一起)——人 2026-06-05**:Agent Skills 开放标准(`SKILL.md` + 渐进披露),`skills.py` 发现+注入 + `read_skill`/文件工具读正文 + 脚本经工具跑;`spec.skills.enabled` 门控。
-- [ ] **④ `spec.skills` 字段最终签字(`CLAUDE.md §6.1`)**:最小 `skills.enabled: bool = False`(+ 可选 `dirs`),implement 前定稿。
-- **软确认(非阻塞,`CLAUDE.md §5.3`)**:基线 allowlist 策略(fetch 开 / git 读开写关 / DC 全关);MCP 工具风险分级(为"低风险默认开"加按 server/tool 的 risk,或仅靠 preset 显式 allowlist);SKILL 目录默认 `skills/`(+ 兼容 `.claude/.cursor/.agents`);除基线三项外 catalog 再收哪些 server。
+- [x] **④ `spec.skills` 字段最终签字(`CLAUDE.md §6.1`)——人 2026-06-05 选 B**:spec **只加结构性开关 `skills.enabled: bool = False`**(对齐 `mcp.enabled` 先例);**技能目录是运行期行为旋钮**,落 `config.yaml skills.dirs`(默认 `["skills"]`,可加 `.claude/skills`/`.cursor/skills`/`.agents/skills`),**不进 spec**。
+- [x] **⑤ MCP 工具风险分级——人 2026-06-05 选 B**:不再"一律 HIGH",改**按工具风险标注**——catalog 标 `fetch` 与 `git` 读类(status/log/diff/show…)为 `safe`、写类(commit/add/push…)为 `high`;`McpServerConfig` 增 `safe_tools` 字段,`register_mcp_tools` 据此设 `risk`。这样**只读范式 plan/ask(`allow_high_risk=False`)也能用 fetch/git 读**,"低风险默认开"有据。未列入 `safe_tools` 的发现工具一律按 `high`(fail-safe)。
+- [x] **⑥ 推进方式——人 2026-06-05 选 split**:**先做 Part A(MCP 工具基线 + catalog + 离线/Docker + 风险分级)**跑绿 §3 相关门禁并 commit,**再做 Part B(标准 SKILL)**单独跑绿门禁 commit。
+- **软确认(已自主定,`CLAUDE.md §5.3`)**:基线 allowlist = fetch 开 / git 读开写关 / DC 全关(预填一键开);catalog 除基线三项外按需收候选(官方 `time`/`memory`/`sequential-thinking`/`everything`,归档 `github`/`postgres`),不阻塞本片;`read_skill` 内置工具=低风险默认可读(只读技能目录内 `SKILL.md`);SKILL 注入点在 `prompts.build_system_prompt`(所有范式共用)。
 
 ## 5. 本 slice 注意
 

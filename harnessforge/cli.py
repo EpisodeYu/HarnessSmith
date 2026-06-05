@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 from pydantic import ValidationError
 
+from .catalog import CatalogError, available_servers, resolve_servers
 from .generator import (
     SmokeCheckError,
     TargetExistsError,
@@ -20,9 +21,15 @@ from .generator import (
     doctor as run_doctor,
     generate,
     lock_dependencies,
+    prewarm_mcp_servers,
     smoke_check,
 )
-from .presets import PresetNotFoundError, available_presets, preset_spec_path
+from .presets import (
+    PresetNotFoundError,
+    available_presets,
+    preset_mcp_servers,
+    preset_spec_path,
+)
 from .spec import load_spec
 
 app = typer.Typer(
@@ -51,6 +58,14 @@ def new(
         "-p",
         help=f"Use a bundled preset instead of --spec ({', '.join(available_presets())}).",
     ),
+    mcp_server: list[str] = typer.Option(
+        [],
+        "--mcp-server",
+        help=(
+            "Prefill an MCP server from the catalog into config.yaml (repeatable). "
+            f"Catalog: {', '.join(available_servers())}."
+        ),
+    ),
     git_init: bool = typer.Option(
         True, "--git/--no-git", help="Run 'git init' in the generated repo."
     ),
@@ -58,6 +73,11 @@ def new(
         True,
         "--verify/--no-verify",
         help="Smoke-test the generated repo (uv sync + import + mock + pytest).",
+    ),
+    prewarm: bool = typer.Option(
+        True,
+        "--prewarm/--no-prewarm",
+        help="Warm the uv cache for uvx-based MCP servers (offline-ready first run).",
     ),
 ) -> None:
     """Generate a new agent harness repo from a spec or preset."""
@@ -70,12 +90,33 @@ def new(
     try:
         spec_path = preset_spec_path(preset) if preset else spec
         harness_spec = load_spec(spec_path)
-    except (FileNotFoundError, ValueError, ValidationError, PresetNotFoundError) as exc:
+        # MCP prefill = preset's baseline + any explicit --mcp-server (catalog).
+        mcp_servers = preset_mcp_servers(preset) if preset else []
+        if mcp_server:
+            mcp_servers = mcp_servers + resolve_servers(list(mcp_server))
+    except (
+        FileNotFoundError,
+        ValueError,
+        ValidationError,
+        PresetNotFoundError,
+        CatalogError,
+    ) as exc:
         typer.secho(f"Invalid spec: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
 
+    if mcp_servers and not harness_spec.mcp.enabled:
+        typer.secho(
+            "Ignoring --mcp-server: spec has mcp.enabled = false (set it to true to "
+            "prefill servers).",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        mcp_servers = []
+
     try:
-        result = generate(harness_spec, target_dir, git_init=git_init)
+        result = generate(
+            harness_spec, target_dir, git_init=git_init, mcp_servers=mcp_servers
+        )
     except TargetExistsError as exc:
         typer.secho(f"Skipped (no overwrite): {exc}", fg=typer.colors.YELLOW, err=True)
         raise typer.Exit(code=1)
@@ -90,6 +131,11 @@ def new(
     try:
         typer.echo("Locking dependencies (uv lock + requirements.txt) ...")
         lock_dependencies(result.target_dir)
+        if prewarm and any(s.uvx_package for s in mcp_servers):
+            typer.echo("Prewarming uvx MCP servers (uv cache) ...")
+            warmed = prewarm_mcp_servers(mcp_servers)
+            if warmed:
+                typer.secho(f"  cached: {', '.join(warmed)}", fg=typer.colors.BRIGHT_BLACK)
         if verify:
             typer.echo("Smoke-testing the generated repo ...")
             smoke_check(result.target_dir, result.project_slug)

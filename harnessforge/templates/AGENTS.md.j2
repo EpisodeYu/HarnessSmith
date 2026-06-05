@@ -181,29 +181,56 @@ own code, pass `on_delta` (a `Callable[[str], None]`) to `run()`.
 
 To add a structural change (a new endpoint, a new module), edit `web.py`
 directly — it's yours. Behavioral knobs belong in `config.yaml` / the panel.{% endif %}{% if spec.mcp.enabled %}
-## MCP tools
+## MCP tools (the capability baseline)
 
-`harness/mcp.py` connects [MCP](https://modelcontextprotocol.io) servers and
-registers their tools into the same registry as built-in tools — the loop is
-untouched. Add servers in `config.yaml` (a runtime knob; no regeneration):
+This harness ships no built-in productivity tools — its real capabilities come
+from [MCP](https://modelcontextprotocol.io) servers. `harness/mcp.py` connects
+servers and registers their tools into the same registry as the built-ins, so
+the loop is untouched. `config.yaml` is prefilled with a baseline:
+
+- **`fetch`** (`uvx mcp-server-fetch`) — web fetch; **on** by default.
+- **`git`** (`uvx mcp-server-git`) — read tools (`git_status`/`git_diff`/`git_log`/
+  …) **on**; mutating tools (`git_commit`/`git_add`/…) **off**.
+- **`desktop-commander`** (`npx @wonderwhy-er/desktop-commander`) — terminal +
+  filesystem; predefined but **all off** (high-risk). Needs Node. Flip a tool to
+  `true` to enable.
+
+A discovered tool is offered to the model **only** when allowlisted in `tools:`
+as `<server>__<tool>`. Per-tool risk: a name listed in the server's `safe_tools`
+registers as `risk="safe"` (read-only — also offered to the `plan`/`ask`
+paradigms); everything else is `risk="high"` (mutating; agent-only). A server is
+launched **only when at least one of its tools is enabled**, so the off-by-default
+Desktop Commander stays dormant until you opt in. Secrets (`env` / `auth_env`)
+are referenced by env-var **name** and resolved from `.env` at runtime.
 
 ```yaml
 mcp:
   servers:
-    - name: filesystem            # stdio: launched as a subprocess
-      command: npx
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
-    - name: github                # remote Streamable HTTP
-      url: https://api.example.com/mcp/
-      auth_env: GITHUB_MCP_TOKEN  # env-var NAME; the value lives in .env
+    - name: git
+      command: uvx
+      args: ["mcp-server-git", "--repository", "."]
+      safe_tools: ["git_status", "git_log", "git_diff"]   # read-only -> risk=safe
+  connect_timeout_seconds: 30   # a slow/failing server is skipped, never hangs
 tools:
-  - name: filesystem__list_directory   # allowlist as <server>__<tool>
+  - name: git__git_status        # allowlist as <server>__<tool>
     enabled: true
+  - name: git__git_commit
+    enabled: false               # mutating -> off until you opt in
 ```
 
-Transport is chosen per server: `command` -> stdio, `url` -> remote. A discovered
-tool is offered to the model **only** when allowlisted in `tools:` as
-`<server>__<tool>`; MCP tools default to `risk="high"`, so opt in deliberately.
-Secrets (`env` / `auth_env`) are referenced by env-var **name** and resolved from
-`.env` at runtime — never stored in `config.yaml`. The `mcp` dependency exists
-only because this repo was generated with MCP enabled.{% endif %}
+### Offline & Docker
+
+uvx-based servers (fetch, git) download on first use, then run from cache. The
+generator prewarms that cache (`harnessforge new` / `--prewarm`), and the
+`Dockerfile` warms it at build time and sets `UV_OFFLINE=1`, so `docker run`
+works with no network. Node-based servers (Desktop Commander) need Node on the
+host and are not baked.
+
+### More servers (marketplace)
+
+Add any server with `harnessforge new --mcp-server <name>` from the catalog, or
+paste a block from a marketplace (Smithery / Glama / MCP.so / the official MCP
+Registry) straight into `config.yaml` — the format is the same. SaaS catalogs
+(e.g. Composio) are reached as **remote** servers (`url` + `auth_env`), no extra
+package. The `mcp` dependency exists only because this repo was generated with
+MCP enabled.{% endif %}

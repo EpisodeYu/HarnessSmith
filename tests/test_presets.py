@@ -7,6 +7,7 @@ import pytest
 from harnessforge.presets import (
     PresetNotFoundError,
     available_presets,
+    preset_mcp_servers,
     preset_spec_path,
 )
 from harnessforge.spec import load_spec
@@ -22,6 +23,23 @@ def test_coding_assistant_preset_is_a_valid_spec():
     assert spec.roles == {"generation": "default"}
     assert {tool.name for tool in spec.tools} == {"get_current_time", "calculator"}
     assert spec.budget.max_steps == 8
+    # Slice 6: the coding-assistant is an MCP capability baseline.
+    assert spec.mcp.enabled is True
+
+
+def test_coding_assistant_mcp_prefill_is_the_baseline():
+    servers = preset_mcp_servers("coding-assistant")
+    assert [s.name for s in servers] == ["fetch", "git", "desktop-commander"]
+    fetch = next(s for s in servers if s.name == "fetch")
+    assert fetch.safe_tools == ["fetch"]
+    git = next(s for s in servers if s.name == "git")
+    assert "git_status" in git.safe_tools and "git_commit" not in git.safe_tools
+
+
+def test_preset_without_prefill_returns_empty():
+    # examples-style presets with no mcp_prefill.yaml just return [].
+    # (coding-assistant has one; an absent file must be tolerated, not error.)
+    assert preset_mcp_servers("coding-assistant")  # has a prefill
 
 
 def test_unknown_preset_raises():

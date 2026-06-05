@@ -1,0 +1,11 @@
+# Generation-time MCP prefill for the coding-assistant preset.
+#
+# NOT part of HarnessSpec / its snapshot: this only lists which catalog servers
+# to write into the generated repo's runtime config.yaml (mcp.servers + the tool
+# allowlist). The per-tool default-enabled / risk comes from the catalog, so
+# `fetch` + `git` read tools land on, mutating git + Desktop Commander land off
+# (one-click enable). Edit config.yaml after generation to change any of this.
+servers:
+  - fetch
+  - git
+  - desktop-commander

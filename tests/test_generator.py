@@ -10,9 +10,10 @@ import py_compile
 from pathlib import Path
 
 import pytest
+import yaml
 
 from harnessforge.generator import TargetExistsError, generate
-from harnessforge.presets import preset_spec_path
+from harnessforge.presets import preset_mcp_servers, preset_spec_path
 from harnessforge.spec import load_spec
 
 EXAMPLE_SPEC = Path(__file__).resolve().parents[1] / "examples" / "spec.yaml"
@@ -310,11 +311,14 @@ def test_web_index_has_no_unrendered_jinja(tmp_path, spec):
 # --- Slice 4: optional MCP tools (conditional generation) ------------------
 
 
-def test_mcp_disabled_omits_mcp_files_and_deps(tmp_path, preset_spec):
-    """Default (mcp.enabled: false) repo has zero MCP footprint — stays thin."""
+def test_mcp_disabled_omits_mcp_files_and_deps(tmp_path, spec):
+    """A spec with mcp.enabled=false has zero MCP footprint — stays thin.
+
+    (The coding-assistant preset is now an MCP baseline, so the thin assertion
+    uses the plain example spec instead.)"""
     out = tmp_path / "nomcp"
-    generate(preset_spec, out, git_init=False)
-    pkg = out / "src" / "coding_assistant"
+    generate(spec, out, git_init=False)
+    pkg = out / "src" / "agent_harness"
     assert not (pkg / "harness" / "mcp.py").exists()
     assert not (out / "tests" / "test_mcp.py").exists()
     assert not (out / "tests" / "_mcp_dummy_server.py").exists()
@@ -348,7 +352,87 @@ def test_mcp_enabled_generates_files_and_deps(tmp_path, spec):
     config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
     assert "mcp: McpConfig" in config_py
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    # No prefill passed -> empty server list (still a runtime knob).
     assert "mcp:" in config_yaml and "servers: []" in config_yaml
 
     # mcp.py is valid Python even though the mcp SDK isn't installed in this dev env
     py_compile.compile(str(pkg / "harness" / "mcp.py"), doraise=True)
+
+
+# --- Slice 6: MCP capability baseline (catalog prefill into config.yaml) ----
+
+
+def test_coding_assistant_is_an_mcp_baseline(tmp_path, preset_spec):
+    """coding-assistant now enables MCP and carries the baseline dependency."""
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    pkg = out / "src" / "coding_assistant"
+    assert (pkg / "harness" / "mcp.py").is_file()
+    pyproject = (out / "pyproject.toml").read_text(encoding="utf-8")
+    assert "mcp>=" in pyproject
+
+
+def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spec):
+    """The baseline prefill lands fetch/git/DC in config.yaml with the right
+    default allowlist (fetch + git-read on, mutating git + DC off)."""
+    out = tmp_path / "ca"
+    servers = preset_mcp_servers("coding-assistant")
+    generate(preset_spec, out, git_init=False, mcp_servers=servers)
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    # servers prefilled into the runtime file
+    assert "command: uvx" in config_yaml
+    assert "mcp-server-fetch" in config_yaml
+    assert "mcp-server-git" in config_yaml
+    assert "@wonderwhy-er/desktop-commander@latest" in config_yaml
+    # safe read tools marked for read-only paradigms
+    assert "safe_tools:" in config_yaml
+
+    config = yaml.safe_load(config_yaml)
+    enabled = {t["name"] for t in config["tools"] if t["enabled"]}
+    disabled = {t["name"] for t in config["tools"] if not t["enabled"]}
+    assert "fetch__fetch" in enabled
+    assert "git__git_status" in enabled and "git__git_log" in enabled
+    assert "git__git_commit" in disabled and "git__git_add" in disabled
+    # Desktop Commander predefined but every tool default OFF (one-click enable)
+    assert any(n.startswith("desktop-commander__") for n in disabled)
+    assert not any(n.startswith("desktop-commander__") for n in enabled)
+
+
+def test_mcp_prefill_servers_do_not_leak_into_spec_snapshot(tmp_path, preset_spec):
+    """Servers are a runtime knob: they go to config.yaml, never the spec/snapshot."""
+    out = tmp_path / "ca"
+    servers = preset_mcp_servers("coding-assistant")
+    generate(preset_spec, out, git_init=False, mcp_servers=servers)
+
+    snapshot = (out / "harness.spec.yaml").read_text(encoding="utf-8")
+    assert "uvx" not in snapshot
+    assert "mcp-server-fetch" not in snapshot
+    assert "servers" not in snapshot
+    # the snapshot still round-trips into a valid spec (mcp only as enabled flag)
+    reloaded = load_spec(out / "harness.spec.yaml")
+    assert reloaded.mcp.enabled is True
+
+
+def test_mcp_prefill_bakes_uvx_servers_into_dockerfile(tmp_path, preset_spec):
+    """uvx servers are baked into the image; Node-based DC is not."""
+    out = tmp_path / "ca"
+    servers = preset_mcp_servers("coding-assistant")
+    generate(preset_spec, out, git_init=False, mcp_servers=servers)
+
+    dockerfile = (out / "Dockerfile").read_text(encoding="utf-8")
+    assert "uvx mcp-server-fetch --help" in dockerfile
+    assert "uvx mcp-server-git --help" in dockerfile
+    assert "UV_OFFLINE=1" in dockerfile  # forced offline at container runtime
+    assert "desktop-commander" not in dockerfile  # Node-based, not baked
+
+
+def test_mcp_disabled_ignores_prefill(tmp_path, spec):
+    """Prefill only applies when mcp.enabled — otherwise zero MCP footprint."""
+    from harnessforge.catalog import resolve_servers
+
+    out = tmp_path / "nomcp"
+    generate(spec, out, git_init=False, mcp_servers=resolve_servers(["fetch"]))
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8").lower()
+    assert "mcp" not in config_yaml
+    assert "fetch__fetch" not in config_yaml

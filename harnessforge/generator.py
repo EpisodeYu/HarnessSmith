@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from .catalog import CatalogServer
 from .spec import HarnessSpec, load_spec
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -70,13 +71,32 @@ class GenerationResult:
     git_initialized: bool = False
 
 
-def _build_context(spec: HarnessSpec) -> dict:
-    """Build the Jinja render context from a spec."""
+def _build_context(spec: HarnessSpec, mcp_servers: list[CatalogServer]) -> dict:
+    """Build the Jinja render context from a spec (+ optional MCP prefill).
+
+    ``mcp_servers`` is a generation-time convenience (catalog selections) that is
+    rendered into the runtime ``config.yaml`` only when ``spec.mcp.enabled``. It
+    never touches the spec/snapshot — servers are a runtime knob.
+    """
     env_names: list[str] = []
     for profile in spec.llms:
         for name in (profile.api_key_env, profile.base_url_env):
             if name and name not in env_names:
                 env_names.append(name)
+
+    servers = mcp_servers if (spec.mcp.enabled and mcp_servers) else []
+    mcp_server_entries = [s.server_entry() for s in servers]
+    mcp_tool_allowlist: list[dict] = []
+    for s in servers:
+        mcp_tool_allowlist.extend(s.allowlist_entries())
+    # uvx-launched packages get prewarmed + baked into the Docker image so the
+    # generated repo runs offline; Node-based servers are documented, not baked.
+    mcp_uvx_packages: list[str] = []
+    for s in servers:
+        pkg = s.uvx_package
+        if pkg and pkg not in mcp_uvx_packages:
+            mcp_uvx_packages.append(pkg)
+
     return {
         "spec": spec,
         "version": spec.version,
@@ -88,6 +108,9 @@ def _build_context(spec: HarnessSpec) -> dict:
         "paradigms": spec.paradigms,
         "observability": spec.observability,
         "env_names": env_names,
+        "mcp_servers": mcp_server_entries,
+        "mcp_tool_allowlist": mcp_tool_allowlist,
+        "mcp_uvx_packages": mcp_uvx_packages,
     }
 
 
@@ -122,8 +145,13 @@ def generate(
     *,
     templates_dir: Path = TEMPLATES_DIR,
     git_init: bool = True,
+    mcp_servers: list[CatalogServer] | None = None,
 ) -> GenerationResult:
     """Render ``spec`` into ``target_dir``.
+
+    ``mcp_servers`` (catalog selections from ``--mcp-server`` / a preset prefill)
+    are written into the generated ``config.yaml`` when ``spec.mcp.enabled``; they
+    are a runtime knob, never added to the spec/snapshot.
 
     Refuses to write into a non-empty existing directory (raises
     :class:`TargetExistsError`) so an existing repo is never clobbered.
@@ -141,7 +169,7 @@ def generate(
         undefined=StrictUndefined,
         autoescape=False,
     )
-    context = _build_context(spec)
+    context = _build_context(spec, mcp_servers or [])
 
     result = GenerationResult(target_dir=target_dir, project_slug=spec.project_slug)
     for template_file in _iter_template_files(templates_dir):
@@ -184,9 +212,12 @@ def generate_from_spec_file(
     target_dir: str | Path,
     *,
     git_init: bool = True,
+    mcp_servers: list[CatalogServer] | None = None,
 ) -> GenerationResult:
     """Convenience: load a spec file then :func:`generate`."""
-    return generate(load_spec(spec_path), target_dir, git_init=git_init)
+    return generate(
+        load_spec(spec_path), target_dir, git_init=git_init, mcp_servers=mcp_servers
+    )
 
 
 # Env vars that would pin a *parent* virtualenv/project onto the child `uv`
@@ -242,6 +273,38 @@ def lock_dependencies(repo: str | Path) -> None:
         repo,
     )
     (repo / REQUIREMENTS_NAME).write_text(exported.stdout, encoding="utf-8")
+
+
+PREWARM_TIMEOUT_SECONDS = 120
+
+
+def prewarm_mcp_servers(servers: list[CatalogServer]) -> list[str]:
+    """Warm the uv cache for uvx-based MCP servers so the first run is fast/offline.
+
+    Best-effort: ``uvx <pkg> --help`` downloads + builds the ephemeral environment
+    that the generated repo reuses at runtime (the same cache an offline ``uvx``
+    falls back to). Failures (no network, a server without ``--help``) are
+    swallowed — only successfully warmed names are returned — so scaffolding never
+    fails here. Node-based servers are skipped (need Node; warmed on first use).
+    """
+    warmed: list[str] = []
+    for server in servers:
+        pkg = server.uvx_package
+        if not pkg:
+            continue
+        try:
+            subprocess.run(
+                ["uvx", pkg, "--help"],
+                cwd=Path.cwd(),
+                check=True,
+                capture_output=True,
+                env=_clean_env(),
+                timeout=PREWARM_TIMEOUT_SECONDS,
+            )
+            warmed.append(server.name)
+        except (OSError, subprocess.SubprocessError):
+            continue  # offline / unavailable — non-fatal (first run still works online)
+    return warmed
 
 
 def smoke_check(repo: str | Path, project_slug: str) -> None:

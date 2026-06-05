@@ -53,8 +53,17 @@ def run(
         prompt = typer.prompt("You")
 {% if spec.mcp.enabled %}    from ..harness.mcp import McpManager, register_mcp_tools
 
-    mcp_manager = McpManager(config.mcp)
-    if config.mcp.servers:
+    # Only launch servers with at least one allowlisted (enabled) tool, so a
+    # predefined-but-off server (e.g. Desktop Commander) stays dormant until you
+    # enable one of its tools in config.yaml.
+    _active = {n.split("__", 1)[0] for n in config.enabled_tool_names() if "__" in n}
+    _servers = [s for s in config.mcp.servers if s.name in _active]
+    mcp_manager = (
+        McpManager(config.mcp.model_copy(update={"servers": _servers}))
+        if _servers
+        else None
+    )
+    if mcp_manager is not None:
         mcp_manager.start()
         register_mcp_tools(config, mcp_manager)
 {% endif %}    router = ClientRouter(config, mock=mock)
@@ -87,7 +96,7 @@ def run(
         f"tokens={result.trace.total_tokens} cost=${result.trace.cost_usd:.4f}",
         fg=typer.colors.BRIGHT_BLACK,
     )
-{% if spec.mcp.enabled %}    if config.mcp.servers:
+{% if spec.mcp.enabled %}    if mcp_manager is not None:
         mcp_manager.close()
 {% endif %}
 {% if interfaces.web %}
@@ -113,8 +122,10 @@ def serve(
     config = load_config(config_path)
 {% if spec.mcp.enabled %}    from ..harness.mcp import McpManager, register_mcp_tools
 
-    if config.mcp.servers:
-        mcp_manager = McpManager(config.mcp)
+    _active = {n.split("__", 1)[0] for n in config.enabled_tool_names() if "__" in n}
+    _servers = [s for s in config.mcp.servers if s.name in _active]
+    if _servers:
+        mcp_manager = McpManager(config.mcp.model_copy(update={"servers": _servers}))
         mcp_manager.start()
         register_mcp_tools(config, mcp_manager)
 {% endif %}    uvicorn.run(create_app(config, mock=mock), host=host, port=port)

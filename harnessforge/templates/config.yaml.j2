@@ -26,7 +26,11 @@ prompts:
 tools:
 {% for tool in tools %}  - name: {{ tool.name }}
     enabled: {{ tool.enabled | tojson }}
-{% endfor %}
+{% endfor %}{% if mcp_tool_allowlist %}  # MCP tools (allowlist): only enabled `<server>__<tool>` entries are offered to
+  # the model. Read tools are on; mutating/shell tools are off — flip to enable.
+{% for entry in mcp_tool_allowlist %}  - name: {{ entry.name }}
+    enabled: {{ entry.enabled | tojson }}
+{% endfor %}{% endif %}
 # Context-window management (runtime knob). truncate = keep system + recent turns;
 # summarize = fold older turns via the `compaction` role; none = off.
 # Unset max_context_tokens means no limit (default behaves like a plain loop).
@@ -59,14 +63,21 @@ budget:
 # MCP tool servers (runtime knob — add/remove without regenerating). Each server
 # uses stdio (set `command`) OR remote Streamable HTTP (set `url`). Secrets are
 # referenced by env-var NAME only, never values. A discovered tool is offered to
-# the model only when allowlisted in `tools:` above as `<server>__<tool>`.
+# the model only when allowlisted in `tools:` above as `<server>__<tool>`; a
+# server is only launched when at least one of its tools is enabled. `safe_tools`
+# marks read-only tools so read-only paradigms (plan/ask) may use them.
 mcp:
-  servers: []
-  # - name: filesystem          # stdio: launched as a subprocess
-  #   command: npx
-  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
-  #   env: []                    # env-var NAMES to inject into the subprocess
-  # - name: github               # remote Streamable HTTP
-  #   url: https://api.example.com/mcp/
-  #   auth_env: GITHUB_MCP_TOKEN  # env-var NAME holding a bearer token
+{% if mcp_servers %}  servers:
+{% for s in mcp_servers %}    - name: {{ s.name }}
+{% if s.get("command") %}      command: {{ s.command }}
+      args: {{ s.args | tojson }}
+{% if s.get("env") %}      env: {{ s.env | tojson }}            # env-var NAMES injected into the subprocess
+{% endif %}{% endif %}{% if s.get("url") %}      url: {{ s.url }}
+{% if s.get("auth_env") %}      auth_env: {{ s.auth_env }}        # env-var NAME holding a bearer token
+{% endif %}{% endif %}{% if s.get("safe_tools") %}      safe_tools: {{ s.safe_tools | tojson }}
+{% endif %}{% endfor %}{% else %}  servers: []
+{% endif %}  connect_timeout_seconds: 30   # per-server startup timeout; a slow/failing server is skipped, not fatal
+  # Add more from the catalog (`harnessforge new --mcp-server <name>`) or paste any
+  # MCP marketplace block here (Smithery / Glama / MCP.so / official Registry).
+  # Remote (SaaS, e.g. Composio) servers use `url` + `auth_env` instead of command.
 {% endif %}

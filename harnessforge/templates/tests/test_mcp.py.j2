@@ -12,20 +12,21 @@ import pytest
 
 from {{ project_slug }}.harness.config import Config, McpConfig, McpServerConfig
 from {{ project_slug }}.harness.mcp import McpManager, _bearer_headers, register_mcp_tools
-from {{ project_slug }}.harness.tools import HIGH, Registry, ToolError
+from {{ project_slug }}.harness.tools import HIGH, SAFE, Registry, ToolError
 
 DUMMY = str(Path(__file__).parent / "_mcp_dummy_server.py")
 
 
-def _config(tools):
-    return Config.model_validate(
-        {
-            "llms": [{"name": "default", "model": "m"}],
-            "roles": {"generation": "default"},
-            "tools": tools,
-            "observability": {"trace": False},
-        }
-    )
+def _config(tools, servers=None):
+    data = {
+        "llms": [{"name": "default", "model": "m"}],
+        "roles": {"generation": "default"},
+        "tools": tools,
+        "observability": {"trace": False},
+    }
+    if servers is not None:
+        data["mcp"] = {"servers": servers}
+    return Config.model_validate(data)
 
 
 @pytest.fixture
@@ -65,6 +66,33 @@ def test_disabled_allowlist_entry_is_not_registered(manager):
     registry = Registry()
     registered = register_mcp_tools(_config([{"name": "dummy__echo", "enabled": False}]), manager, registry)
     assert registered == []
+
+
+def test_safe_tools_grade_risk_and_read_only_paradigms_see_them(manager):
+    """`safe_tools` marks read-only tools as risk=safe; everything else is high.
+
+    Read-only paradigms (plan/ask) call active_names(allow_high_risk=False), so a
+    high-risk MCP tool is dropped while a safe one is still offered.
+    """
+    registry = Registry()
+    config = _config(
+        [
+            {"name": "dummy__echo", "enabled": True},
+            {"name": "dummy__add", "enabled": True},
+        ],
+        servers=[
+            {"name": "dummy", "command": sys.executable, "args": [DUMMY], "safe_tools": ["echo"]}
+        ],
+    )
+    register_mcp_tools(config, manager, registry)
+
+    assert registry.get("dummy__echo").risk == SAFE
+    assert registry.get("dummy__add").risk == HIGH
+
+    enabled = config.enabled_tool_names()
+    read_only = registry.active_names(enabled, allow_high_risk=False)
+    assert "dummy__echo" in read_only
+    assert "dummy__add" not in read_only
 
 
 def test_remote_server_injects_bearer_header(monkeypatch):

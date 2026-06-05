@@ -19,7 +19,7 @@ import threading
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
 
-from .tools import HIGH, Registry, Tool
+from .tools import HIGH, SAFE, Registry, Tool
 from .tools import registry as default_registry
 
 if TYPE_CHECKING:
@@ -100,23 +100,26 @@ class McpManager:
             self._loop.close()
 
     async def _main(self) -> None:
-        from mcp import ClientSession
-
         self._inbox = asyncio.Queue()
+        timeout = self._config.connect_timeout_seconds
         async with AsyncExitStack() as stack:
             for server in self._config.servers:
                 try:
-                    streams = await stack.enter_async_context(_open_streams(server))
-                    session = await stack.enter_async_context(
-                        ClientSession(streams[0], streams[1])
-                    )
-                    await session.initialize()
-                    self._sessions[server.name] = session
-                    self.discovered[server.name] = list((await session.list_tools()).tools)
-                except Exception as exc:  # failure isolation
+                    await asyncio.wait_for(self._connect(stack, server), timeout)
+                except Exception as exc:  # failure isolation (incl. timeout)
                     self.errors[server.name] = str(exc)
             self._ready.set_result(True)
             await self._serve()
+
+    async def _connect(self, stack: AsyncExitStack, server: McpServerConfig) -> None:
+        """Open one server's session and list its tools (under a startup timeout)."""
+        from mcp import ClientSession
+
+        streams = await stack.enter_async_context(_open_streams(server))
+        session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
+        await session.initialize()
+        self._sessions[server.name] = session
+        self.discovered[server.name] = list((await session.list_tools()).tools)
 
     async def _serve(self) -> None:
         assert self._inbox is not None
@@ -152,13 +155,17 @@ def register_mcp_tools(
     """Register allowlisted MCP tools into ``registry`` (default: the shared one).
 
     Only tools whose ``{server}__{tool}`` name is enabled in ``config.tools`` are
-    registered — a non-allowlisted MCP tool is never connected to the model. MCP
-    tools default to ``risk=high`` (external code; opt in deliberately).
+    registered — a non-allowlisted MCP tool is never connected to the model. Risk
+    is per-tool: a tool listed in its server's ``safe_tools`` registers as
+    ``risk=safe`` (read-only; offered to plan/ask); every other tool defaults to
+    ``risk=high`` (mutating/external; agent-only, opt in deliberately).
     """
     registry = registry or default_registry
     allowed = config.enabled_tool_names()
+    safe_by_server = {s.name: set(s.safe_tools) for s in config.mcp.servers}
     registered: list[str] = []
     for server, tools in manager.discovered.items():
+        safe = safe_by_server.get(server, set())
         for tool in tools:
             name = f"{server}__{tool.name}"
             if name not in allowed:
@@ -169,7 +176,7 @@ def register_mcp_tools(
                     description=tool.description or "",
                     parameters=tool.inputSchema or {"type": "object", "properties": {}},
                     func=_make_caller(manager, server, tool.name),
-                    risk=HIGH,
+                    risk=SAFE if tool.name in safe else HIGH,
                 )
             )
             registered.append(name)

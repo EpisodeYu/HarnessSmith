@@ -1,5 +1,9 @@
-# coding-assistant preset — a minimal, runnable agent harness (HarnessForge L1).
-# Generates a thin function-calling loop with two safe built-in tools.
+# coding-assistant preset — a runnable agent harness with a real capability
+# baseline (HarnessForge Slice 6). Beyond the two safe built-in demo tools it
+# turns on MCP (`mcp.enabled: true`) and prefills the catalog baseline into
+# config.yaml: `fetch` + `git` read tools on, mutating git + Desktop Commander
+# predefined but off. The baseline servers land in config.yaml (runtime), NOT in
+# this spec — see presets/coding-assistant/mcp_prefill.yaml.
 version: "0.1"
 project_slug: coding_assistant
 
@@ -26,6 +30,9 @@ tools:
 interfaces:
   cli: true
   web: false
+
+mcp:
+  enabled: true
 
 observability:
   trace: true
