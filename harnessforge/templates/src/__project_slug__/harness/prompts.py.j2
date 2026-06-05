@@ -1,4 +1,4 @@
-"""Assemble the system prompt from config (system + optional persona{% if spec.skills.enabled %} + skills{% endif %})."""
+"""Assemble the system prompt from config (system + optional persona{% if spec.skills.enabled %} + skills{% endif %}{% if spec.mcp.enabled %} + environment{% endif %})."""
 
 from __future__ import annotations
 
@@ -7,8 +7,40 @@ from .config import Config
 {% endif %}
 _DEFAULT_SYSTEM = "You are a helpful assistant. Use the available tools when they help."
 
+{% if spec.mcp.enabled %}
+def _environment_note(config: Config) -> str:
+    """Tell the model its OS/shell and surface installed-but-disabled capabilities.
 
-def build_system_prompt(config: Config) -> str:
+    Shell commands are OS-specific, so the model is told the host platform; and any
+    configured MCP server with no enabled tool (e.g. a high-risk shell/file server
+    kept off by default) is named with a hint to enable it — so a capability is
+    never silently missing and the model can guide the user to turn it on.
+    """
+    if not config.mcp.servers:
+        return ""
+    import platform
+
+    system = platform.system() or "an unknown OS"
+    shell = "PowerShell or cmd" if system == "Windows" else "a POSIX shell (sh/bash)"
+    lines = [
+        f"Environment: the host OS is {system}; shell commands (if any tool runs "
+        f"them) use {shell}, so write commands for that shell."
+    ]
+    active = {n.split("__", 1)[0] for n in config.enabled_tool_names() if "__" in n}
+    dormant = [s for s in config.mcp.servers if s.name not in active]
+    if dormant:
+        lines.append(
+            "These capabilities are installed but currently disabled (off by "
+            "default — typically shell/file writes). If a task needs one, tell the "
+            "user to enable its tools in config.yaml (e.g. `<server>__<tool>: true`):"
+        )
+        for server in dormant:
+            desc = f" — {server.description}" if server.description else ""
+            lines.append(f"- {server.name}{desc}")
+    return "\n".join(lines)
+
+
+{% endif %}def build_system_prompt(config: Config) -> str:
     prompts = config.prompts
     parts = [prompts.system or _DEFAULT_SYSTEM]
     if prompts.persona:
@@ -19,4 +51,7 @@ def build_system_prompt(config: Config) -> str:
     skills_section = build_skills_prompt(config)
     if skills_section:
         parts.append(skills_section)
+{% endif %}{% if spec.mcp.enabled %}    environment = _environment_note(config)
+    if environment:
+        parts.append(environment)
 {% endif %}    return "\n\n".join(parts)

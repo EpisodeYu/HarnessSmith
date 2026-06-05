@@ -188,12 +188,18 @@ from [MCP](https://modelcontextprotocol.io) servers. `harness/mcp.py` connects
 servers and registers their tools into the same registry as the built-ins, so
 the loop is untouched. `config.yaml` is prefilled with a baseline:
 
-- **`fetch`** (`uvx mcp-server-fetch`) — web fetch; **on** by default.
+- **`fetch`** (`uvx mcp-server-fetch`) — fetch a known URL as markdown; **on**.
+- **`ddg-search`** (`uvx duckduckgo-mcp-server`) — keyless web **search** +
+  `fetch_content`; **on** by default (gives the agent real "search → read" research).
 - **`git`** (`uvx mcp-server-git`) — read tools (`git_status`/`git_diff`/`git_log`/
   …) **on**; mutating tools (`git_commit`/`git_add`/…) **off**.
 - **`desktop-commander`** (`npx @wonderwhy-er/desktop-commander`) — terminal +
   filesystem; predefined but **all off** (high-risk). Needs Node. Flip a tool to
   `true` to enable.
+
+The system prompt tells the model which capabilities are installed-but-disabled
+(and how to enable them), so a turned-off server like Desktop Commander is never
+*silently* missing — the agent will ask you to enable it when a task needs it.
 
 A discovered tool is offered to the model **only** when allowlisted in `tools:`
 as `<server>__<tool>`. Per-tool risk: a name listed in the server's `safe_tools`
@@ -220,11 +226,24 @@ tools:
 
 ### Offline & Docker
 
-uvx-based servers (fetch, git) download on first use, then run from cache. The
-generator prewarms that cache (`harnessforge new` / `--prewarm`), and the
-`Dockerfile` warms it at build time and sets `UV_OFFLINE=1`, so `docker run`
+uvx-based servers (fetch, ddg-search, git) download on first use, then run from
+cache. The generator prewarms that cache (`harnessforge new` / `--prewarm`), and
+the `Dockerfile` warms it at build time and sets `UV_OFFLINE=1`, so `docker run`
 works with no network. Node-based servers (Desktop Commander) need Node on the
 host and are not baked.
+
+### Windows
+
+The harness core (uv, Python, Typer) is cross-platform, but a few MCP details
+differ on native Windows:
+
+- **Docker is the smoothest path** — the generated image is Linux, so `docker run`
+  (via Docker Desktop / WSL2) sidesteps every Windows-specific quirk below.
+- **`fetch` on native Windows** may need `PYTHONIOENCODING=utf-8` (a known
+  mcp-server-fetch issue); set it in your environment if `fetch` times out.
+- **Shell commands are OS-specific.** The system prompt tells the model the host
+  OS so it writes PowerShell/cmd (not bash) when a shell tool is enabled; Desktop
+  Commander also has a `defaultShell` setting.
 
 ### More servers (marketplace)
 

@@ -71,7 +71,8 @@ budget:
 mcp:
 {% if mcp_servers %}  servers:
 {% for s in mcp_servers %}    - name: {{ s.name }}
-{% if s.get("command") %}      command: {{ s.command }}
+{% if s.get("description") %}      description: {{ s.description | tojson }}
+{% endif %}{% if s.get("command") %}      command: {{ s.command }}
       args: {{ s.args | tojson }}
 {% if s.get("env") %}      env: {{ s.env | tojson }}            # env-var NAMES injected into the subprocess
 {% endif %}{% endif %}{% if s.get("url") %}      url: {{ s.url }}

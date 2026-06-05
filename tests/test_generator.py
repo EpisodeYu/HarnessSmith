@@ -383,15 +383,17 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     # servers prefilled into the runtime file
     assert "command: uvx" in config_yaml
     assert "mcp-server-fetch" in config_yaml
+    assert "duckduckgo-mcp-server" in config_yaml  # keyless web search
     assert "mcp-server-git" in config_yaml
     assert "@wonderwhy-er/desktop-commander@latest" in config_yaml
-    # safe read tools marked for read-only paradigms
-    assert "safe_tools:" in config_yaml
+    # safe read tools marked for read-only paradigms + a description per server
+    assert "safe_tools:" in config_yaml and "description:" in config_yaml
 
     config = yaml.safe_load(config_yaml)
     enabled = {t["name"] for t in config["tools"] if t["enabled"]}
     disabled = {t["name"] for t in config["tools"] if not t["enabled"]}
     assert "fetch__fetch" in enabled
+    assert "ddg-search__search" in enabled and "ddg-search__fetch_content" in enabled
     assert "git__git_status" in enabled and "git__git_log" in enabled
     assert "git__git_commit" in disabled and "git__git_add" in disabled
     # Desktop Commander predefined but every tool default OFF (one-click enable)
@@ -422,6 +424,7 @@ def test_mcp_prefill_bakes_uvx_servers_into_dockerfile(tmp_path, preset_spec):
 
     dockerfile = (out / "Dockerfile").read_text(encoding="utf-8")
     assert "uvx mcp-server-fetch --help" in dockerfile
+    assert "uvx duckduckgo-mcp-server --help" in dockerfile
     assert "uvx mcp-server-git --help" in dockerfile
     assert "UV_OFFLINE=1" in dockerfile  # forced offline at container runtime
     assert "desktop-commander" not in dockerfile  # Node-based, not baked

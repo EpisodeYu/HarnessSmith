@@ -31,6 +31,18 @@ servers:
     tools:
       - {name: fetch, risk: safe, default_enabled: true}
 
+  ddg-search:
+    description: Web search via DuckDuckGo (keyless) plus fetching a result page as markdown.
+    transport: stdio
+    command: uvx
+    args: [duckduckgo-mcp-server]
+    requires: uv
+    source: https://github.com/nickclyde/duckduckgo-mcp-server
+    updated: "2026-06-04"
+    tools:
+      - {name: search, risk: safe, default_enabled: true}
+      - {name: fetch_content, risk: safe, default_enabled: true}
+
   git:
     description: Inspect and operate on a local Git repository (read tools on; write tools off).
     transport: stdio

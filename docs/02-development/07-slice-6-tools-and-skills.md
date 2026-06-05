@@ -95,6 +95,12 @@
 - [x] **⑥ 推进方式——人 2026-06-05 选 split**:**先做 Part A(MCP 工具基线 + catalog + 离线/Docker + 风险分级)**跑绿 §3 相关门禁并 commit,**再做 Part B(标准 SKILL)**单独跑绿门禁 commit。
 - **软确认(已自主定,`CLAUDE.md §5.3`)**:基线 allowlist = fetch 开 / git 读开写关 / DC 全关(预填一键开);catalog 除基线三项外按需收候选(官方 `time`/`memory`/`sequential-thinking`/`everything`,归档 `github`/`postgres`),不阻塞本片;`read_skill` 内置工具=低风险默认可读(只读技能目录内 `SKILL.md`);SKILL 注入点在 `prompts.build_system_prompt`(所有范式共用)。
 
+### 4.1 后续增强决策(人 2026-06-05,基线落地后追加)
+
+- [x] **⑦ 联网搜索进基线(人选 A)**:`fetch` 只能取已知 URL、非搜索;加 `ddg-search`(`uvx duckduckgo-mcp-server`,**免 key**,`search`+`fetch_content` 标 `safe`)进 catalog 并**默认开**进 coding-assistant 基线,给 agent 真正的"搜→读"。uvx 系,可预热/烤进 Docker。
+- [x] **⑧ shell/写默认关如何不"静默失能"(人选 X,守 §6)**:shell/写仍默认关(DC 一键开、需 Node),但**系统提示注入"环境感知"**——预置但禁用的 server(名+description+如何在 `config.yaml` 开)由 agent 主动暴露,用户/agent 不会"没注意到开关"。`McpServerConfig` 加 `description`(运行期、非 spec)。**不破 §6 红线、不强制 Node**(默认能力靠只读 uvx:fetch+ddg+git 读)。
+- [x] **⑨ Windows(人选 A)**:同一处"环境感知"注入 `platform.system()` + shell 提示(让模型在 Windows 写 PowerShell/cmd 而非 bash);README/AGENTS 补 Windows 注意(优先 Docker/Linux;`fetch` 原生 Windows 需 `PYTHONIOENCODING=utf-8`;DC `defaultShell`)。**环境感知仅 `spec.mcp.enabled` 时注入、且 servers 非空才出**,薄。**未做 Windows 一等公民**(CI 加 Windows / 字面量 env 值)——留 v1+。
+
 ## 5. 本 slice 注意
 
 - **能力来自 MCP(非 built-in)**:不自写工具(免造轮子+维护);`fetch`/`git` 读默认开、Desktop Commander/写/shell 默认关(守 `01 §6`)。`coding-assistant` 因此带 `mcp` 依赖(不再极薄),另留无 MCP 的极薄 example 守 thin/golden。

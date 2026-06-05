@@ -7,5 +7,6 @@
 # (one-click enable). Edit config.yaml after generation to change any of this.
 servers:
   - fetch
+  - ddg-search
   - git
   - desktop-commander

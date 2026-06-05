@@ -63,6 +63,8 @@ class CatalogServer:
     def server_entry(self) -> dict:
         """A ``config.yaml`` ``mcp.servers`` entry (env-var NAMES only)."""
         entry: dict = {"name": self.name}
+        if self.description:
+            entry["description"] = self.description
         if self.command:
             entry["command"] = self.command
             entry["args"] = list(self.args)

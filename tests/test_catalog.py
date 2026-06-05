@@ -20,6 +20,16 @@ def test_catalog_loads_baseline_servers():
     assert "fetch" in available_servers()
 
 
+def test_ddg_search_is_keyless_uvx_web_search():
+    ddg = get_server("ddg-search")
+    assert ddg.command == "uvx"
+    assert ddg.uvx_package == "duckduckgo-mcp-server"
+    assert ddg.auth_env is None and ddg.env == []  # keyless
+    assert ddg.safe_tools == ["search", "fetch_content"]  # read-only -> usable by plan/ask
+    allow = {e["name"]: e["enabled"] for e in ddg.allowlist_entries()}
+    assert allow["ddg-search__search"] is True
+
+
 def test_fetch_is_a_safe_uvx_server():
     fetch = get_server("fetch")
     assert fetch.command == "uvx"

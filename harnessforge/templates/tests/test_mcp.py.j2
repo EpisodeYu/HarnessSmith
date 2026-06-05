@@ -12,6 +12,7 @@ import pytest
 
 from {{ project_slug }}.harness.config import Config, McpConfig, McpServerConfig
 from {{ project_slug }}.harness.mcp import McpManager, _bearer_headers, register_mcp_tools
+from {{ project_slug }}.harness.prompts import build_system_prompt
 from {{ project_slug }}.harness.tools import HIGH, SAFE, Registry, ToolError
 
 DUMMY = str(Path(__file__).parent / "_mcp_dummy_server.py")
@@ -93,6 +94,33 @@ def test_safe_tools_grade_risk_and_read_only_paradigms_see_them(manager):
     read_only = registry.active_names(enabled, allow_high_risk=False)
     assert "dummy__echo" in read_only
     assert "dummy__add" not in read_only
+
+
+def test_environment_note_surfaces_disabled_capabilities():
+    """The system prompt names the host OS and any installed-but-disabled server,
+    so a turned-off capability (e.g. shell/file write) is never silently missing."""
+    config = Config.model_validate(
+        {
+            "llms": [{"name": "default", "model": "m"}],
+            "roles": {"generation": "default"},
+            "prompts": {"system": "You are a test agent."},
+            "tools": [
+                {"name": "git__git_status", "enabled": True},  # git is active
+                {"name": "shellbox__run", "enabled": False},  # shellbox stays dormant
+            ],
+            "observability": {"trace": False},
+            "mcp": {
+                "servers": [
+                    {"name": "git", "command": "uvx", "args": ["mcp-server-git"], "safe_tools": ["git_status"]},
+                    {"name": "shellbox", "description": "Run shell commands.", "command": "x"},
+                ]
+            },
+        }
+    )
+    prompt = build_system_prompt(config)
+    assert "host OS is" in prompt  # OS/shell awareness for correct commands
+    assert "- shellbox" in prompt and "Run shell commands." in prompt  # dormant surfaced
+    assert "- git" not in prompt  # active server is not listed as disabled
 
 
 def test_remote_server_injects_bearer_header(monkeypatch):

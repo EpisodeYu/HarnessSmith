@@ -148,6 +148,7 @@ class McpServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
+    description: str = ""  # human/agent-readable capability summary (for prompts/UX)
     # stdio transport (launched as a subprocess):
     command: str | None = None
     args: list[str] = Field(default_factory=list)
