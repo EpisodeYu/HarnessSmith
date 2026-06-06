@@ -112,12 +112,30 @@ def run(
 {% endif %}
 {% if interfaces.web %}
 
+def _find_free_port(preferred: int, host: str = "127.0.0.1") -> int:
+    """Return a bindable port: try ``preferred`` upward, else an OS-assigned one."""
+    import socket
+
+    for candidate in range(preferred, preferred + 64):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind((host, candidate))
+                return candidate
+            except OSError:
+                continue
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return sock.getsockname()[1]
+
+
 @app.command()
 def serve(
     host: str = typer.Option(
         "127.0.0.1", "--host", help="Bind host (use 0.0.0.0 to expose on the network)."
     ),
-    port: int = typer.Option(8000, "--port", help="Bind port."),
+    port: int = typer.Option(
+        0, "--port", help="Bind port; 0 (default) auto-picks a free port from 8000."
+    ),
     config_path: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to config.yaml."
     ),
@@ -130,6 +148,7 @@ def serve(
 
     from .web import create_app
 
+    bind_port = port if port else _find_free_port(8000, host)
     config = load_config(config_path)
 {% if spec.mcp.enabled %}    from ..harness.mcp import McpManager, register_mcp_tools
 
@@ -139,7 +158,11 @@ def serve(
         mcp_manager = McpManager(config.mcp.model_copy(update={"servers": _servers}))
         mcp_manager.start()
         register_mcp_tools(config, mcp_manager)
-{% endif %}    uvicorn.run(create_app(config, mock=mock), host=host, port=port)
+{% endif %}    typer.secho(
+        f"Serving on http://{host}:{bind_port}  (open this; Ctrl-C to stop)",
+        fg=typer.colors.GREEN,
+    )
+    uvicorn.run(create_app(config, mock=mock), host=host, port=bind_port)
 {% endif %}
 
 if __name__ == "__main__":

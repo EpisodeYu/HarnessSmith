@@ -8,6 +8,7 @@ so the repo ships a deterministic dependency set).
 
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 
 import typer
@@ -154,10 +155,26 @@ def new(
     )
 
 
+def _find_free_port(preferred: int, *, host: str = "127.0.0.1", tries: int = 64) -> int:
+    """Return a bindable port: try ``preferred`` upward, else an OS-assigned one."""
+    for candidate in range(preferred, preferred + tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind((host, candidate))
+                return candidate
+            except OSError:
+                continue
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return sock.getsockname()[1]
+
+
 @app.command()
 def wizard(
     host: str = typer.Option("127.0.0.1", help="Host to bind the wizard to."),
-    port: int = typer.Option(8000, help="Port to bind the wizard to."),
+    port: int = typer.Option(
+        0, "--port", help="Port to bind to; 0 (default) auto-picks a free port from 8000."
+    ),
 ) -> None:
     """Launch the single-page spec wizard (needs the optional `wizard` extra)."""
     try:
@@ -172,11 +189,12 @@ def wizard(
             err=True,
         )
         raise typer.Exit(code=1) from exc
+    bind_port = port if port else _find_free_port(8000, host=host)
     typer.secho(
-        f"HarnessForge wizard → http://{host}:{port}  (Ctrl-C to stop)",
+        f"HarnessForge wizard → http://{host}:{bind_port}  (open this; Ctrl-C to stop)",
         fg=typer.colors.GREEN,
     )
-    uvicorn.run(create_app(), host=host, port=port)
+    uvicorn.run(create_app(), host=host, port=bind_port)
 
 
 @app.command()

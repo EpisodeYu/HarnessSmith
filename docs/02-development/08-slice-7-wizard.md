@@ -33,7 +33,7 @@
 - `wizard/`(新目录,`[wizard]` extra 门控):
   - `wizard/app.py` — FastAPI:`GET /`(单页)、`GET /meta`(范式/catalog/presets 元数据)、`POST /spec`(对缺省行为性字段烤 `_BAKED_DEFAULTS` → `HarnessSpec` 校验 → spec YAML + `harnessforge new` 命令 / 字段级错误)、`POST /generate`(可选一键 `generate()` render-only,产物落盘后由用户 `uv sync`)。`_BAKED_DEFAULTS` 只在字段缺省时填(显式/手写 spec 优先)。
   - `wizard/static/index.html` — 无构建**精简单页**:**首项语言下拉(中/英)** + `{zh,en}` i18n 字典(切换换 wizard UI),该选择写入 `spec.language`(贯穿到产物 UI 默认);**只两组结构选项**——基本(显示名→slug、`paradigms` 多选+默认)与 能力(`interfaces.web`、`mcp.enabled`+catalog 多选、`skills.enabled`)+ 产出;显示名→slug 前端派生。
-- `cli.py` — `harnessforge wizard`(懒加载 uvicorn + wizard app,默认 `127.0.0.1:8000`;未装 extra 给友好提示)。
+- `cli.py` — `harnessforge wizard`(懒加载 uvicorn + wizard app;**默认自动挑空闲端口**(`_find_free_port`,从 8000 起,`--port` 可固定)并打印可打开地址;未装 extra 给友好提示)。产物 `serve` 同样默认自动挑端口 + 打印地址。
 - `pyproject.toml` — 新增 `[project.optional-dependencies] wizard = [fastapi, uvicorn]`;`dev` 加 fastapi/uvicorn/httpx 供 `fastapi.testclient` 测试。
 
 产物侧(`harnessforge/templates/`,`interfaces.web` 门控):

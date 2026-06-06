@@ -11,7 +11,7 @@
     <header class="flex items-center justify-between gap-4">
       <h1 class="text-xl font-semibold" data-i18n="app_title">HarnessForge 向导</h1>
       <label class="flex items-center gap-2 text-sm">
-        <span data-i18n="lang_label">语言</span>
+        <span class="text-slate-500">语言 / Language</span>
         <select id="lang" class="rounded-lg border px-2 py-1">
           <option value="zh">中文</option>
           <option value="en">English</option>
@@ -20,7 +20,7 @@
     </header>
 
     <p class="text-xs text-slate-500" data-i18n="intro_note">
-      本向导只决定「生成什么」(结构)。LLM、提示词、预算、上下文等运行期配置在生成后于产物的配置页 / .env 里设置 —— 向导会带好可用默认值,先低成本拥有你的 agent。
+      本向导只决定「生成什么」(结构)。LLM、提示词、预算等运行期配置在生成后于产物的配置页里调整;向导会带好可用默认值,先低成本拥有你的 agent。
     </p>
 
     <!-- Basic -->
@@ -111,8 +111,8 @@
 
     const I18N = {
       zh: {
-        app_title: "HarnessForge 向导", lang_label: "语言",
-        intro_note: "本向导只决定「生成什么」(结构)。LLM、提示词、预算、上下文等运行期配置在生成后于产物的配置页 / .env 里设置 —— 向导会带好可用默认值,先低成本拥有你的 agent。",
+        app_title: "HarnessForge 向导",
+        intro_note: "本向导只决定「生成什么」(结构)。LLM、提示词、预算等运行期配置在生成后于产物的配置页里调整;向导会带好可用默认值,先低成本拥有你的 agent。",
         basic_heading: "基本", display_name_label: "显示名",
         display_name_hint: "人类可读名称,用于产物 UI 标题 / README。",
         slug_label: "包名 (project_slug)",
@@ -132,8 +132,8 @@
         ok_produced: "spec 已校验通过。", ok_generated: "已生成", err_fix: "请修正以下字段:",
       },
       en: {
-        app_title: "HarnessForge wizard", lang_label: "Language",
-        intro_note: "This wizard only decides WHAT to generate (structure). LLM, prompts, budget and context are configured after generation in the product's config page / .env — the wizard ships working defaults so you can own an agent cheaply first.",
+        app_title: "HarnessForge wizard",
+        intro_note: "This wizard only decides WHAT to generate (structure). LLM, prompts and budget are adjusted later in the generated product's config page; it ships working defaults so you can own an agent quickly.",
         basic_heading: "Basic", display_name_label: "Display name",
         display_name_hint: "Human-readable name; used for the product UI title / README.",
         slug_label: "Package name (project_slug)",
