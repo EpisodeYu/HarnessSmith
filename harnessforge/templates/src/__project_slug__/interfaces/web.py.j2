@@ -18,11 +18,19 @@ import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
-from ..harness.config import Config, ConfigError, load_config, set_env_value
+from ..harness.config import (
+    Config,
+    ConfigError,
+    LLMProfileConfig,
+    load_config,
+    resolve_env,
+    set_env_value,
+)
 from ..harness.hooks import Hooks
-from ..harness.llm import ClientRouter, LLMResponse, ToolCall
+from ..harness.llm import ClientRouter, LLMResponse, OpenAIClient, ToolCall
 from ..harness.loop import run as run_loop
 
 _INDEX_HTML = (Path(__file__).parent / "web_index.html").read_text(encoding="utf-8")
@@ -149,6 +157,40 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
         except ConfigError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         return {"ok": True, "name": name}  # never return the value
+
+    @app.post("/test-llm")
+    async def test_llm(request: Request) -> dict:
+        """Probe one LLM profile with a real one-shot call. Returns ``{ok, error}``.
+
+        Uses the SAME client path as the loop (so the result reflects real usage):
+        sampling knobs are sent only when set. Secrets stay server-side — the
+        request carries the env-var NAME, the key is resolved from .env here.
+        Obvious config gaps (no model, unresolved key with no custom base_url) are
+        reported up front without a network call.
+        """
+        body = await request.json()
+        try:
+            profile = LLMProfileConfig.model_validate(body)
+        except Exception as exc:
+            return {"ok": False, "error": f"invalid profile: {exc}"}
+        if not profile.model.strip():
+            return {"ok": False, "error": "model is required"}
+        api_key = resolve_env(profile.api_key_env)
+        base_url = resolve_env(profile.base_url_env)
+        if not api_key and not base_url:
+            return {"ok": False, "error": (
+                f"no API key: env var {profile.api_key_env} is not set in .env or the "
+                "environment — set its value first (or configure a custom base_url)"
+            )}
+
+        def _probe() -> None:
+            OpenAIClient(profile).complete([{"role": "user", "content": "ping"}], None)
+
+        try:
+            await run_in_threadpool(_probe)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     @app.post("/config")
     async def set_config(request: Request):

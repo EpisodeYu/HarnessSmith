@@ -75,6 +75,12 @@
 - **temperature 默认值(调研后定)**:推理模型(GPT-5.x / o 系)**拒绝任何 temperature、要求省略**;普通模型省略即用 provider 默认(≈1)。故**默认留空=不传**才是正确且 provider-agnostic 的做法(非硬编码 1);UI 占位「模型默认(≈1)」。
 - 自验证:快测 110 + golden 11(含 web/mcp/范式/skills/wizard + Docker×2 + uvx)全绿;真实 `serve` 浏览器走查:无 LLM 横幅+禁用生效、多配置/高级/定价分区、key&url 写 `.env`、`reasoning_effort`+per-million 单价经 `POST /config` 正确回存。
 
+#### 实现说明(2026-06-06 续 2:每配置「测试」按钮 + 角色下拉修复)
+
+- **每个 LLM 配置加「测试」按钮**:新增后端 `POST /test-llm`——用该配置走**与 loop 同一条** `OpenAIClient.complete` 路径做一次真实一问("ping"),成功回 `{ok:true}`(前端显示绿色 **PASSED**),失败回 `{ok:false,error}`(前端显示红色失败原因=provider 原始报错)。**密钥仍只在服务端**:请求只带 env 变量名,key 由 `.env`/环境解析,不回显。**配置缺失先于网络判定**:`model` 为空、或 `api_key_env` 既未解析到值且无自定义 `base_url` → 直接返回原因(不发请求,省一次必失败的调用);走线程池跑避免阻塞事件循环。产物 `test_web.py` 加 2 个无网络断言(缺 env / 缺 model)。
+- **角色下拉修复(原 bug:无论配置如何都只有 first profile / use generation)**:① 选项改为从**实时的 profile 名称输入**取(`#cfg-profiles .p-name`),而非旧的已存配置 `cfg.llms` → 新增/改名/删除即时反映;profile 名输入挂 `input` 监听 + 增删后 `buildRoles()`,重建时保留当前选择。② compaction 的空选项从「(同 generation)」改为与 generation 一致的「(首个配置)」——**契合运行期回落语义**(未设的角色 `profile_for` 回落到**第一个 profile**,而非 generation 解析到的 profile)。③ 存在配置时下拉同时含「(首个配置)」空选项 + 所有非空 profile 名(含第一个,允许重名)。
+- 自验证:真实 `serve` 浏览器走查——测试按钮对无效 model 回真实 400 原因、对有效 model(本机 LiteLLM `mimo-v2.5-pro`)回 **PASSED**;新增 profile 命名后 generation/compaction 下拉即时变为 `["", default, fast]`;两角色默认均「首个配置」。
+
 ### 2.4 依赖隔离
 - fastapi/uvicorn 进 `harnessforge[wizard]` extra;`harnessforge wizard` 懒加载;核心 CLI、`uvx harnessforge new`、产物均不含。测试断言核心 `dependencies` 不含 fastapi/uvicorn。
 

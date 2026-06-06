@@ -122,3 +122,25 @@ def test_env_endpoint_writes_dotenv_without_echoing(tmp_path, monkeypatch):
 def test_env_endpoint_rejects_bad_name():
     resp = _client().post("/env", json={"name": "bad name", "value": "x"})
     assert resp.status_code == 400
+
+
+def test_test_llm_preflight_reports_missing_key_without_network():
+    """A profile whose api_key_env is unset (and no base_url) fails fast — no call."""
+    resp = _client().post(
+        "/test-llm",
+        json={"name": "p", "model": "some-model", "api_key_env": "HARNESS_UNSET_KEY_FOR_TEST"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert "HARNESS_UNSET_KEY_FOR_TEST" in data["error"]
+
+
+def test_test_llm_requires_a_model(monkeypatch):
+    """Even with a key present, an empty model is reported up front (no call)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-irrelevant")
+    resp = _client().post("/test-llm", json={"name": "p", "model": ""})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert "model" in data["error"].lower()

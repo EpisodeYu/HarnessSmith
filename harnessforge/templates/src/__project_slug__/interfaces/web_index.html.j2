@@ -123,9 +123,10 @@
         subtab_tools: "Tools", subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
         subtab_observability: "Observability",
         profiles_label: "LLM profiles", profile_add: "+ Add profile", profile_remove: "remove",
+        test_btn: "Test", test_running: "testing…",
         roles_label: "Roles", roles_hint: "Bind each role to a profile above.",
         role_generation: "generation (main loop)", role_compaction: "compaction (summarize)",
-        role_use_first: "(first profile)", role_use_generation: "(use generation)",
+        role_use_first: "(first profile)",
         profile_name: "name", profile_model: "model",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "env var name",
@@ -154,9 +155,10 @@
         subtab_tools: "工具", subtab_prompts: "提示词", subtab_paradigms: "范式",
         subtab_observability: "可观测",
         profiles_label: "LLM 配置", profile_add: "+ 添加配置", profile_remove: "删除",
+        test_btn: "测试", test_running: "测试中…",
         roles_label: "角色", roles_hint: "把每个角色绑定到上面的某个配置。",
         role_generation: "generation(主循环)", role_compaction: "compaction(压缩)",
-        role_use_first: "(用第一个配置)", role_use_generation: "(同 generation)",
+        role_use_first: "(用第一个配置)",
         profile_name: "名称", profile_model: "model",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "环境变量名",
@@ -301,6 +303,10 @@
         "</div>" +
         keyRow("profile_key_section", "p-key", esc(p.api_key_env || "OPENAI_API_KEY"), "p-keyval", "p-setkey", "p-keystatus", t("set_key_ph"), t("set_key_btn"), "password") +
         keyRow("profile_url_section", "p-baseurl", esc(p.base_url_env || "OPENAI_BASE_URL"), "p-urlval", "p-seturl", "p-urlstatus", t("set_url_ph"), t("set_url_btn"), "text") +
+        "<div class='flex items-center gap-2'>" +
+          "<button type='button' class='p-test rounded border px-3 py-1 text-xs'>" + t("test_btn") + "</button>" +
+          "<span class='p-teststatus text-xs'></span>" +
+        "</div>" +
         "<details class='text-xs'><summary class='cursor-pointer text-slate-600'>" + t("adv_section") + "</summary>" +
           "<div class='mt-2 grid grid-cols-3 gap-2'>" +
             "<label>" + t("profile_temp") + "<input class='p-temp mt-1 w-full rounded border px-2 py-1' placeholder='" + t("temp_ph") + "' value='" + escNum(p.temperature) + "'/></label>" +
@@ -327,28 +333,48 @@
         "</div></div>";
     }
 
+    // Build a profile object from one card's live inputs (used by Save + Test).
+    function cardToProfile(w) {
+      const g = (cls) => { const el = w.querySelector("." + cls); return el ? el.value.trim() : ""; };
+      const o = { name: g("p-name"), model: g("p-model") };
+      if (g("p-key")) o.api_key_env = g("p-key");
+      if (g("p-baseurl")) o.base_url_env = g("p-baseurl");
+      const temp = numOrNull(g("p-temp")); if (temp != null) o.temperature = temp;
+      const mt = numOrNull(g("p-maxtok")); if (mt != null) o.max_tokens = mt;
+      const re = g("p-reasoning"); if (re) o.reasoning_effort = re;
+      o.input_cost_per_million = numOrNull(g("p-pcost")) ?? 0;
+      o.output_cost_per_million = numOrNull(g("p-ccost")) ?? 0;
+      return o;
+    }
+    // Options come from the LIVE profile-name inputs (so renaming/adding a profile
+    // is reflected at once). Every named profile is listed — duplicates included.
     function roleOptions(selected) {
       let html = "";
-      (cfg.llms || []).forEach((p) => {
-        if (!p.name) return;
-        html += "<option value='" + esc(p.name) + "'" + (selected === p.name ? " selected" : "") + ">" + esc(p.name) + "</option>";
+      document.querySelectorAll("#cfg-profiles .p-name").forEach((inp) => {
+        const name = inp.value.trim();
+        if (!name) return;
+        html += "<option value='" + esc(name) + "'" + (selected === name ? " selected" : "") + ">" + esc(name) + "</option>";
       });
       return html;
     }
     // generation + compaction are always shown; any extra configured role is kept.
+    // Both default to the empty "(first profile)" option — that mirrors the runtime
+    // fallback (an unset role resolves to the first profile, NOT to generation).
     function buildRoles() {
       const rc = $("cfg-roles");
+      const prev = {};  // preserve current picks across a live rebuild
+      rc.querySelectorAll(".role-target").forEach((el) => { prev[el.dataset.role] = el.value; });
       rc.innerHTML = "";
       const roles = cfg.roles || {};
       const names = ["generation", "compaction"];
       Object.keys(roles).forEach((r) => { if (!names.includes(r)) names.push(r); });
       names.forEach((role) => {
-        const empty = role === "compaction" ? t("role_use_generation") : t("role_use_first");
+        const selected = (role in prev) ? prev[role] : (roles[role] || "");
         const label = (role === "generation" || role === "compaction") ? t("role_" + role) : role;
         rc.insertAdjacentHTML("beforeend",
           "<label class='flex items-center gap-2 text-sm'><span class='w-44 font-mono'>" + label + "</span>" +
           "<select class='role-target rounded border px-2 py-1' data-role='" + role + "'>" +
-            "<option value=''>" + empty + "</option>" + roleOptions(roles[role] || "") +
+            "<option value=''>" + t("role_use_first") + "</option>" + roleOptions(selected) +
           "</select></label>");
       });
     }
@@ -401,18 +427,9 @@
 
     function collectConfig() {
       const patch = {};
-      patch.llms = Array.from(document.querySelectorAll("#cfg-profiles .profile")).map((w) => {
-        const g = (cls) => { const el = w.querySelector("." + cls); return el ? el.value.trim() : ""; };
-        const o = { name: g("p-name"), model: g("p-model") };
-        if (g("p-key")) o.api_key_env = g("p-key");
-        if (g("p-baseurl")) o.base_url_env = g("p-baseurl");
-        const temp = numOrNull(g("p-temp")); if (temp != null) o.temperature = temp;
-        const mt = numOrNull(g("p-maxtok")); if (mt != null) o.max_tokens = mt;
-        const re = g("p-reasoning"); if (re) o.reasoning_effort = re;
-        o.input_cost_per_million = numOrNull(g("p-pcost")) ?? 0;
-        o.output_cost_per_million = numOrNull(g("p-ccost")) ?? 0;
-        return o;
-      }).filter((o) => o.name || o.model);  // drop empty (freshly-added, unfilled) cards
+      patch.llms = Array.from(document.querySelectorAll("#cfg-profiles .profile"))
+        .map(cardToProfile)
+        .filter((o) => o.name || o.model);  // drop empty (freshly-added, unfilled) cards
       const roles = {};
       document.querySelectorAll("#cfg-roles .role-target").forEach((el) => {
         if (el.value.trim()) roles[el.dataset.role] = el.value.trim();
@@ -450,13 +467,38 @@
     }
     $("cfg-add-profile").addEventListener("click", () => {
       $("cfg-profiles").appendChild(profileCard({}));
+      buildRoles();  // a new (empty) profile may already provide a name to bind
     });
-    // Remove a profile, or write an env-var VALUE (api key / base url) into the
-    // local .env (gitignored). The value is write-only: posted once, never read
-    // back into the UI.
+    // Keep the role dropdowns in sync as profile names are typed.
+    $("cfg-profiles").addEventListener("input", (e) => {
+      if (e.target.classList.contains("p-name")) buildRoles();
+    });
+    // Test a profile, remove it, or write an env-var VALUE (api key / base url)
+    // into the local .env (gitignored). Written values are write-only: posted
+    // once, never read back into the UI.
     $("cfg-profiles").addEventListener("click", async (e) => {
       const rm = e.target.closest(".p-remove");
-      if (rm) { rm.closest(".profile").remove(); return; }
+      if (rm) { rm.closest(".profile").remove(); buildRoles(); return; }
+      const testBtn = e.target.closest(".p-test");
+      if (testBtn) {
+        const row = testBtn.closest(".profile");
+        const status = row.querySelector(".p-teststatus");
+        status.className = "p-teststatus text-xs text-slate-500";
+        status.textContent = t("test_running");
+        testBtn.disabled = true;
+        try {
+          const resp = await fetch("/test-llm", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(cardToProfile(row)),
+          });
+          const data = await resp.json();
+          if (data.ok) { status.className = "p-teststatus text-xs font-semibold text-emerald-700"; status.textContent = "PASSED"; }
+          else { status.className = "p-teststatus text-xs text-red-600"; status.textContent = data.error || t("cfg_invalid"); }
+        } catch (err) {
+          status.className = "p-teststatus text-xs text-red-600"; status.textContent = String(err);
+        } finally { testBtn.disabled = false; }
+        return;
+      }
       const isKey = e.target.closest(".p-setkey");
       const btn = isKey || e.target.closest(".p-seturl");
       if (!btn) return;
