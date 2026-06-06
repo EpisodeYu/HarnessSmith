@@ -9,6 +9,7 @@ so the repo ships a deterministic dependency set).
 from __future__ import annotations
 
 import socket
+import sys
 from pathlib import Path
 
 import typer
@@ -169,6 +170,21 @@ def _find_free_port(preferred: int, *, host: str = "127.0.0.1", tries: int = 64)
         return sock.getsockname()[1]
 
 
+def _maybe_print_forward_hint(port: int) -> None:
+    """On Linux, print an SSH port-forward command (the wizard may be remote).
+
+    Local Windows/macOS access is direct, so no hint there. Linux users running
+    behind SSH can copy this to reach the port from their own machine.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    typer.secho(
+        "  remote? forward this port from your machine:\n"
+        f"    ssh -L {port}:127.0.0.1:{port} <user>@<host>",
+        fg=typer.colors.BRIGHT_BLACK,
+    )
+
+
 @app.command()
 def wizard(
     host: str = typer.Option("127.0.0.1", help="Host to bind the wizard to."),
@@ -194,6 +210,7 @@ def wizard(
         f"HarnessForge wizard → http://{host}:{bind_port}  (open this; Ctrl-C to stop)",
         fg=typer.colors.GREEN,
     )
+    _maybe_print_forward_hint(bind_port)
     uvicorn.run(create_app(), host=host, port=bind_port)
 
 

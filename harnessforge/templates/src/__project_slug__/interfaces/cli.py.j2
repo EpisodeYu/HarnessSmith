@@ -187,6 +187,15 @@ def serve(
         f"Serving on http://{host}:{bind_port}  (open this; Ctrl-C to stop)",
         fg=typer.colors.GREEN,
     )
+    import sys as _sys
+
+    # On Linux you may be reaching this over SSH; surface the forward command.
+    if _sys.platform.startswith("linux"):
+        typer.secho(
+            "  remote? forward this port from your machine:\n"
+            f"    ssh -L {bind_port}:127.0.0.1:{bind_port} <user>@<host>",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
     uvicorn.run(create_app(config, mock=mock), host=host, port=bind_port)
 {% endif %}
 

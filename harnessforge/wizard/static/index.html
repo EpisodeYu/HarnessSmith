@@ -19,22 +19,16 @@
       </label>
     </header>
 
-    <p class="text-xs text-slate-500" data-i18n="intro_note">
-      本向导只决定「生成什么」(结构)。LLM、提示词、预算等运行期配置在生成后于产物的配置页里调整;向导会带好可用默认值,先低成本拥有你的 agent。
-    </p>
-
     <!-- Basic -->
     <section class="space-y-4">
       <h2 class="font-semibold" data-i18n="basic_heading">基本</h2>
       <div>
         <label class="block text-sm font-medium" data-i18n="display_name_label">显示名</label>
         <input id="display_name" class="mt-1 w-full rounded-lg border px-3 py-2" placeholder="My Coding Assistant" />
-        <p class="mt-1 text-xs text-slate-500" data-i18n="display_name_hint">人类可读名称,用于产物 UI 标题 / README。</p>
       </div>
       <div>
         <label class="block text-sm font-medium" data-i18n="slug_label">包名 (project_slug)</label>
         <input id="project_slug" class="mt-1 w-full rounded-lg border px-3 py-2 font-mono" placeholder="agent_harness" />
-        <p class="mt-1 text-xs text-slate-500" data-i18n="slug_hint">snake_case,由显示名自动派生,可手改。用作 Python 包名 / 文件夹。</p>
       </div>
       <div>
         <label class="block text-sm font-medium" data-i18n="paradigms_label">范式 (多选)</label>
@@ -83,7 +77,6 @@
         <div>
           <label class="block text-sm font-medium" data-i18n="target_label">目标目录</label>
           <input id="target_dir" class="mt-1 w-full rounded-lg border px-3 py-2 font-mono" placeholder="./generate/agent_harness" />
-          <p class="mt-1 text-xs text-slate-500" data-i18n="target_hint">默认生成到 HarnessForge/generate/&lt;包名&gt;,可手改。</p>
         </div>
         <label class="flex items-center gap-2 text-sm">
           <input id="gen_git" type="checkbox" /> <span data-i18n="git_label">git init</span>
@@ -93,7 +86,8 @@
           <a id="open-product" class="hidden rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white" target="_blank" rel="noopener"></a>
           <span id="generate-status" class="text-sm text-slate-500"></span>
         </div>
-        <p class="text-xs text-slate-500" data-i18n="oneclick_hint">勾选 Web 时,生成后自动拉起产物 Web(首次需安装依赖,稍候),再点「跳转」打开。在配置页 / .env 设置 LLM key 后即可对话。</p>
+        <div id="progress" class="hidden space-y-1 text-sm"></div>
+        <div id="forward-hint" class="hidden text-xs text-slate-500"></div>
       </div>
 
       <!-- Method 2: CLI -->
@@ -121,11 +115,8 @@
     const I18N = {
       zh: {
         app_title: "HarnessForge 向导",
-        intro_note: "本向导只决定「生成什么」(结构)。LLM、提示词、预算等运行期配置在生成后于产物的配置页里调整;向导会带好可用默认值,先低成本拥有你的 agent。",
         basic_heading: "基本", display_name_label: "显示名",
-        display_name_hint: "人类可读名称,用于产物 UI 标题 / README。",
         slug_label: "包名 (project_slug)",
-        slug_hint: "snake_case,由显示名自动派生,可手改。用作 Python 包名 / 文件夹。",
         paradigms_label: "范式 (多选)", paradigms_hint: "至少选一个;第一个选中的作为运行期默认范式。",
         caps_heading: "能力(结构开关)",
         iface_web_label: "生成 Web 接口(SSE chat + 分页配置面板)",
@@ -136,22 +127,20 @@
         skills_hint: "关时产物零 skills 痕迹。开后生成 skills.py + read_skill + 示例 skill。",
         generate_heading: "生成产物",
         oneclick_heading: "一键生成",
-        target_label: "目标目录", target_hint: "默认生成到 HarnessForge/generate/<包名>,可手改。",
+        target_label: "目标目录",
         git_label: "git init", oneclick_btn: "一键生成",
-        oneclick_hint: "勾选 Web 时,生成后自动拉起产物 Web(首次需安装依赖,稍候),再点「跳转」打开。在配置页 / .env 设置 LLM key 后即可对话。",
         cli_heading: "CLI 生成", produce_btn: "校验并产出 spec", download_btn: "下载 spec.yaml",
         newcmd_label: "下载 spec.yaml 后,在其所在目录运行:",
         ok_produced: "spec 已校验通过。", ok_generated: "已生成", err_fix: "请修正以下字段:",
-        open_product: "跳转到", generating: "正在生成…", launching: "正在拉起产物 Web(首次需安装依赖,稍候)…",
-        ready: "产物已就绪,点「跳转」打开。", launch_timeout: "产物已在后台启动;若「跳转」打不开,请稍后重试。",
+        open_product: "跳转到", generating: "正在生成…",
+        ready: "产物已就绪,点「跳转」打开。", failed: "失败",
+        step_render: "生成代码", step_sync: "安装依赖 (uv sync)", step_serve: "启动产物 Web",
+        forward_note: "远程访问产物?先在你的机器转发该端口:",
       },
       en: {
         app_title: "HarnessForge wizard",
-        intro_note: "This wizard only decides WHAT to generate (structure). LLM, prompts and budget are adjusted later in the generated product's config page; it ships working defaults so you can own an agent quickly.",
         basic_heading: "Basic", display_name_label: "Display name",
-        display_name_hint: "Human-readable name; used for the product UI title / README.",
         slug_label: "Package name (project_slug)",
-        slug_hint: "snake_case, auto-derived from the display name (editable). Used as the Python package / folder.",
         paradigms_label: "Paradigms (multi-select)", paradigms_hint: "Pick at least one; the first selected is the runtime default.",
         caps_heading: "Capabilities (structural switches)",
         iface_web_label: "Generate the Web interface (SSE chat + paged config panel)",
@@ -162,14 +151,15 @@
         skills_hint: "Off = zero skills footprint. On = generate skills.py + read_skill + a sample skill.",
         generate_heading: "Generate the product",
         oneclick_heading: "One-click generate",
-        target_label: "Target directory", target_hint: "Defaults to HarnessForge/generate/<package>; editable.",
+        target_label: "Target directory",
         git_label: "git init", oneclick_btn: "Generate",
-        oneclick_hint: "With Web enabled, the product web is launched after generating (first run installs deps — hold on), then click Open. Set the LLM key in the config page / .env to chat.",
         cli_heading: "CLI generate", produce_btn: "Validate & produce spec", download_btn: "Download spec.yaml",
         newcmd_label: "After downloading spec.yaml, run from its directory:",
         ok_produced: "Spec validated.", ok_generated: "Generated at", err_fix: "Please fix these fields:",
-        open_product: "Open", generating: "Generating…", launching: "Launching the product web (first run installs deps — hold on)…",
-        ready: "Product is ready — click Open.", launch_timeout: "Product started in the background; if Open fails, retry shortly.",
+        open_product: "Open", generating: "Generating…",
+        ready: "Product is ready — click Open.", failed: "Failed",
+        step_render: "Generate code", step_sync: "Install deps (uv sync)", step_serve: "Start product web",
+        forward_note: "Reaching the product remotely? Forward its port from your machine first:",
       },
     };
 
@@ -188,6 +178,7 @@
         .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^([0-9])/, "_$1");
     }
     let generateBase = "";
+    let metaLinux = false;
     let slugEdited = false;
     let targetEdited = false;
     const currentSlug = () => $("project_slug").value.trim() || "agent_harness";
@@ -207,6 +198,7 @@
     async function loadMeta() {
       const meta = await (await fetch("/meta")).json();
       generateBase = meta.generate_base || "";
+      metaLinux = !!meta.linux;
       syncTarget();
       const pl = $("paradigms-list");
       // All paradigms checked by default; the first selected is the runtime default.
@@ -277,27 +269,76 @@
       $("produce-status").textContent = t("ok_produced");
     });
 
-    // Poll the launched product until its port accepts connections (first run
-    // installs deps, which takes a moment). Cross-origin fetch resolves once the
-    // port is up; it rejects (connection refused) while still starting.
-    async function pollReady(url) {
-      $("generate-status").textContent = t("launching");
-      const deadline = Date.now() + 5 * 60 * 1000;
-      while (Date.now() < deadline) {
-        try {
-          await fetch(url, { mode: "no-cors", cache: "no-store" });
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const STEP_ICON = { done: "✓", running: "…", error: "✗", pending: "○" };
+    const STEP_CLS = {
+      done: "text-emerald-700", running: "text-slate-800 font-medium",
+      error: "text-red-600", pending: "text-slate-400",
+    };
+
+    function renderProgress(steps) {
+      const box = $("progress");
+      box.classList.remove("hidden");
+      box.innerHTML = steps.map((s) =>
+        "<div class='flex items-center gap-2 " + (STEP_CLS[s.status] || "") + "'>" +
+        "<span class='w-4 text-center'>" + (STEP_ICON[s.status] || "○") + "</span>" +
+        "<span>" + t("step_" + s.key) + "</span></div>").join("");
+    }
+
+    // Show the jump button up-front but disabled; enable it only once the launch
+    // job reports done (all steps succeeded). The product is NOT openable before.
+    function showJumpButton(enabled, url) {
+      const btn = $("open-product");
+      btn.textContent = t("open_product") + " " + (displayName() || currentSlug());
+      btn.classList.remove("hidden");
+      if (enabled && url) {
+        btn.href = url;
+        btn.classList.remove("pointer-events-none", "opacity-50");
+      } else {
+        btn.removeAttribute("href");
+        btn.classList.add("pointer-events-none", "opacity-50");
+      }
+    }
+
+    // When the wizard runs on Linux (likely reached over SSH), remind the user
+    // to forward the product's port before opening it from another machine.
+    function showForwardHint(url) {
+      if (!metaLinux || !url) return;
+      const port = new URL(url).port;
+      const box = $("forward-hint");
+      box.classList.remove("hidden");
+      box.innerHTML = t("forward_note") +
+        " <code class='rounded bg-slate-100 px-1'>ssh -L " + port + ":127.0.0.1:" + port +
+        " &lt;user&gt;@&lt;host&gt;</code>";
+    }
+
+    // Poll the launch job's step-by-step progress until done or error.
+    async function trackJob(jobId) {
+      showJumpButton(false);
+      while (true) {
+        let job;
+        try { job = await (await fetch("/generate/status/" + jobId)).json(); }
+        catch (e) { await sleep(1500); continue; }
+        renderProgress(job.steps || []);
+        if (job.done && job.url) {
+          showJumpButton(true, job.url);
+          showForwardHint(job.url);
           $("generate-status").textContent = t("ready");
           return;
-        } catch (e) {
-          await new Promise((r) => setTimeout(r, 2000));
         }
+        if (job.error) {
+          $("generate-status").textContent = t("failed") + ": " + job.error;
+          return;
+        }
+        await sleep(1500);
       }
-      $("generate-status").textContent = t("launch_timeout");
     }
 
     $("generate").addEventListener("click", async () => {
       $("errors").classList.add("hidden");
       $("open-product").classList.add("hidden");
+      $("progress").classList.add("hidden");
+      $("forward-hint").classList.add("hidden");
       $("generate-status").textContent = t("generating");
       const body = payload();
       body.git = $("gen_git").checked;
@@ -308,13 +349,7 @@
       const data = await resp.json();
       if (!data.ok) { showErrors(data.errors || []); $("generate-status").textContent = ""; return; }
       $("generate-status").textContent = t("ok_generated") + " " + data.target_dir + " (" + data.files + " files)";
-      if (data.url) {
-        const btn = $("open-product");
-        btn.href = data.url;
-        btn.textContent = t("open_product") + " " + (displayName() || currentSlug());
-        btn.classList.remove("hidden");
-        pollReady(data.url);
-      }
+      if (data.job_id) trackJob(data.job_id);
     });
 
     loadMeta();

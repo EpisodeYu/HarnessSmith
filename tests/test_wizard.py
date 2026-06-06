@@ -80,6 +80,11 @@ def test_meta_exposes_generate_base_under_repo_root(client):
     assert base.endswith("generate")  # <repo-root>/generate
 
 
+def test_meta_exposes_linux_flag(client):
+    # Gates the product port-forward hint in the UI (shown only on Linux hosts).
+    assert isinstance(client.get("/meta").json()["linux"], bool)
+
+
 def test_wizard_ui_defaults_web_mcp_skills_checked(client):
     """Web / MCP / Skills capabilities are checked by default in the form."""
     html = client.get("/").text
@@ -191,28 +196,38 @@ def test_generate_refuses_non_empty_dir(client, tmp_path):
     assert r.status_code == 400 and r.json()["ok"] is False
 
 
-def test_generate_launches_product_when_requested(client, tmp_path, monkeypatch):
-    """One-click generate + ``launch`` stands the Web product up and returns a URL.
-    The spawn is stubbed so the test never runs uv / opens a port."""
+def test_generate_launches_product_with_progress_job(client, tmp_path, monkeypatch):
+    """One-click generate + ``launch`` returns a job whose step-by-step status the
+    UI polls; the product URL appears only once the job is done. The worker is
+    stubbed so the test never runs uv / opens a port."""
     import harnessforge.wizard.app as app_mod
 
     calls = {}
 
-    def fake_launch(target_dir, project_slug, **kw):
-        calls["target_dir"] = str(target_dir)
+    def fake_spawn(job, target_dir, project_slug):
         calls["project_slug"] = project_slug
-        return "http://127.0.0.1:8123"
+        for step in job["steps"]:
+            step["status"] = "done"
+        job["url"] = "http://127.0.0.1:8123"
+        job["done"] = True
 
-    monkeypatch.setattr(app_mod, "_launch_product", fake_launch)
+    monkeypatch.setattr(app_mod, "_spawn_launch", fake_spawn)
     out = tmp_path / "gen"
     r = client.post(
         "/generate",
         json={"spec": _valid_spec(), "target_dir": str(out), "launch": True},
     )
     assert r.status_code == 200
-    data = r.json()
-    assert data["url"] == "http://127.0.0.1:8123"
+    job_id = r.json()["job_id"]
     assert calls["project_slug"] == "my_ca"
+    status = client.get(f"/generate/status/{job_id}").json()
+    assert [s["key"] for s in status["steps"]] == ["render", "sync", "serve"]
+    assert status["done"] is True
+    assert status["url"] == "http://127.0.0.1:8123"
+
+
+def test_generate_status_unknown_job_is_404(client):
+    assert client.get("/generate/status/nope").status_code == 404
 
 
 def test_generate_does_not_launch_without_web(client, tmp_path, monkeypatch):
@@ -220,14 +235,14 @@ def test_generate_does_not_launch_without_web(client, tmp_path, monkeypatch):
     import harnessforge.wizard.app as app_mod
 
     monkeypatch.setattr(
-        app_mod, "_launch_product",
+        app_mod, "_spawn_launch",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not launch")),
     )
     spec = {**_valid_spec(), "interfaces": {"cli": True, "web": False}}
     out = tmp_path / "gen"
     r = client.post("/generate", json={"spec": spec, "target_dir": str(out), "launch": True})
     assert r.status_code == 200
-    assert "url" not in r.json()
+    assert "job_id" not in r.json()
 
 
 def test_generate_render_only_by_default(client, tmp_path, monkeypatch):
@@ -235,12 +250,12 @@ def test_generate_render_only_by_default(client, tmp_path, monkeypatch):
     import harnessforge.wizard.app as app_mod
 
     monkeypatch.setattr(
-        app_mod, "_launch_product",
+        app_mod, "_spawn_launch",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not launch")),
     )
     out = tmp_path / "gen"
     r = client.post("/generate", json={"spec": _valid_spec(), "target_dir": str(out)})
-    assert r.status_code == 200 and "url" not in r.json()
+    assert r.status_code == 200 and "job_id" not in r.json()
 
 
 def test_core_dependencies_exclude_wizard_deps():
