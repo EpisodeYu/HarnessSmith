@@ -110,6 +110,10 @@ def _build_context(spec: HarnessSpec, mcp_servers: list[CatalogServer]) -> dict:
         "spec": spec,
         "version": spec.version,
         "project_slug": spec.project_slug,
+        # Human-readable label for UI titles / README; slug is the fallback.
+        "display_name": spec.display_name or spec.project_slug,
+        # Baked-in default UI language for the product web ("en" | "zh").
+        "language": spec.language,
         "llms": spec.llms,
         "roles": spec.roles,
         "interfaces": spec.interfaces,

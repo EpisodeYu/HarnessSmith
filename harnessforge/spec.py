@@ -127,6 +127,18 @@ class HarnessSpec(BaseModel):
 
     version: str = "0.1"
     project_slug: str = "agent_harness"
+    # Human-readable display name (e.g. "My Coding Assistant"). Used for UI titles
+    # (product web header / FastAPI title) and the README heading; falls back to
+    # ``project_slug`` when unset. The wizard derives ``project_slug`` from it.
+    # It is a label, not a runtime knob — it is never written to ``config.yaml``.
+    display_name: str | None = None
+    # Default UI language for the generated product's web interface (and the
+    # wizard that produced it): "en" or "zh". This is only the baked-in default —
+    # the product user can still switch at runtime (the choice is remembered in
+    # the browser). It seeds the web UI default, not ``config.yaml``. The agent's
+    # *response* language is a separate, optional system-prompt directive the
+    # wizard can add (most models already match the user's input language).
+    language: Literal["en", "zh"] = "en"
     llms: list[LLMProfile] = Field(default_factory=list)
     roles: dict[str, str] = Field(default_factory=dict)
     prompts: Prompts = Field(default_factory=Prompts)

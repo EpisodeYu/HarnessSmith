@@ -14,7 +14,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+# The wizard (Slice 7) is a generator-side tool only; FastAPI/uvicorn live here,
+# NOT in the core `dependencies`, so `uvx harnessforge new` and the generated
+# product stay free of them.
+wizard = ["fastapi>=0.110", "uvicorn>=0.29"]
+# `dev` adds the wizard deps + httpx so the test suite can drive the wizard via
+# fastapi.testclient.
+dev = ["pytest>=8.0", "fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
 
 [project.scripts]
 harnessforge = "harnessforge.cli:app"
@@ -32,6 +38,10 @@ addopts = "-m 'not golden'"
 markers = [
     "golden: slow end-to-end generation tests (uv lock/sync + pytest in the generated repo)",
     "docker: requires a working Docker daemon",
+]
+filterwarnings = [
+    # Upstream transitional notice from starlette's TestClient (httpx<2); not ours.
+    "ignore:Using .httpx. with .starlette.testclient. is deprecated",
 ]
 
 [tool.pyright]

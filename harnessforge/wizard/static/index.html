@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HarnessForge wizard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <main class="mx-auto max-w-3xl p-6 space-y-5">
+    <header class="flex items-center justify-between gap-4">
+      <h1 class="text-xl font-semibold" data-i18n="app_title">HarnessForge 向导</h1>
+      <label class="flex items-center gap-2 text-sm">
+        <span data-i18n="lang_label">语言</span>
+        <select id="lang" class="rounded-lg border px-2 py-1">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+    </header>
+
+    <p class="text-xs text-slate-500" data-i18n="secrets_note">
+      只采集 env 变量名,绝不收集或回显密钥真值 —— 真值放产物的 .env。
+    </p>
+
+    <nav id="tabs" class="flex flex-wrap gap-1 border-b text-sm"></nav>
+
+    <!-- Basic -->
+    <section data-panel="basic" class="space-y-4">
+      <h2 class="font-semibold" data-i18n="basic_heading">基本</h2>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="display_name_label">显示名</label>
+        <input id="display_name" class="mt-1 w-full rounded-lg border px-3 py-2" placeholder="My Coding Assistant" />
+        <p class="mt-1 text-xs text-slate-500" data-i18n="display_name_hint">人类可读名称,用于产物 UI 标题 / README。</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="slug_label">包名 (project_slug)</label>
+        <input id="project_slug" class="mt-1 w-full rounded-lg border px-3 py-2 font-mono" placeholder="agent_harness" />
+        <p class="mt-1 text-xs text-slate-500" data-i18n="slug_hint">snake_case,由显示名自动派生,可手改。用作 Python 包名 / 文件夹。</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="paradigms_label">范式 (多选)</label>
+        <div id="paradigms-list" class="mt-1 space-y-1"></div>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="paradigms_hint">至少选一个;第一个选中的作为运行期默认范式。</p>
+      </div>
+    </section>
+
+    <!-- LLM -->
+    <section data-panel="llm" class="hidden space-y-4">
+      <h2 class="font-semibold" data-i18n="llm_heading">LLM</h2>
+      <p class="text-xs text-slate-500" data-i18n="llm_hint">
+        采样 (temperature/max_tokens) 与单价是运行期旋钮,在产物配置页 / config.yaml 里设,不进 spec。
+      </p>
+      <div id="profiles" class="space-y-3"></div>
+      <button id="add-profile" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="add_profile">+ 添加 profile</button>
+    </section>
+
+    <!-- Prompts -->
+    <section data-panel="prompts" class="hidden space-y-4">
+      <h2 class="font-semibold" data-i18n="prompts_heading">提示词</h2>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="system_label">系统提示 (system)</label>
+        <textarea id="system" rows="3" class="mt-1 w-full rounded-lg border px-3 py-2"></textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="persona_label">人设 (persona)</label>
+        <textarea id="persona" rows="2" class="mt-1 w-full rounded-lg border px-3 py-2"></textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="rules_label">全局 rule 文件 (rules_files)</label>
+        <textarea id="rules_files" rows="2" class="mt-1 w-full rounded-lg border px-3 py-2 font-mono" placeholder="RULES.md"></textarea>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="rules_hint">每行一个 markdown 路径,注入每轮系统提示。列出 RULES.md 会生成 starter 文件。</p>
+      </div>
+      <div>
+        <label class="flex items-center gap-2 text-sm font-medium">
+          <input id="llm_language" type="checkbox" />
+          <span data-i18n="llm_lang_label">让 Agent 默认用所选语言回答</span>
+        </label>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="llm_lang_hint">可选。多数模型会自动按输入语言回答;勾选会在系统提示加一句软指令(仍尊重用户实际输入的语言)。</p>
+      </div>
+    </section>
+
+    <!-- Tools -->
+    <section data-panel="tools" class="hidden space-y-4">
+      <h2 class="font-semibold" data-i18n="tools_heading">工具</h2>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="builtin_label">内置示例工具</label>
+        <div id="builtin-tools-list" class="mt-1 space-y-1"></div>
+      </div>
+      <div>
+        <label class="flex items-center gap-2 text-sm font-medium">
+          <input id="mcp_enabled" type="checkbox" />
+          <span data-i18n="mcp_enable_label">启用 MCP 工具能力</span>
+        </label>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="mcp_hint">关时产物零 MCP 痕迹。开后可从 catalog 预选 server(落运行期 config.yaml)。</p>
+        <div id="catalog-wrap" class="mt-2 hidden">
+          <label class="block text-sm font-medium" data-i18n="catalog_label">预选 MCP server</label>
+          <div id="catalog-list" class="mt-1 space-y-1"></div>
+        </div>
+      </div>
+      <div>
+        <label class="flex items-center gap-2 text-sm font-medium">
+          <input id="skills_enabled" type="checkbox" />
+          <span data-i18n="skills_enable_label">启用标准 Agent Skills</span>
+        </label>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="skills_hint">关时产物零 skills 痕迹。开后生成 skills.py + read_skill + 示例 skill。</p>
+      </div>
+    </section>
+
+    <!-- Context -->
+    <section data-panel="context" class="hidden space-y-4">
+      <h2 class="font-semibold" data-i18n="context_heading">上下文</h2>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="ctx_strategy_label">策略</label>
+        <select id="ctx_strategy" class="mt-1 rounded-lg border px-3 py-2">
+          <option value="truncate">truncate</option>
+          <option value="summarize">summarize</option>
+          <option value="none">none</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="ctx_keep_label">保留最近轮数 (keep_last_turns)</label>
+        <input id="ctx_keep_last_turns" type="number" min="1" value="6" class="mt-1 w-40 rounded-lg border px-3 py-2" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="ctx_maxtokens_label">最大上下文 token (max_context_tokens)</label>
+        <input id="ctx_max_tokens" type="number" min="1" class="mt-1 w-40 rounded-lg border px-3 py-2" />
+        <p class="mt-1 text-xs text-slate-500" data-i18n="ctx_maxtokens_hint">留空表示不限制(等同普通循环)。</p>
+      </div>
+    </section>
+
+    <!-- Budget -->
+    <section data-panel="budget" class="hidden space-y-4">
+      <h2 class="font-semibold" data-i18n="budget_heading">预算</h2>
+      <p class="text-xs text-slate-500" data-i18n="budget_hint">每次运行的护栏;留空表示该项不限制。token 上限是运行期旋钮(config.yaml)。</p>
+      <div class="flex flex-wrap gap-4">
+        <label class="text-sm"><span data-i18n="b_steps">max_steps</span>
+          <input id="b_max_steps" type="number" min="1" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
+        <label class="text-sm"><span data-i18n="b_seconds">max_seconds</span>
+          <input id="b_max_seconds" type="number" min="0" step="0.1" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
+        <label class="text-sm"><span data-i18n="b_cost">max_cost_usd</span>
+          <input id="b_max_cost" type="number" min="0" step="0.01" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
+      </div>
+    </section>
+
+    <!-- Interfaces -->
+    <section data-panel="interfaces" class="hidden space-y-4">
+      <h2 class="font-semibold" data-i18n="interfaces_heading">接口</h2>
+      <p class="text-xs text-slate-500" data-i18n="iface_cli_note">CLI 接口始终生成。</p>
+      <label class="flex items-center gap-2 text-sm font-medium">
+        <input id="iface_web" type="checkbox" />
+        <span data-i18n="iface_web_label">生成 Web 接口 (SSE chat + 分页配置面板)</span>
+      </label>
+      <p class="text-xs text-slate-500" data-i18n="iface_web_hint">关时产物不含 fastapi/uvicorn,零 Web 痕迹。</p>
+    </section>
+
+    <!-- Observability -->
+    <section data-panel="observability" class="hidden space-y-4">
+      <h2 class="font-semibold" data-i18n="obs_heading">可观测</h2>
+      <label class="flex items-center gap-2 text-sm font-medium">
+        <input id="obs_trace" type="checkbox" checked />
+        <span data-i18n="obs_trace_label">写 JSONL trace</span>
+      </label>
+      <div>
+        <label class="block text-sm font-medium" data-i18n="obs_tracedir_label">trace 目录</label>
+        <input id="obs_trace_dir" value="traces" class="mt-1 w-48 rounded-lg border px-3 py-2 font-mono" />
+      </div>
+    </section>
+
+    <!-- Output -->
+    <section data-panel="output" class="hidden space-y-4">
+      <h2 class="font-semibold" data-i18n="output_heading">产出</h2>
+      <div class="flex flex-wrap items-center gap-3">
+        <button id="produce" type="button" class="rounded-lg bg-slate-800 px-4 py-2 text-sm text-white" data-i18n="produce_btn">校验并产出 spec</button>
+        <a id="download" class="hidden rounded-lg border px-4 py-2 text-sm" data-i18n="download_btn" download="spec.yaml">下载 spec.yaml</a>
+        <span id="produce-status" class="text-sm text-slate-500"></span>
+      </div>
+      <div id="errors" class="hidden rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700"></div>
+      <textarea id="spec-yaml" rows="14" class="hidden w-full rounded-lg border bg-white p-3 font-mono text-xs" readonly></textarea>
+      <div id="newcmd-wrap" class="hidden text-xs">
+        <span class="text-slate-500" data-i18n="newcmd_label">或用 CLI 接力:</span>
+        <code id="newcmd" class="block mt-1 rounded bg-slate-100 p-2 font-mono"></code>
+      </div>
+
+      <div class="border-t pt-4 space-y-3">
+        <h3 class="font-medium" data-i18n="generate_heading">一键生成产物(可选)</h3>
+        <div>
+          <label class="block text-sm font-medium" data-i18n="target_label">目标目录</label>
+          <input id="target_dir" class="mt-1 w-full rounded-lg border px-3 py-2 font-mono" placeholder="./my-agent" />
+        </div>
+        <label class="flex items-center gap-2 text-sm">
+          <input id="gen_git" type="checkbox" /> <span data-i18n="git_label">git init</span>
+        </label>
+        <div class="flex items-center gap-3">
+          <button id="generate" type="button" class="rounded-lg bg-emerald-700 px-4 py-2 text-sm text-white" data-i18n="generate_btn">生成</button>
+          <span id="generate-status" class="text-sm text-slate-500"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const TABS = ["basic", "llm", "prompts", "tools", "context", "budget", "interfaces", "observability", "output"];
+
+    const I18N = {
+      zh: {
+        app_title: "HarnessForge 向导", lang_label: "语言",
+        secrets_note: "只采集 env 变量名,绝不收集或回显密钥真值 —— 真值放产物的 .env。",
+        tab_basic: "基本", tab_llm: "LLM", tab_prompts: "提示词", tab_tools: "工具",
+        tab_context: "上下文", tab_budget: "预算", tab_interfaces: "接口",
+        tab_observability: "可观测", tab_output: "产出",
+        basic_heading: "基本", display_name_label: "显示名",
+        display_name_hint: "人类可读名称,用于产物 UI 标题 / README。",
+        slug_label: "包名 (project_slug)",
+        slug_hint: "snake_case,由显示名自动派生,可手改。用作 Python 包名 / 文件夹。",
+        paradigms_label: "范式 (多选)", paradigms_hint: "至少选一个;第一个选中的作为运行期默认范式。",
+        llm_heading: "LLM",
+        llm_hint: "采样 (temperature/max_tokens) 与单价是运行期旋钮,在产物配置页 / config.yaml 里设,不进 spec。",
+        add_profile: "+ 添加 profile", profile_name: "名称", profile_model: "model",
+        profile_key: "api_key_env (变量名)", profile_baseurl: "base_url_env (可选)", remove: "删除",
+        prompts_heading: "提示词", system_label: "系统提示 (system)", persona_label: "人设 (persona)",
+        rules_label: "全局 rule 文件 (rules_files)",
+        rules_hint: "每行一个 markdown 路径,注入每轮系统提示。列出 RULES.md 会生成 starter 文件。",
+        llm_lang_label: "让 Agent 默认用所选语言回答",
+        llm_lang_hint: "可选。多数模型会自动按输入语言回答;勾选会在系统提示加一句软指令(仍尊重用户实际输入的语言)。",
+        tools_heading: "工具", builtin_label: "内置示例工具",
+        mcp_enable_label: "启用 MCP 工具能力",
+        mcp_hint: "关时产物零 MCP 痕迹。开后可从 catalog 预选 server(落运行期 config.yaml)。",
+        catalog_label: "预选 MCP server", skills_enable_label: "启用标准 Agent Skills",
+        skills_hint: "关时产物零 skills 痕迹。开后生成 skills.py + read_skill + 示例 skill。",
+        context_heading: "上下文", ctx_strategy_label: "策略",
+        ctx_keep_label: "保留最近轮数 (keep_last_turns)",
+        ctx_maxtokens_label: "最大上下文 token (max_context_tokens)",
+        ctx_maxtokens_hint: "留空表示不限制(等同普通循环)。",
+        budget_heading: "预算",
+        budget_hint: "每次运行的护栏;留空表示该项不限制。token 上限是运行期旋钮(config.yaml)。",
+        b_steps: "max_steps", b_seconds: "max_seconds", b_cost: "max_cost_usd",
+        interfaces_heading: "接口", iface_cli_note: "CLI 接口始终生成。",
+        iface_web_label: "生成 Web 接口 (SSE chat + 分页配置面板)",
+        iface_web_hint: "关时产物不含 fastapi/uvicorn,零 Web 痕迹。",
+        obs_heading: "可观测", obs_trace_label: "写 JSONL trace", obs_tracedir_label: "trace 目录",
+        output_heading: "产出", produce_btn: "校验并产出 spec", download_btn: "下载 spec.yaml",
+        newcmd_label: "或用 CLI 接力:", generate_heading: "一键生成产物(可选)",
+        target_label: "目标目录", git_label: "git init", generate_btn: "生成",
+        ok_produced: "spec 已校验通过。", ok_generated: "已生成", err_fix: "请修正以下字段:",
+      },
+      en: {
+        app_title: "HarnessForge wizard", lang_label: "Language",
+        secrets_note: "Only env-var NAMES are collected; secret values are never collected or shown — they live in the product's .env.",
+        tab_basic: "Basic", tab_llm: "LLM", tab_prompts: "Prompts", tab_tools: "Tools",
+        tab_context: "Context", tab_budget: "Budget", tab_interfaces: "Interfaces",
+        tab_observability: "Observability", tab_output: "Output",
+        basic_heading: "Basic", display_name_label: "Display name",
+        display_name_hint: "Human-readable name; used for the product UI title / README.",
+        slug_label: "Package name (project_slug)",
+        slug_hint: "snake_case, auto-derived from the display name (editable). Used as the Python package / folder.",
+        paradigms_label: "Paradigms (multi-select)", paradigms_hint: "Pick at least one; the first selected is the runtime default.",
+        llm_heading: "LLM",
+        llm_hint: "Sampling (temperature/max_tokens) and pricing are runtime knobs — set them in the product config page / config.yaml, not the spec.",
+        add_profile: "+ Add profile", profile_name: "name", profile_model: "model",
+        profile_key: "api_key_env (var NAME)", profile_baseurl: "base_url_env (optional)", remove: "Remove",
+        prompts_heading: "Prompts", system_label: "System prompt (system)", persona_label: "Persona (persona)",
+        rules_label: "Project rule files (rules_files)",
+        rules_hint: "One markdown path per line, injected into every system prompt. Listing RULES.md ships a starter file.",
+        llm_lang_label: "Also reply in this language by default",
+        llm_lang_hint: "Optional. Most models auto-detect the input language; this adds a soft line to the system prompt (still matches the user's actual input).",
+        tools_heading: "Tools", builtin_label: "Built-in demo tools",
+        mcp_enable_label: "Enable MCP tool capability",
+        mcp_hint: "Off = zero MCP footprint. On = preselect servers from the catalog (written to runtime config.yaml).",
+        catalog_label: "Preselect MCP servers", skills_enable_label: "Enable standard Agent Skills",
+        skills_hint: "Off = zero skills footprint. On = generate skills.py + read_skill + a sample skill.",
+        context_heading: "Context", ctx_strategy_label: "Strategy",
+        ctx_keep_label: "Recent turns to keep (keep_last_turns)",
+        ctx_maxtokens_label: "Max context tokens (max_context_tokens)",
+        ctx_maxtokens_hint: "Leave empty for no limit (behaves like a plain loop).",
+        budget_heading: "Budget",
+        budget_hint: "Per-run guardrails; leave empty for no limit. The token cap is a runtime knob (config.yaml).",
+        b_steps: "max_steps", b_seconds: "max_seconds", b_cost: "max_cost_usd",
+        interfaces_heading: "Interfaces", iface_cli_note: "The CLI interface is always generated.",
+        iface_web_label: "Generate the Web interface (SSE chat + paged config panel)",
+        iface_web_hint: "Off = no fastapi/uvicorn, zero Web footprint.",
+        obs_heading: "Observability", obs_trace_label: "Write a JSONL trace", obs_tracedir_label: "Trace directory",
+        output_heading: "Output", produce_btn: "Validate & produce spec", download_btn: "Download spec.yaml",
+        newcmd_label: "Or relay via the CLI:", generate_heading: "Generate the repo (optional)",
+        target_label: "Target directory", git_label: "git init", generate_btn: "Generate",
+        ok_produced: "Spec validated.", ok_generated: "Generated at", err_fix: "Please fix these fields:",
+      },
+    };
+
+    let lang = "zh";
+    const t = (k) => (I18N[lang] && I18N[lang][k]) || k;
+
+    function applyI18n() {
+      document.documentElement.lang = lang;
+      document.querySelectorAll("[data-i18n]").forEach((el) => {
+        el.textContent = t(el.dataset.i18n);
+      });
+      // tab labels + dynamic remove buttons
+      buildTabs();
+      document.querySelectorAll("[data-i18n-text]").forEach((el) => {
+        el.textContent = t(el.dataset.i18nText);
+      });
+    }
+
+    function buildTabs() {
+      const nav = $("tabs");
+      nav.innerHTML = "";
+      for (const name of TABS) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = t("tab_" + name);
+        b.className = "px-3 py-2 " + (name === current ? "border-b-2 border-slate-800 font-semibold" : "text-slate-500");
+        b.addEventListener("click", () => show(name));
+        nav.appendChild(b);
+      }
+    }
+
+    let current = "basic";
+    function show(name) {
+      current = name;
+      document.querySelectorAll("[data-panel]").forEach((p) => {
+        p.classList.toggle("hidden", p.dataset.panel !== name);
+      });
+      buildTabs();
+    }
+
+    // --- display name -> slug derivation ---------------------------------
+    function deriveSlug(name) {
+      let s = (name || "").toLowerCase().trim()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .replace(/^([0-9])/, "_$1");
+      return s;
+    }
+    let slugEdited = false;
+    $("project_slug").addEventListener("input", () => { slugEdited = true; });
+    $("display_name").addEventListener("input", () => {
+      if (!slugEdited) $("project_slug").value = deriveSlug($("display_name").value);
+    });
+
+    // --- profiles --------------------------------------------------------
+    function addProfile(p) {
+      p = p || { name: "default", model: "gpt-4o-mini", api_key_env: "OPENAI_API_KEY", base_url_env: "" };
+      const wrap = document.createElement("div");
+      wrap.className = "profile rounded-lg border p-3 grid grid-cols-2 gap-2";
+      wrap.innerHTML = `
+        <label class="text-xs">${t("profile_name")}<input class="p-name mt-1 w-full rounded border px-2 py-1" /></label>
+        <label class="text-xs">${t("profile_model")}<input class="p-model mt-1 w-full rounded border px-2 py-1 font-mono" /></label>
+        <label class="text-xs">${t("profile_key")}<input class="p-key mt-1 w-full rounded border px-2 py-1 font-mono" /></label>
+        <label class="text-xs">${t("profile_baseurl")}<input class="p-baseurl mt-1 w-full rounded border px-2 py-1 font-mono" /></label>
+        <div class="col-span-2 text-right"><button type="button" class="p-remove text-xs text-red-600">${t("remove")}</button></div>`;
+      wrap.querySelector(".p-name").value = p.name || "";
+      wrap.querySelector(".p-model").value = p.model || "";
+      wrap.querySelector(".p-key").value = p.api_key_env || "";
+      wrap.querySelector(".p-baseurl").value = p.base_url_env || "";
+      wrap.querySelector(".p-remove").addEventListener("click", () => {
+        if ($("profiles").children.length > 1) wrap.remove();
+      });
+      $("profiles").appendChild(wrap);
+    }
+    $("add-profile").addEventListener("click", () => addProfile());
+
+    // --- meta-driven lists ----------------------------------------------
+    async function loadMeta() {
+      const meta = await (await fetch("/meta")).json();
+      const pl = $("paradigms-list");
+      meta.paradigms.forEach((p, i) => {
+        pl.insertAdjacentHTML("beforeend",
+          `<label class="flex items-start gap-2 text-sm"><input type="checkbox" class="par mt-1" value="${p.name}" ${i === 0 ? "checked" : ""}/>
+           <span><span class="font-mono">${p.name}</span> — <span class="text-slate-500">${p.description}</span></span></label>`);
+      });
+      const bt = $("builtin-tools-list");
+      meta.builtin_tools.forEach((tool) => {
+        bt.insertAdjacentHTML("beforeend",
+          `<label class="flex items-start gap-2 text-sm"><input type="checkbox" class="btool mt-1" value="${tool.name}" checked/>
+           <span><span class="font-mono">${tool.name}</span> — <span class="text-slate-500">${tool.description}</span></span></label>`);
+      });
+      const cl = $("catalog-list");
+      meta.catalog.forEach((s) => {
+        const req = s.requires ? ` (needs ${s.requires})` : "";
+        cl.insertAdjacentHTML("beforeend",
+          `<label class="flex items-start gap-2 text-sm"><input type="checkbox" class="cserver mt-1" value="${s.name}"/>
+           <span><span class="font-mono">${s.name}</span>${req} — <span class="text-slate-500">${s.description}</span></span></label>`);
+      });
+    }
+
+    $("mcp_enabled").addEventListener("change", () => {
+      $("catalog-wrap").classList.toggle("hidden", !$("mcp_enabled").checked);
+    });
+
+    // --- build spec ------------------------------------------------------
+    const intOrNull = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const checkedValues = (cls) => Array.from(document.querySelectorAll("." + cls + ":checked")).map((e) => e.value);
+
+    function buildSpec() {
+      const spec = {};
+      const dn = $("display_name").value.trim();
+      if (dn) spec.display_name = dn;
+      spec.project_slug = $("project_slug").value.trim() || "agent_harness";
+      spec.language = lang;  // the single language choice threads into the product UI default
+      spec.paradigms = checkedValues("par");
+
+      const profiles = Array.from(document.querySelectorAll(".profile")).map((w) => {
+        const o = {
+          name: w.querySelector(".p-name").value.trim(),
+          model: w.querySelector(".p-model").value.trim(),
+        };
+        const key = w.querySelector(".p-key").value.trim();
+        if (key) o.api_key_env = key;
+        const bu = w.querySelector(".p-baseurl").value.trim();
+        if (bu) o.base_url_env = bu;
+        return o;
+      }).filter((p) => p.name || p.model);
+      spec.llms = profiles;
+      if (profiles.length && profiles[0].name) spec.roles = { generation: profiles[0].name };
+
+      const prompts = {};
+      if ($("system").value.trim()) prompts.system = $("system").value.trim();
+      if ($("persona").value.trim()) prompts.persona = $("persona").value.trim();
+      const rf = $("rules_files").value.split("\n").map((s) => s.trim()).filter(Boolean);
+      if (rf.length) prompts.rules_files = rf;
+      if (Object.keys(prompts).length) spec.prompts = prompts;
+
+      spec.tools = checkedValues("btool").map((name) => ({ name, enabled: true }));
+      spec.mcp = { enabled: $("mcp_enabled").checked };
+      spec.skills = { enabled: $("skills_enabled").checked };
+
+      const ctx = { strategy: $("ctx_strategy").value, keep_last_turns: Number($("ctx_keep_last_turns").value || 6) };
+      const mct = intOrNull("ctx_max_tokens");
+      if (mct) ctx.max_context_tokens = mct;
+      spec.context = ctx;
+
+      const budget = {};
+      const ms = intOrNull("b_max_steps"); if (ms) budget.max_steps = ms;
+      const sec = intOrNull("b_max_seconds"); if (sec) budget.max_seconds = sec;
+      const cost = intOrNull("b_max_cost"); if (cost) budget.max_cost_usd = cost;
+      if (Object.keys(budget).length) spec.budget = budget;
+
+      spec.interfaces = { cli: true, web: $("iface_web").checked };
+      spec.observability = { trace: $("obs_trace").checked, trace_dir: $("obs_trace_dir").value.trim() || "traces" };
+      return spec;
+    }
+
+    function payload() {
+      return {
+        spec: buildSpec(),
+        mcp_servers: $("mcp_enabled").checked ? checkedValues("cserver") : [],
+        llm_language: $("llm_language").checked,
+      };
+    }
+
+    function showErrors(errors) {
+      const box = $("errors");
+      box.classList.remove("hidden");
+      box.innerHTML = "<p class='font-medium'>" + t("err_fix") + "</p>" +
+        "<ul class='list-disc pl-5'>" + errors.map((e) => `<li><span class="font-mono">${e.loc}</span>: ${e.msg}</li>`).join("") + "</ul>";
+    }
+
+    $("produce").addEventListener("click", async () => {
+      $("errors").classList.add("hidden");
+      $("produce-status").textContent = "";
+      const resp = await fetch("/spec", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload()),
+      });
+      const data = await resp.json();
+      if (!data.ok) { showErrors(data.errors || []); $("spec-yaml").classList.add("hidden"); $("download").classList.add("hidden"); return; }
+      $("spec-yaml").value = data.yaml;
+      $("spec-yaml").classList.remove("hidden");
+      $("download").href = "data:text/yaml;charset=utf-8," + encodeURIComponent(data.yaml);
+      $("download").classList.remove("hidden");
+      $("newcmd").textContent = data.new_command;
+      $("newcmd-wrap").classList.remove("hidden");
+      $("produce-status").textContent = t("ok_produced");
+    });
+
+    $("generate").addEventListener("click", async () => {
+      $("generate-status").textContent = "...";
+      const body = payload();
+      body.target_dir = $("target_dir").value.trim();
+      body.git = $("gen_git").checked;
+      const resp = await fetch("/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!data.ok) { showErrors(data.errors || []); $("generate-status").textContent = ""; return; }
+      $("generate-status").textContent = t("ok_generated") + " " + data.target_dir + " (" + data.files + " files)";
+    });
+
+    $("lang").addEventListener("change", () => { lang = $("lang").value; applyI18n(); });
+
+    addProfile();
+    loadMeta();
+    applyI18n();
+    show("basic");
+  </script>
+</body>
+</html>

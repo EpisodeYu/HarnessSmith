@@ -171,6 +171,46 @@ def test_golden_skills_enabled_generates_and_smoke_passes(tmp_path):
 
 
 @pytest.mark.golden
+def test_golden_wizard_spec_generates_and_smoke_passes(tmp_path):
+    """The wizard's POST /spec output is a real spec: validate -> generate ->
+    lock -> sync + import + mock step + pytest (web=true, so test_web runs)."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from harnessforge.wizard.app import create_app
+
+    client = TestClient(create_app())
+    spec_data = {
+        "display_name": "Wizard Bot",
+        "project_slug": "wizard_bot",
+        "paradigms": ["agent", "plan", "ask"],
+        "llms": [{"name": "default", "model": "gpt-4o-mini", "api_key_env": "OPENAI_API_KEY"}],
+        "roles": {"generation": "default"},
+        "prompts": {"system": "You are helpful."},
+        "tools": [{"name": "calculator", "enabled": True}],
+        "interfaces": {"cli": True, "web": True},
+        "context": {"strategy": "truncate", "keep_last_turns": 4},
+        "budget": {"max_steps": 4},
+    }
+    resp = client.post("/spec", json={"spec": spec_data})
+    assert resp.status_code == 200, resp.text
+    spec_file = tmp_path / "spec.yaml"
+    spec_file.write_text(resp.json()["yaml"], encoding="utf-8")
+
+    spec = load_spec(spec_file)
+    out = tmp_path / "wizard_out"
+    result = generate(spec, out, git_init=False)
+
+    lock_dependencies(out)
+    lock_text = (out / "uv.lock").read_text(encoding="utf-8").lower()
+    assert "fastapi" in lock_text  # web=true -> web deps locked in
+    for forbidden in FORBIDDEN:
+        assert forbidden not in lock_text, forbidden
+
+    smoke_check(out, result.project_slug)
+
+
+@pytest.mark.golden
 def test_uvx_harnessforge_new_smoke(tmp_path):
     """`uvx --from <repo> harnessforge new ...` builds + runs the CLI one-shot."""
     if shutil.which("uv") is None:

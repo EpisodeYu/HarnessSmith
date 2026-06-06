@@ -41,6 +41,28 @@ def test_mcp_enabled_is_accepted():
     assert spec.mcp.enabled is True
 
 
+def test_display_name_defaults_to_none():
+    assert HarnessSpec().display_name is None
+
+
+def test_display_name_is_accepted():
+    spec = HarnessSpec.model_validate({"display_name": "My Coding Assistant"})
+    assert spec.display_name == "My Coding Assistant"
+
+
+def test_language_defaults_to_en():
+    assert HarnessSpec().language == "en"
+
+
+def test_language_accepts_zh():
+    assert HarnessSpec.model_validate({"language": "zh"}).language == "zh"
+
+
+def test_invalid_language_is_rejected():
+    with pytest.raises(ValidationError):
+        HarnessSpec.model_validate({"language": "fr"})
+
+
 def test_paradigms_default_is_agent():
     spec = HarnessSpec()
     assert spec.paradigms == ["agent"]

@@ -334,6 +334,90 @@ def test_web_index_has_no_unrendered_jinja(tmp_path, spec):
     assert "agent_harness" in html  # project_slug was rendered into the title
 
 
+# --- Slice 7: display_name, context seeding, paged config panel ------------
+
+
+def test_display_name_renders_in_titles_and_readme(tmp_path, spec):
+    spec.display_name = "Friendly Bot"
+    spec.interfaces.web = True
+    out = tmp_path / "named"
+    generate(spec, out, git_init=False)
+    pkg = out / "src" / "agent_harness"
+
+    assert (out / "README.md").read_text(encoding="utf-8").splitlines()[0] == "# Friendly Bot"
+    assert 'FastAPI(title="Friendly Bot — web")' in (pkg / "interfaces" / "web.py").read_text(
+        encoding="utf-8"
+    )
+    idx = (pkg / "interfaces" / "web_index.html").read_text(encoding="utf-8")
+    assert "<title>Friendly Bot — web</title>" in idx
+    # the slug still drives the package/folder, not the display name
+    assert (pkg / "harness" / "loop.py").is_file()
+
+
+def test_display_name_falls_back_to_slug(tmp_path, spec):
+    """The example spec has no display_name -> titles use project_slug."""
+    out = tmp_path / "fallback"
+    generate(spec, out, git_init=False)
+    assert (out / "README.md").read_text(encoding="utf-8").splitlines()[0] == "# agent_harness"
+
+
+def test_context_block_seeds_from_spec(tmp_path, spec):
+    spec.context = {"strategy": "summarize", "keep_last_turns": 3, "max_context_tokens": 4000}
+    out = tmp_path / "ctx"
+    generate(spec, out, git_init=False)
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "strategy: summarize" in config_yaml
+    assert "keep_last_turns: 3" in config_yaml
+    assert "max_context_tokens: 4000" in config_yaml
+
+
+def test_context_block_defaults_when_spec_omits_it(tmp_path, spec):
+    out = tmp_path / "ctx_default"
+    generate(spec, out, git_init=False)
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "strategy: truncate" in config_yaml
+    assert "keep_last_turns: 6" in config_yaml
+    assert "# max_context_tokens: 8000" in config_yaml  # stays a commented hint
+
+
+def test_web_index_has_paged_config_and_language_switch(tmp_path, preset_spec):
+    preset_spec.interfaces.web = True
+    out = tmp_path / "paged"
+    generate(preset_spec, out, git_init=False)
+    idx = (out / "src" / "coding_assistant" / "interfaces" / "web_index.html").read_text(
+        encoding="utf-8"
+    )
+    assert 'id="lang"' in idx and "中文" in idx  # language switch (en/zh)
+    assert 'id="cfg-tabs"' in idx  # config is paged by function
+    for sub in (
+        "subtab_llm", "subtab_context", "subtab_budget", "subtab_tools",
+        "subtab_prompts", "subtab_paradigms", "subtab_observability",
+    ):
+        assert sub in idx
+
+
+def test_language_seeds_product_web_default(tmp_path, spec):
+    """spec.language threads into the product web's default UI language."""
+    spec.interfaces.web = True
+    spec.language = "zh"
+    out = tmp_path / "lang_zh"
+    generate(spec, out, git_init=False)
+    idx = (out / "src" / "agent_harness" / "interfaces" / "web_index.html").read_text(
+        encoding="utf-8"
+    )
+    assert 'localStorage.getItem("hf_lang") || "zh"' in idx
+
+
+def test_language_defaults_to_en_in_product_web(tmp_path, spec):
+    spec.interfaces.web = True
+    out = tmp_path / "lang_en"
+    generate(spec, out, git_init=False)
+    idx = (out / "src" / "agent_harness" / "interfaces" / "web_index.html").read_text(
+        encoding="utf-8"
+    )
+    assert 'localStorage.getItem("hf_lang") || "en"' in idx
+
+
 # --- Slice 4: optional MCP tools (conditional generation) ------------------
 
 

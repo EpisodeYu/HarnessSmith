@@ -3,37 +3,95 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{ project_slug }} — web</title>
+  <title>{{ display_name }} — web</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 text-slate-800">
   <main class="mx-auto max-w-3xl p-6 space-y-6">
-    <header class="flex items-center justify-between">
-      <h1 class="text-xl font-semibold">{{ project_slug }}</h1>
-      <nav class="text-sm space-x-3">
-        <button id="tab-chat" class="font-semibold underline">Chat</button>
-        <button id="tab-config" class="text-slate-500">Config</button>
+    <header class="flex items-center justify-between gap-3">
+      <h1 class="text-xl font-semibold">{{ display_name }}</h1>
+      <nav class="flex items-center gap-3 text-sm">
+        <select id="lang" class="rounded-lg border px-2 py-1" title="Language">
+          <option value="en">English</option>
+          <option value="zh">中文</option>
+        </select>
+        <button id="tab-chat" class="font-semibold underline" data-i18n="nav_chat">Chat</button>
+        <button id="tab-config" class="text-slate-500" data-i18n="nav_config">Config</button>
       </nav>
     </header>
 
     <section id="view-chat" class="space-y-3">
       <div id="log" class="h-96 overflow-y-auto rounded-lg border bg-white p-4 text-sm space-y-2"></div>
       <form id="chat-form" class="flex items-center gap-2">
-        <input id="msg" class="flex-1 rounded-lg border px-3 py-2" placeholder="Ask something…" autocomplete="off" />
-        <select id="mode" class="rounded-lg border px-2 py-2 text-sm" title="Loop paradigm"></select>
+        <input id="msg" class="flex-1 rounded-lg border px-3 py-2" data-i18n-ph="chat_placeholder" placeholder="Ask something…" autocomplete="off" />
+        <select id="mode" class="rounded-lg border px-2 py-2 text-sm" data-i18n-title="chat_mode_title" title="Loop paradigm"></select>
         <label class="flex items-center gap-1 text-sm text-slate-500">
-          <input id="stream" type="checkbox" checked /> stream
+          <input id="stream" type="checkbox" checked /> <span data-i18n="chat_stream">stream</span>
         </label>
-        <button class="rounded-lg bg-slate-800 px-4 py-2 text-white">Send</button>
+        <button class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="chat_send">Send</button>
       </form>
     </section>
 
-    <section id="view-config" class="hidden space-y-3">
-      <p class="text-sm text-slate-500">Runtime behavioral config (no secrets). Edits apply in-process.</p>
-      <textarea id="cfg" class="h-96 w-full rounded-lg border bg-white p-3 font-mono text-xs"></textarea>
-      <div class="flex items-center gap-3">
-        <button id="cfg-save" class="rounded-lg bg-slate-800 px-4 py-2 text-white">Save</button>
-        <button id="cfg-reload" class="rounded-lg border px-4 py-2">Reload</button>
+    <section id="view-config" class="hidden space-y-4">
+      <p class="text-sm text-slate-500" data-i18n="cfg_intro">Runtime behavioral config (no secrets). Edits apply in-process.</p>
+      <nav id="cfg-tabs" class="flex flex-wrap gap-1 border-b text-sm"></nav>
+
+      <div data-cfg="llm" class="space-y-3">
+        <div id="cfg-profiles" class="space-y-3"></div>
+        <div>
+          <h4 class="text-sm font-medium" data-i18n="roles_label">Roles</h4>
+          <div id="cfg-roles" class="mt-1 space-y-1"></div>
+        </div>
+      </div>
+
+      <div data-cfg="context" class="hidden space-y-3">
+        <label class="block text-sm"><span data-i18n="ctx_strategy_label">Strategy</span>
+          <select id="cfg-ctx-strategy" class="mt-1 block rounded-lg border px-3 py-2">
+            <option value="truncate">truncate</option><option value="summarize">summarize</option><option value="none">none</option>
+          </select></label>
+        <label class="block text-sm"><span data-i18n="ctx_keep_label">keep_last_turns</span>
+          <input id="cfg-ctx-keep" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
+        <label class="block text-sm"><span data-i18n="ctx_maxtokens_label">max_context_tokens</span>
+          <input id="cfg-ctx-maxtokens" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
+      </div>
+
+      <div data-cfg="budget" class="hidden flex flex-wrap gap-4">
+        <label class="text-sm">max_steps<input id="cfg-b-steps" type="number" min="1" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
+        <label class="text-sm">max_seconds<input id="cfg-b-seconds" type="number" min="0" step="0.1" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
+        <label class="text-sm">max_tokens<input id="cfg-b-tokens" type="number" min="1" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
+        <label class="text-sm">max_cost_usd<input id="cfg-b-cost" type="number" min="0" step="0.01" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
+      </div>
+
+      <div data-cfg="tools" class="hidden space-y-2">
+        <p class="text-xs text-slate-500" data-i18n="tools_hint">Allowlist — only enabled tools are offered to the model.</p>
+        <div id="cfg-tools" class="space-y-1"></div>
+      </div>
+
+      <div data-cfg="prompts" class="hidden space-y-3">
+        <label class="block text-sm"><span data-i18n="prompts_system">system</span>
+          <textarea id="cfg-p-system" rows="3" class="mt-1 block w-full rounded-lg border px-3 py-2"></textarea></label>
+        <label class="block text-sm"><span data-i18n="prompts_persona">persona</span>
+          <textarea id="cfg-p-persona" rows="2" class="mt-1 block w-full rounded-lg border px-3 py-2"></textarea></label>
+        <label class="block text-sm"><span data-i18n="prompts_rules">rules_files (one path per line)</span>
+          <textarea id="cfg-p-rules" rows="2" class="mt-1 block w-full rounded-lg border px-3 py-2 font-mono"></textarea></label>
+      </div>
+
+      <div data-cfg="paradigms" class="hidden space-y-3">
+        <label class="block text-sm"><span data-i18n="paradigms_enabled">enabled (comma-separated)</span>
+          <input id="cfg-par-enabled" class="mt-1 block w-full rounded-lg border px-3 py-2 font-mono" /></label>
+        <label class="block text-sm"><span data-i18n="paradigms_default">default</span>
+          <input id="cfg-par-default" class="mt-1 block w-48 rounded-lg border px-3 py-2 font-mono" /></label>
+      </div>
+
+      <div data-cfg="observability" class="hidden space-y-3">
+        <label class="flex items-center gap-2 text-sm"><input id="cfg-obs-trace" type="checkbox" /> <span data-i18n="obs_trace">write JSONL trace</span></label>
+        <label class="block text-sm"><span data-i18n="obs_tracedir">trace_dir</span>
+          <input id="cfg-obs-tracedir" class="mt-1 block w-48 rounded-lg border px-3 py-2 font-mono" /></label>
+      </div>
+
+      <div class="flex items-center gap-3 border-t pt-3">
+        <button id="cfg-save" class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="cfg_save">Save</button>
+        <button id="cfg-reload" class="rounded-lg border px-4 py-2" data-i18n="cfg_reload">Reload</button>
         <span id="cfg-status" class="text-sm text-slate-500"></span>
       </div>
     </section>
@@ -43,6 +101,58 @@
     const $ = (id) => document.getElementById(id);
     const log = $("log");
 
+    const I18N = {
+      en: {
+        nav_chat: "Chat", nav_config: "Config", chat_placeholder: "Ask something…",
+        chat_send: "Send", chat_stream: "stream", chat_mode_title: "Loop paradigm",
+        cfg_intro: "Runtime behavioral config (no secrets). Edits apply in-process.",
+        cfg_save: "Save", cfg_reload: "Reload", cfg_saved: "saved", cfg_invalid: "rejected",
+        subtab_llm: "LLM", subtab_context: "Context", subtab_budget: "Budget",
+        subtab_tools: "Tools", subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
+        subtab_observability: "Observability",
+        roles_label: "Roles", profile_name: "name", profile_model: "model",
+        profile_key: "api_key_env", profile_baseurl: "base_url_env", profile_temp: "temperature",
+        profile_maxtok: "max_tokens", profile_pcost: "prompt_cost_per_1k", profile_ccost: "completion_cost_per_1k",
+        ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_maxtokens_label: "max_context_tokens",
+        tools_hint: "Allowlist — only enabled tools are offered to the model.",
+        prompts_system: "system", prompts_persona: "persona", prompts_rules: "rules_files (one path per line)",
+        paradigms_enabled: "enabled (comma-separated)", paradigms_default: "default",
+        obs_trace: "write JSONL trace", obs_tracedir: "trace_dir",
+      },
+      zh: {
+        nav_chat: "对话", nav_config: "配置", chat_placeholder: "问点什么…",
+        chat_send: "发送", chat_stream: "流式", chat_mode_title: "循环范式",
+        cfg_intro: "运行期行为性配置(无密钥)。修改进程内即时生效。",
+        cfg_save: "保存", cfg_reload: "重载", cfg_saved: "已保存", cfg_invalid: "被拒绝",
+        subtab_llm: "LLM", subtab_context: "上下文", subtab_budget: "预算",
+        subtab_tools: "工具", subtab_prompts: "提示词", subtab_paradigms: "范式",
+        subtab_observability: "可观测",
+        roles_label: "角色", profile_name: "名称", profile_model: "model",
+        profile_key: "api_key_env", profile_baseurl: "base_url_env", profile_temp: "temperature",
+        profile_maxtok: "max_tokens", profile_pcost: "prompt_cost_per_1k", profile_ccost: "completion_cost_per_1k",
+        ctx_strategy_label: "策略", ctx_keep_label: "保留最近轮数", ctx_maxtokens_label: "最大上下文 token",
+        tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
+        prompts_system: "系统提示", prompts_persona: "人设", prompts_rules: "rule 文件(每行一个路径)",
+        paradigms_enabled: "启用范式(逗号分隔)", paradigms_default: "默认范式",
+        obs_trace: "写 JSONL trace", obs_tracedir: "trace 目录",
+      },
+    };
+    let lang = localStorage.getItem("hf_lang") || "{{ language }}";
+    const t = (k) => (I18N[lang] && I18N[lang][k]) || k;
+
+    function applyI18n() {
+      document.documentElement.lang = lang;
+      $("lang").value = lang;
+      document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+      document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+      document.querySelectorAll("[data-i18n-title]").forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+      buildCfgTabs();
+    }
+    $("lang").addEventListener("change", () => {
+      lang = $("lang").value; localStorage.setItem("hf_lang", lang); applyI18n();
+    });
+
+    // ---- chat (unchanged behavior) -------------------------------------
     function line(text, cls) {
       const el = document.createElement("div");
       el.className = cls || "text-slate-700";
@@ -58,8 +168,7 @@
         $("mode").innerHTML = "";
         for (const name of data.enabled) {
           const opt = document.createElement("option");
-          opt.value = name;
-          opt.textContent = name;
+          opt.value = name; opt.textContent = name;
           if (name === data.default) opt.selected = true;
           $("mode").appendChild(opt);
         }
@@ -76,7 +185,7 @@
       line("you" + (mode ? " (" + mode + ")" : "") + ": " + message, "font-semibold");
 
       const stream = $("stream").checked;
-      let answer = null;  // the live assistant line, created on the first token
+      let answer = null;
       let url = "/chat?message=" + encodeURIComponent(message) + "&stream=" + stream;
       if (mode) url += "&mode=" + encodeURIComponent(mode);
       const es = new EventSource(url);
@@ -106,28 +215,147 @@
       });
     });
 
+    // ---- config: functional sub-tabs ------------------------------------
+    const CFG_TABS = ["llm", "context", "budget", "tools", "prompts", "paradigms", "observability"];
+    let cfgTab = "llm";
+    let cfg = {};
+
+    function buildCfgTabs() {
+      const nav = $("cfg-tabs");
+      if (!nav) return;
+      nav.innerHTML = "";
+      for (const name of CFG_TABS) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = t("subtab_" + name);
+        b.className = "px-3 py-2 " + (name === cfgTab ? "border-b-2 border-slate-800 font-semibold" : "text-slate-500");
+        b.addEventListener("click", () => showCfg(name));
+        nav.appendChild(b);
+      }
+    }
+    function showCfg(name) {
+      cfgTab = name;
+      document.querySelectorAll("[data-cfg]").forEach((p) => p.classList.toggle("hidden", p.dataset.cfg !== name));
+      buildCfgTabs();
+    }
+
+    const numOrNull = (v) => { v = (v ?? "").toString().trim(); return v === "" ? null : Number(v); };
+
+    function renderConfig() {
+      // LLM profiles
+      const pc = $("cfg-profiles");
+      pc.innerHTML = "";
+      (cfg.llms || []).forEach((p) => {
+        const row = document.createElement("div");
+        row.className = "profile rounded-lg border p-3 grid grid-cols-2 gap-2";
+        const f = (cls, label, val, mono) =>
+          "<label class='text-xs'>" + t(label) + "<input class='" + cls + " mt-1 w-full rounded border px-2 py-1" +
+          (mono ? " font-mono" : "") + "' value='" + (val == null ? "" : String(val).replace(/'/g, "&#39;")) + "'/></label>";
+        row.innerHTML =
+          f("p-name", "profile_name", p.name) + f("p-model", "profile_model", p.model, true) +
+          f("p-key", "profile_key", p.api_key_env, true) + f("p-baseurl", "profile_baseurl", p.base_url_env, true) +
+          f("p-temp", "profile_temp", p.temperature) + f("p-maxtok", "profile_maxtok", p.max_tokens) +
+          f("p-pcost", "profile_pcost", p.prompt_cost_per_1k) + f("p-ccost", "profile_ccost", p.completion_cost_per_1k);
+        pc.appendChild(row);
+      });
+      // roles
+      const rc = $("cfg-roles");
+      rc.innerHTML = "";
+      Object.entries(cfg.roles || {}).forEach(([role, target]) => {
+        rc.insertAdjacentHTML("beforeend",
+          "<div class='flex items-center gap-2 text-sm'><span class='font-mono w-32'>" + role +
+          "</span><input class='role-target rounded border px-2 py-1 font-mono' data-role='" + role + "' value='" + target + "'/></div>");
+      });
+      // context
+      const ctx = cfg.context || {};
+      $("cfg-ctx-strategy").value = ctx.strategy || "truncate";
+      $("cfg-ctx-keep").value = ctx.keep_last_turns ?? 6;
+      $("cfg-ctx-maxtokens").value = ctx.max_context_tokens ?? "";
+      // budget
+      const b = cfg.budget || {};
+      $("cfg-b-steps").value = b.max_steps ?? "";
+      $("cfg-b-seconds").value = b.max_seconds ?? "";
+      $("cfg-b-tokens").value = b.max_tokens ?? "";
+      $("cfg-b-cost").value = b.max_cost_usd ?? "";
+      // tools
+      const tc = $("cfg-tools");
+      tc.innerHTML = "";
+      (cfg.tools || []).forEach((tool, i) => {
+        tc.insertAdjacentHTML("beforeend",
+          "<label class='flex items-center gap-2 text-sm'><input type='checkbox' class='tool-en' data-i='" + i +
+          "' " + (tool.enabled ? "checked" : "") + "/> <span class='font-mono'>" + tool.name + "</span></label>");
+      });
+      // prompts
+      const pr = cfg.prompts || {};
+      $("cfg-p-system").value = pr.system || "";
+      $("cfg-p-persona").value = pr.persona || "";
+      $("cfg-p-rules").value = (pr.rules_files || []).join("\n");
+      // paradigms
+      const par = cfg.paradigms || {};
+      $("cfg-par-enabled").value = (par.enabled || []).join(", ");
+      $("cfg-par-default").value = par.default || "";
+      // observability
+      const obs = cfg.observability || {};
+      $("cfg-obs-trace").checked = !!obs.trace;
+      $("cfg-obs-tracedir").value = obs.trace_dir || "traces";
+    }
+
+    function collectConfig() {
+      const patch = {};
+      patch.llms = Array.from(document.querySelectorAll("#cfg-profiles .profile")).map((w) => {
+        const g = (cls) => w.querySelector("." + cls).value.trim();
+        const o = { name: g("p-name"), model: g("p-model") };
+        if (g("p-key")) o.api_key_env = g("p-key");
+        if (g("p-baseurl")) o.base_url_env = g("p-baseurl");
+        const temp = numOrNull(g("p-temp")); if (temp != null) o.temperature = temp;
+        const mt = numOrNull(g("p-maxtok")); if (mt != null) o.max_tokens = mt;
+        o.prompt_cost_per_1k = numOrNull(g("p-pcost")) ?? 0;
+        o.completion_cost_per_1k = numOrNull(g("p-ccost")) ?? 0;
+        return o;
+      });
+      const roles = {};
+      document.querySelectorAll("#cfg-roles .role-target").forEach((el) => {
+        if (el.value.trim()) roles[el.dataset.role] = el.value.trim();
+      });
+      patch.roles = roles;
+      patch.context = { strategy: $("cfg-ctx-strategy").value, keep_last_turns: Number($("cfg-ctx-keep").value || 6) };
+      const mct = numOrNull($("cfg-ctx-maxtokens").value); if (mct != null) patch.context.max_context_tokens = mct;
+      patch.budget = {
+        max_steps: numOrNull($("cfg-b-steps").value), max_seconds: numOrNull($("cfg-b-seconds").value),
+        max_tokens: numOrNull($("cfg-b-tokens").value), max_cost_usd: numOrNull($("cfg-b-cost").value),
+      };
+      patch.tools = (cfg.tools || []).map((tool, i) => {
+        const cb = document.querySelector(".tool-en[data-i='" + i + "']");
+        return { name: tool.name, enabled: cb ? cb.checked : tool.enabled };
+      });
+      const prompts = {};
+      if ($("cfg-p-system").value.trim()) prompts.system = $("cfg-p-system").value.trim();
+      if ($("cfg-p-persona").value.trim()) prompts.persona = $("cfg-p-persona").value.trim();
+      const rules = $("cfg-p-rules").value.split("\n").map((s) => s.trim()).filter(Boolean);
+      prompts.rules_files = rules;
+      patch.prompts = prompts;
+      patch.paradigms = {
+        enabled: $("cfg-par-enabled").value.split(",").map((s) => s.trim()).filter(Boolean),
+        default: $("cfg-par-default").value.trim(),
+      };
+      patch.observability = { trace: $("cfg-obs-trace").checked, trace_dir: $("cfg-obs-tracedir").value.trim() || "traces" };
+      return patch;
+    }
+
     async function loadConfig() {
-      const resp = await fetch("/config");
-      $("cfg").value = JSON.stringify(await resp.json(), null, 2);
+      cfg = await (await fetch("/config")).json();
+      renderConfig();
       $("cfg-status").textContent = "";
     }
     $("cfg-reload").addEventListener("click", loadConfig);
     $("cfg-save").addEventListener("click", async () => {
-      let body;
-      try { body = JSON.parse($("cfg").value); }
-      catch (err) { $("cfg-status").textContent = "invalid JSON"; return; }
       const resp = await fetch("/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(collectConfig()),
       });
       const data = await resp.json();
-      if (resp.ok) {
-        $("cfg").value = JSON.stringify(data, null, 2);
-        $("cfg-status").textContent = "saved";
-      } else {
-        $("cfg-status").textContent = data.error || "rejected";
-      }
+      if (resp.ok) { cfg = data; renderConfig(); $("cfg-status").textContent = t("cfg_saved"); }
+      else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });
 
     function show(which) {
@@ -135,10 +363,12 @@
       $("view-config").classList.toggle("hidden", which !== "config");
       $("tab-chat").className = which === "chat" ? "font-semibold underline" : "text-slate-500";
       $("tab-config").className = which === "config" ? "font-semibold underline" : "text-slate-500";
-      if (which === "config") loadConfig();
+      if (which === "config") { showCfg(cfgTab); loadConfig(); }
     }
     $("tab-chat").addEventListener("click", () => show("chat"));
     $("tab-config").addEventListener("click", () => show("config"));
+
+    applyI18n();
   </script>
 </body>
 </html>

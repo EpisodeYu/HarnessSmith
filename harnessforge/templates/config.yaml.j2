@@ -41,9 +41,11 @@ tools:
 # summarize = fold older turns via the `compaction` role; none = off.
 # Unset max_context_tokens means no limit (default behaves like a plain loop).
 context:
-  strategy: truncate
-  keep_last_turns: 6
-  # max_context_tokens: 8000
+  strategy: {{ (spec.context or {}).get("strategy", "truncate") }}
+  keep_last_turns: {{ (spec.context or {}).get("keep_last_turns", 6) }}
+{% if (spec.context or {}).get("max_context_tokens") %}  max_context_tokens: {{ (spec.context or {}).get("max_context_tokens") }}
+{% else %}  # max_context_tokens: 8000
+{% endif %}
 
 # Loop paradigms (runtime roster). `enabled` lists the selectable paradigms; pick
 # one per turn via `run --mode <name>` (CLI) or the web dropdown. `default` is

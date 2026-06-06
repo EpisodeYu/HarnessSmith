@@ -106,7 +106,7 @@ def _chat_events(
 
 def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
     """Build the FastAPI app. ``config`` defaults to ``load_config()`` (config.yaml)."""
-    app = FastAPI(title="{{ project_slug }} — web")
+    app = FastAPI(title="{{ display_name }} — web")
     app.state.config = config or load_config()
     app.state.mock = mock
 

@@ -122,7 +122,7 @@ flowchart LR
 ```
 
 生成器目录(仓库根 `/home/s1yu/HarnessForge`,独立 git repo,MIT;支持 `uvx harnessforge new` 免安装一次性运行):
-- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/llms/roles/prompts(`system`/`persona`/**`rules_files`**(Slice 6B,全局 rule 文件种子,渲染进运行期 `config.yaml`))/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/observability/budget;context/rag/secrets backend 字段预留但 MVP 不全实现)。
+- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/**`display_name`**(Slice 7,人类可读显示名,渲染进产物 web 标题/header + README 标题,空则回落 `project_slug`;wizard 由它派生 slug;纯标签不进 `config.yaml`)/**`language`**(Slice 7,产物 web 默认 UI 语言 `en`/`zh`,种子化 web 默认、运行期浏览器可切;Agent 回答语言另由 wizard 可选软指令注入系统提示)/llms/roles/prompts(`system`/`persona`/**`rules_files`**(Slice 6B,全局 rule 文件种子,渲染进运行期 `config.yaml`))/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/observability/budget;context(Slice 7 起 wizard 采集并**种子化** `config.yaml` 的 context 块,沿用 rules_files 式 seed)/rag/secrets backend 字段预留但 MVP 不全实现)。
 - `harnessforge/generator.py` — 渲染模板 → 写出仓库 + 拷入 `harness.spec.yaml` + `git init` + `uv lock` + 重跑警告不覆盖 + 生成后冒烟自检(`uv sync`+`pytest`+mock 跑一步)。
 - `harnessforge/cli.py` — Typer 入口(`new`、`--spec`、`--preset`、交互模式、`doctor` 预检、`--no-verify` 关闭冒烟自检)。
 - `harnessforge/catalog/mcp_servers.yaml` — 精选静态 MCP catalog(L2)。
@@ -153,7 +153,7 @@ flowchart LR
 ## 6. 关键技术决策
 
 已定(用户拍板):
-- 名称 **HarnessForge**;生成器包/CLI `harnessforge`,产物默认包名 `agent_harness`(spec `project_slug` 可覆盖)。
+- 名称 **HarnessForge**;生成器包/CLI `harnessforge`,产物默认包名 `agent_harness`(spec `project_slug` 可覆盖)。产物**显示名**走 spec `display_name`(人类可读,用于 UI 标题/README;空则回落 `project_slug`);wizard 输入显示名并由它派生 `project_slug`(snake_case 包名/文件夹)。
 - 仓库 `/home/s1yu/HarnessForge`,独立 git repo,**MIT**;GitHub `EpisodeYu/HarnessForge`。
 - LLM 底座:**openai 官方 SDK + base_url**(provider-agnostic)。
 - 循环:**原生 function-calling**(非文本解析 ReAct)。

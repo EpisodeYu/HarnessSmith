@@ -155,6 +155,31 @@ def new(
 
 
 @app.command()
+def wizard(
+    host: str = typer.Option("127.0.0.1", help="Host to bind the wizard to."),
+    port: int = typer.Option(8000, help="Port to bind the wizard to."),
+) -> None:
+    """Launch the single-page spec wizard (needs the optional `wizard` extra)."""
+    try:
+        import uvicorn
+
+        from .wizard.app import create_app
+    except ImportError as exc:
+        typer.secho(
+            "The wizard needs its optional dependencies. Install them with:\n"
+            "  uv pip install 'harnessforge[wizard]'  (or pip install 'harnessforge[wizard]')",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    typer.secho(
+        f"HarnessForge wizard → http://{host}:{port}  (Ctrl-C to stop)",
+        fg=typer.colors.GREEN,
+    )
+    uvicorn.run(create_app(), host=host, port=port)
+
+
+@app.command()
 def doctor() -> None:
     """Pre-flight: check that uv is installed and the package index is reachable."""
     report = run_doctor()
