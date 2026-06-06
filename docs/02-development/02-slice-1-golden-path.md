@@ -29,7 +29,7 @@
 
 **实现说明(与初版计划的偏差/细化)**:
 
-- **HarnessSpec 未改**(避免 `CLAUDE.md §6.1`)。**定价**(`prompt_cost_per_1k`/`completion_cost_per_1k`)与 **token 预算**(`budget.max_tokens`)都只落在**生成产物运行期** `config.py`,默认无限制/`0.0`,`config.yaml` 以注释提示——它们是部署期旋钮(费率随 provider 变),运行期可配更合理(人已确认)。`spec.budget` 仍保留生成期默认 steps/seconds/cost 三项。
+- **HarnessSpec 未改**(避免 `CLAUDE.md §6.1`)。**定价**(`prompt_cost_per_1k`/`completion_cost_per_1k`,**2026-06-06 Slice 7 续重命名为 `input_cost_per_million`/`output_cost_per_million`、单位改 per-1M 且货币无关**,见 `08-slice-7-wizard.md §2.3 实现说明`)与 **token 预算**(`budget.max_tokens`)都只落在**生成产物运行期** `config.py`,默认无限制/`0.0`,`config.yaml` 以注释提示——它们是部署期旋钮(费率随 provider 变),运行期可配更合理(人已确认)。`spec.budget` 仍保留生成期默认 steps/seconds/cost 三项。
 - **预算停止 = 4 维**:步数(轮次)/ 时间 / **token** / 费用,任意组合,命中第一个即停。"按费用"依赖对应 LLM profile 的非零单价,否则 cost 恒 0、永不触发(已在 `config.yaml`/`AGENTS.md` 写明)。
 - **mock LLM 落在产物内** `harness/mock.py`(非仅测试夹具),因此 `cli.py --mock`、Docker、冒烟自检、生成产物自带测试可共用同一 mock,真正"无 key 跑通一次工具调用"。
 - 产物**测试依赖**走 uv 原生 `[dependency-groups] dev = ["pytest"]`(`uv sync` 默认安装),而非 `optional-dependencies`——否则 `uv run pytest` 会落到临时解释器、找不到包(已踩坑修复)。

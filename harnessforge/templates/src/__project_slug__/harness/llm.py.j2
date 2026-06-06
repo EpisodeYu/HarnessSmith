@@ -69,16 +69,23 @@ class OpenAIClient:
         self.model = profile.model
         self.temperature = profile.temperature
         self.max_tokens = profile.max_tokens
+        self.reasoning_effort = profile.reasoning_effort
 
     def _request_kwargs(self, messages: list[dict], tools: list[dict] | None) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"model": self.model, "messages": messages}
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        # Sampling knobs are sent ONLY when set. Reasoning models (GPT-5.x /
+        # o-series) reject `temperature`; non-reasoning models reject
+        # `reasoning_effort`. Leaving the irrelevant one unset keeps the same
+        # client provider-agnostic across both kinds.
         if self.temperature is not None:
             kwargs["temperature"] = self.temperature
         if self.max_tokens is not None:
             kwargs["max_tokens"] = self.max_tokens
+        if self.reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self.reasoning_effort
         return kwargs
 
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:

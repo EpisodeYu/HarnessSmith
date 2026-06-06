@@ -21,10 +21,13 @@ from .llm import Usage
 
 
 def compute_cost(usage: Usage, profile: LLMProfileConfig) -> float:
-    """USD cost of one response given the profile's per-1K-token prices."""
+    """Cost of one response given the profile's per-1M-token prices.
+
+    Currency-agnostic: the profile prices are whatever currency you filled in.
+    """
     return (
-        usage.prompt_tokens / 1000 * profile.prompt_cost_per_1k
-        + usage.completion_tokens / 1000 * profile.completion_cost_per_1k
+        usage.prompt_tokens / 1_000_000 * profile.input_cost_per_million
+        + usage.completion_tokens / 1_000_000 * profile.output_cost_per_million
     )
 
 

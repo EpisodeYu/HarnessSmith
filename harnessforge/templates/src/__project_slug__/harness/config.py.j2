@@ -40,13 +40,21 @@ class LLMProfileConfig(BaseModel):
     model: str
     api_key_env: str = "OPENAI_API_KEY"
     base_url_env: str | None = None
-    # Optional sampling knobs passed through to the API when set.
+    # Optional sampling knobs — only sent to the API when set (None = omit, so the
+    # provider applies its own default, ~1.0 for chat models). Leave temperature
+    # UNSET for reasoning models (GPT-5.x / o-series): they reject any temperature
+    # and only accept it omitted.
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, gt=0)
-    # Optional cost accounting (USD per 1K tokens). Set these to track spend in
-    # the trace and to enable a cost-based budget stop; defaults to free.
-    prompt_cost_per_1k: float = 0.0
-    completion_cost_per_1k: float = 0.0
+    # Reasoning depth for reasoning models (Chat Completions ``reasoning_effort``):
+    # one of none/minimal/low/medium/high/xhigh (model-dependent). Only sent when
+    # set; leave unset for non-reasoning models (they reject the parameter).
+    reasoning_effort: str | None = None
+    # Optional cost accounting (price per 1,000,000 tokens, in your own currency —
+    # fill in your local price). Set these to track spend in the trace and to
+    # enable a cost-based budget stop; defaults to free.
+    input_cost_per_million: float = 0.0
+    output_cost_per_million: float = 0.0
 
 
 class PromptsConfig(BaseModel):

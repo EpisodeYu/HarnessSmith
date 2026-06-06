@@ -52,7 +52,8 @@ llms:
 ```
 
 Add the matching name(s) to `.env`. To track spend, set
-`prompt_cost_per_1k` / `completion_cost_per_1k` on the profile.
+`input_cost_per_million` / `output_cost_per_million` on the profile (price per
+1M tokens, in your own currency).
 
 ## Project rules (always-apply)
 
@@ -174,9 +175,10 @@ budget:
 ```
 
 `max_cost_usd` only works if the active LLM profile has non-zero
-`prompt_cost_per_1k` / `completion_cost_per_1k` — otherwise cost stays `0` and
-the limit never triggers. Pricing is a runtime knob (it lives in `config.yaml`,
-not the spec) so you can change provider rates without regenerating.
+`input_cost_per_million` / `output_cost_per_million` — otherwise cost stays `0`
+and the limit never triggers. Pricing is a runtime knob (it lives in
+`config.yaml`, not the spec) so you can change provider rates without
+regenerating.
 
 Every run writes a JSONL trace under the configured `trace_dir` with per-step
 token counts and cost. Inspect a run with `cat traces/run-*.jsonl`.

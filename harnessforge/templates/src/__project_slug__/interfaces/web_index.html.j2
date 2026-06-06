@@ -22,6 +22,10 @@
     </header>
 
     <section id="view-chat" class="space-y-3">
+      <div id="no-llm" class="hidden rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+        <span data-i18n="no_llm">Please configure an LLM first.</span>
+        <button id="no-llm-link" type="button" class="ml-1 underline" data-i18n="no_llm_link">Go to Config → LLM</button>
+      </div>
       <div id="log" class="h-96 overflow-y-auto rounded-lg border bg-white p-4 text-sm space-y-2"></div>
       <form id="chat-form" class="flex items-center gap-2">
         <input id="msg" class="flex-1 rounded-lg border px-3 py-2" data-i18n-ph="chat_placeholder" placeholder="Ask something…" autocomplete="off" />
@@ -29,7 +33,7 @@
         <label class="flex items-center gap-1 text-sm text-slate-500">
           <input id="stream" type="checkbox" checked /> <span data-i18n="chat_stream">stream</span>
         </label>
-        <button class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="chat_send">Send</button>
+        <button id="chat-send" class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="chat_send">Send</button>
       </form>
     </section>
 
@@ -38,10 +42,15 @@
       <nav id="cfg-tabs" class="flex flex-wrap gap-1 border-b text-sm"></nav>
 
       <div data-cfg="llm" class="space-y-3">
+        <div class="flex items-center justify-between">
+          <h4 class="text-sm font-medium" data-i18n="profiles_label">LLM profiles</h4>
+          <button id="cfg-add-profile" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="profile_add">+ Add profile</button>
+        </div>
         <div id="cfg-profiles" class="space-y-3"></div>
-        <div>
+        <div class="border-t pt-3">
           <h4 class="text-sm font-medium" data-i18n="roles_label">Roles</h4>
-          <div id="cfg-roles" class="mt-1 space-y-1"></div>
+          <p class="text-xs text-slate-500" data-i18n="roles_hint">Bind each role to a profile above.</p>
+          <div id="cfg-roles" class="mt-2 space-y-2"></div>
         </div>
       </div>
 
@@ -106,16 +115,28 @@
       en: {
         nav_chat: "Chat", nav_config: "Config", chat_placeholder: "Ask something…",
         chat_send: "Send", chat_stream: "stream", chat_mode_title: "Loop paradigm",
+        no_llm: "No LLM is configured yet — you can't chat until you add one.",
+        no_llm_link: "Go to Config → LLM",
         cfg_intro: "Runtime behavioral config (no secrets). Edits apply in-process.",
         cfg_save: "Save", cfg_reload: "Reload", cfg_saved: "saved", cfg_invalid: "rejected",
         subtab_llm: "LLM", subtab_context: "Context", subtab_budget: "Budget",
         subtab_tools: "Tools", subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
         subtab_observability: "Observability",
-        roles_label: "Roles", profile_name: "name", profile_model: "model",
-        profile_key: "api_key_env", profile_baseurl: "base_url_env", profile_temp: "temperature",
-        profile_maxtok: "max_tokens", profile_pcost: "prompt_cost_per_1k", profile_ccost: "completion_cost_per_1k",
-        set_key_ph: "set this key's value in .env (write-only)", set_key_btn: "Save to .env",
-        key_saved: "saved to .env", key_need_name: "set the api_key_env name first",
+        profiles_label: "LLM profiles", profile_add: "+ Add profile", profile_remove: "remove",
+        roles_label: "Roles", roles_hint: "Bind each role to a profile above.",
+        role_generation: "generation (main loop)", role_compaction: "compaction (summarize)",
+        role_use_first: "(first profile)", role_use_generation: "(use generation)",
+        profile_name: "name", profile_model: "model",
+        profile_key_section: "API key", profile_url_section: "Base URL",
+        profile_varname: "env var name",
+        adv_section: "Advanced (sampling)", stats_section: "Pricing (cost tracking)",
+        profile_temp: "temperature", profile_maxtok: "max_tokens", profile_reasoning: "reasoning effort",
+        temp_ph: "model default (≈1)", reasoning_default: "(model default)",
+        profile_input_cost: "input cost", profile_output_cost: "output cost",
+        cost_ph: "price / 1M tokens",
+        set_key_ph: "set this key's value in .env (overwrites if it exists)", set_key_btn: "Save to .env",
+        set_url_ph: "set this URL's value in .env (overwrites if it exists)", set_url_btn: "Save to .env",
+        key_saved: "saved to .env", key_need_name: "set the env-var name first",
         ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_maxtokens_label: "max_context_tokens",
         tools_hint: "Allowlist — only enabled tools are offered to the model.",
         prompts_system: "system", prompts_persona: "persona", prompts_rules: "rules_files (one path per line)",
@@ -125,16 +146,28 @@
       zh: {
         nav_chat: "对话", nav_config: "配置", chat_placeholder: "问点什么…",
         chat_send: "发送", chat_stream: "流式", chat_mode_title: "循环范式",
+        no_llm: "尚未配置任何 LLM —— 请先添加一个才能对话。",
+        no_llm_link: "前往 配置 → LLM",
         cfg_intro: "运行期行为性配置(无密钥)。修改进程内即时生效。",
         cfg_save: "保存", cfg_reload: "重载", cfg_saved: "已保存", cfg_invalid: "被拒绝",
         subtab_llm: "LLM", subtab_context: "上下文", subtab_budget: "预算",
         subtab_tools: "工具", subtab_prompts: "提示词", subtab_paradigms: "范式",
         subtab_observability: "可观测",
-        roles_label: "角色", profile_name: "名称", profile_model: "model",
-        profile_key: "api_key_env", profile_baseurl: "base_url_env", profile_temp: "temperature",
-        profile_maxtok: "max_tokens", profile_pcost: "prompt_cost_per_1k", profile_ccost: "completion_cost_per_1k",
-        set_key_ph: "在 .env 设置该 key 的值(只写不回显)", set_key_btn: "写入 .env",
-        key_saved: "已写入 .env", key_need_name: "请先填 api_key_env 名称",
+        profiles_label: "LLM 配置", profile_add: "+ 添加配置", profile_remove: "删除",
+        roles_label: "角色", roles_hint: "把每个角色绑定到上面的某个配置。",
+        role_generation: "generation(主循环)", role_compaction: "compaction(压缩)",
+        role_use_first: "(用第一个配置)", role_use_generation: "(同 generation)",
+        profile_name: "名称", profile_model: "model",
+        profile_key_section: "API key", profile_url_section: "Base URL",
+        profile_varname: "环境变量名",
+        adv_section: "高级(采样)", stats_section: "定价(成本统计)",
+        profile_temp: "temperature", profile_maxtok: "max_tokens", profile_reasoning: "思考深度",
+        temp_ph: "模型默认(≈1)", reasoning_default: "(模型默认)",
+        profile_input_cost: "输入 cost", profile_output_cost: "输出 cost",
+        cost_ph: "价格 / 百万 token",
+        set_key_ph: "在 .env 设置该 key 的值(如已存在则覆盖)", set_key_btn: "写入 .env",
+        set_url_ph: "在 .env 设置该 url 的值(如已存在则覆盖)", set_url_btn: "写入 .env",
+        key_saved: "已写入 .env", key_need_name: "请先填环境变量名",
         ctx_strategy_label: "策略", ctx_keep_label: "保留最近轮数", ctx_maxtokens_label: "最大上下文 token",
         tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
         prompts_system: "系统提示", prompts_persona: "人设", prompts_rules: "rule 文件(每行一个路径)",
@@ -183,6 +216,7 @@
 
     $("chat-form").addEventListener("submit", (e) => {
       e.preventDefault();
+      if (!hasLLM()) { show("config"); showCfg("llm"); return; }
       const message = $("msg").value.trim();
       if (!message) return;
       $("msg").value = "";
@@ -215,7 +249,7 @@
       es.addEventListener("final", (ev) => {
         const d = JSON.parse(ev.data);
         if (answer === null) line(d.answer, "text-slate-900 whitespace-pre-wrap");
-        line("[" + d.mode + "] [" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=$" + d.cost_usd, "text-xs text-slate-400");
+        line("[" + d.mode + "] [" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=" + d.cost_usd, "text-xs text-slate-400");
         es.close();
       });
     });
@@ -245,36 +279,92 @@
     }
 
     const numOrNull = (v) => { v = (v ?? "").toString().trim(); return v === "" ? null : Number(v); };
+    const esc = (v) => (v == null ? "" : String(v).replace(/'/g, "&#39;"));
+    const escNum = (v) => (v ? esc(v) : "");  // hide 0 / null behind the placeholder
 
-    function renderConfig() {
-      // LLM profiles
-      const pc = $("cfg-profiles");
-      pc.innerHTML = "";
+    // One LLM profile card: name/model + API key + base_url always visible;
+    // sampling knobs under "Advanced", per-1M prices under "Pricing".
+    function profileCard(p) {
+      p = p || {};
+      const reasoning = p.reasoning_effort || "";
+      const reOpt = (v, label) =>
+        "<option value='" + v + "'" + (reasoning === v ? " selected" : "") + ">" + (label || v) + "</option>";
+      const div = document.createElement("div");
+      div.className = "profile rounded-lg border p-3 space-y-2";
+      div.innerHTML =
+        "<div class='flex items-start justify-between gap-2'>" +
+          "<div class='grid grid-cols-2 gap-2 flex-1'>" +
+            "<label class='text-xs'>" + t("profile_name") + "<input class='p-name mt-1 w-full rounded border px-2 py-1' value='" + esc(p.name) + "'/></label>" +
+            "<label class='text-xs'>" + t("profile_model") + "<input class='p-model mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc(p.model) + "'/></label>" +
+          "</div>" +
+          "<button type='button' class='p-remove text-xs text-red-600'>" + t("profile_remove") + "</button>" +
+        "</div>" +
+        keyRow("profile_key_section", "p-key", esc(p.api_key_env || "OPENAI_API_KEY"), "p-keyval", "p-setkey", "p-keystatus", t("set_key_ph"), t("set_key_btn"), "password") +
+        keyRow("profile_url_section", "p-baseurl", esc(p.base_url_env || "OPENAI_BASE_URL"), "p-urlval", "p-seturl", "p-urlstatus", t("set_url_ph"), t("set_url_btn"), "text") +
+        "<details class='text-xs'><summary class='cursor-pointer text-slate-600'>" + t("adv_section") + "</summary>" +
+          "<div class='mt-2 grid grid-cols-3 gap-2'>" +
+            "<label>" + t("profile_temp") + "<input class='p-temp mt-1 w-full rounded border px-2 py-1' placeholder='" + t("temp_ph") + "' value='" + escNum(p.temperature) + "'/></label>" +
+            "<label>" + t("profile_maxtok") + "<input class='p-maxtok mt-1 w-full rounded border px-2 py-1' value='" + escNum(p.max_tokens) + "'/></label>" +
+            "<label>" + t("profile_reasoning") + "<select class='p-reasoning mt-1 w-full rounded border px-2 py-1'>" +
+              reOpt("", t("reasoning_default")) + reOpt("none") + reOpt("minimal") + reOpt("low") + reOpt("medium") + reOpt("high") + reOpt("xhigh") +
+            "</select></label>" +
+          "</div></details>" +
+        "<details class='text-xs'><summary class='cursor-pointer text-slate-600'>" + t("stats_section") + "</summary>" +
+          "<div class='mt-2 grid grid-cols-2 gap-2'>" +
+            "<label>" + t("profile_input_cost") + "<input class='p-pcost mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(p.input_cost_per_million) + "'/></label>" +
+            "<label>" + t("profile_output_cost") + "<input class='p-ccost mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(p.output_cost_per_million) + "'/></label>" +
+          "</div></details>";
+      return div;
+    }
+    // An env-var row: NAME input + write-only VALUE input that posts to /env.
+    function keyRow(sectionKey, nameCls, nameVal, valCls, btnCls, statusCls, ph, btnLabel, valType) {
+      return "<div><div class='text-xs text-slate-500'>" + t(sectionKey) + "</div>" +
+        "<div class='mt-1 flex items-center gap-2'>" +
+          "<input class='" + nameCls + " w-44 rounded border px-2 py-1 font-mono text-xs' title='" + t("profile_varname") + "' value='" + nameVal + "'/>" +
+          "<input type='" + valType + "' class='" + valCls + " flex-1 rounded border px-2 py-1' placeholder='" + ph + "'/>" +
+          "<button type='button' class='" + btnCls + " rounded border px-2 py-1 text-xs whitespace-nowrap'>" + btnLabel + "</button>" +
+          "<span class='" + statusCls + " text-xs text-emerald-700'></span>" +
+        "</div></div>";
+    }
+
+    function roleOptions(selected) {
+      let html = "";
       (cfg.llms || []).forEach((p) => {
-        const row = document.createElement("div");
-        row.className = "profile rounded-lg border p-3 grid grid-cols-2 gap-2";
-        const f = (cls, label, val, mono) =>
-          "<label class='text-xs'>" + t(label) + "<input class='" + cls + " mt-1 w-full rounded border px-2 py-1" +
-          (mono ? " font-mono" : "") + "' value='" + (val == null ? "" : String(val).replace(/'/g, "&#39;")) + "'/></label>";
-        row.innerHTML =
-          f("p-name", "profile_name", p.name) + f("p-model", "profile_model", p.model, true) +
-          f("p-key", "profile_key", p.api_key_env, true) + f("p-baseurl", "profile_baseurl", p.base_url_env, true) +
-          f("p-temp", "profile_temp", p.temperature) + f("p-maxtok", "profile_maxtok", p.max_tokens) +
-          f("p-pcost", "profile_pcost", p.prompt_cost_per_1k) + f("p-ccost", "profile_ccost", p.completion_cost_per_1k) +
-          "<div class='col-span-2 mt-1 flex items-center gap-2 border-t pt-2'>" +
-            "<input type='password' class='p-keyval flex-1 rounded border px-2 py-1' placeholder='" + t("set_key_ph") + "'/>" +
-            "<button type='button' class='p-setkey rounded border px-2 py-1 text-xs'>" + t("set_key_btn") + "</button>" +
-            "<span class='p-keystatus text-xs text-emerald-700'></span></div>";
-        pc.appendChild(row);
+        if (!p.name) return;
+        html += "<option value='" + esc(p.name) + "'" + (selected === p.name ? " selected" : "") + ">" + esc(p.name) + "</option>";
       });
-      // roles
+      return html;
+    }
+    // generation + compaction are always shown; any extra configured role is kept.
+    function buildRoles() {
       const rc = $("cfg-roles");
       rc.innerHTML = "";
-      Object.entries(cfg.roles || {}).forEach(([role, target]) => {
+      const roles = cfg.roles || {};
+      const names = ["generation", "compaction"];
+      Object.keys(roles).forEach((r) => { if (!names.includes(r)) names.push(r); });
+      names.forEach((role) => {
+        const empty = role === "compaction" ? t("role_use_generation") : t("role_use_first");
+        const label = (role === "generation" || role === "compaction") ? t("role_" + role) : role;
         rc.insertAdjacentHTML("beforeend",
-          "<div class='flex items-center gap-2 text-sm'><span class='font-mono w-32'>" + role +
-          "</span><input class='role-target rounded border px-2 py-1 font-mono' data-role='" + role + "' value='" + target + "'/></div>");
+          "<label class='flex items-center gap-2 text-sm'><span class='w-44 font-mono'>" + label + "</span>" +
+          "<select class='role-target rounded border px-2 py-1' data-role='" + role + "'>" +
+            "<option value=''>" + empty + "</option>" + roleOptions(roles[role] || "") +
+          "</select></label>");
       });
+    }
+
+    const hasLLM = () => !!(cfg.llms && cfg.llms.length);
+    function gateChat() {
+      const none = !hasLLM();
+      $("no-llm").classList.toggle("hidden", !none);
+      ["msg", "mode", "stream", "chat-send"].forEach((id) => { $(id).disabled = none; });
+    }
+
+    function renderConfig() {
+      const pc = $("cfg-profiles");
+      pc.innerHTML = "";
+      (cfg.llms || []).forEach((p) => pc.appendChild(profileCard(p)));
+      buildRoles();
       // context
       const ctx = cfg.context || {};
       $("cfg-ctx-strategy").value = ctx.strategy || "truncate";
@@ -312,16 +402,17 @@
     function collectConfig() {
       const patch = {};
       patch.llms = Array.from(document.querySelectorAll("#cfg-profiles .profile")).map((w) => {
-        const g = (cls) => w.querySelector("." + cls).value.trim();
+        const g = (cls) => { const el = w.querySelector("." + cls); return el ? el.value.trim() : ""; };
         const o = { name: g("p-name"), model: g("p-model") };
         if (g("p-key")) o.api_key_env = g("p-key");
         if (g("p-baseurl")) o.base_url_env = g("p-baseurl");
         const temp = numOrNull(g("p-temp")); if (temp != null) o.temperature = temp;
         const mt = numOrNull(g("p-maxtok")); if (mt != null) o.max_tokens = mt;
-        o.prompt_cost_per_1k = numOrNull(g("p-pcost")) ?? 0;
-        o.completion_cost_per_1k = numOrNull(g("p-ccost")) ?? 0;
+        const re = g("p-reasoning"); if (re) o.reasoning_effort = re;
+        o.input_cost_per_million = numOrNull(g("p-pcost")) ?? 0;
+        o.output_cost_per_million = numOrNull(g("p-ccost")) ?? 0;
         return o;
-      });
+      }).filter((o) => o.name || o.model);  // drop empty (freshly-added, unfilled) cards
       const roles = {};
       document.querySelectorAll("#cfg-roles .role-target").forEach((el) => {
         if (el.value.trim()) roles[el.dataset.role] = el.value.trim();
@@ -354,23 +445,34 @@
     async function loadConfig() {
       cfg = await (await fetch("/config")).json();
       renderConfig();
+      gateChat();
       $("cfg-status").textContent = "";
     }
-    // Write-only secret helper: store an LLM key's VALUE into the local .env
-    // (gitignored). The value is sent once and never read back into the UI.
+    $("cfg-add-profile").addEventListener("click", () => {
+      $("cfg-profiles").appendChild(profileCard({}));
+    });
+    // Remove a profile, or write an env-var VALUE (api key / base url) into the
+    // local .env (gitignored). The value is write-only: posted once, never read
+    // back into the UI.
     $("cfg-profiles").addEventListener("click", async (e) => {
-      const btn = e.target.closest(".p-setkey");
+      const rm = e.target.closest(".p-remove");
+      if (rm) { rm.closest(".profile").remove(); return; }
+      const isKey = e.target.closest(".p-setkey");
+      const btn = isKey || e.target.closest(".p-seturl");
       if (!btn) return;
       const row = btn.closest(".profile");
-      const name = row.querySelector(".p-key").value.trim();
-      const status = row.querySelector(".p-keystatus");
+      const sel = isKey
+        ? { name: ".p-key", val: ".p-keyval", status: ".p-keystatus" }
+        : { name: ".p-baseurl", val: ".p-urlval", status: ".p-urlstatus" };
+      const name = row.querySelector(sel.name).value.trim();
+      const status = row.querySelector(sel.status);
       if (!name) { status.textContent = t("key_need_name"); return; }
       const resp = await fetch("/env", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, value: row.querySelector(".p-keyval").value }),
+        body: JSON.stringify({ name, value: row.querySelector(sel.val).value }),
       });
       const data = await resp.json();
-      if (resp.ok) { row.querySelector(".p-keyval").value = ""; status.textContent = t("key_saved"); }
+      if (resp.ok) { row.querySelector(sel.val).value = ""; status.textContent = t("key_saved"); }
       else { status.textContent = data.error || t("cfg_invalid"); }
     });
     $("cfg-reload").addEventListener("click", loadConfig);
@@ -380,7 +482,7 @@
         body: JSON.stringify(collectConfig()),
       });
       const data = await resp.json();
-      if (resp.ok) { cfg = data; renderConfig(); $("cfg-status").textContent = t("cfg_saved"); }
+      if (resp.ok) { cfg = data; renderConfig(); gateChat(); $("cfg-status").textContent = t("cfg_saved"); }
       else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });
 
@@ -393,8 +495,10 @@
     }
     $("tab-chat").addEventListener("click", () => show("chat"));
     $("tab-config").addEventListener("click", () => show("config"));
+    $("no-llm-link").addEventListener("click", () => { show("config"); showCfg("llm"); });
 
     applyI18n();
+    loadConfig();  // populate cfg up front so the chat gate (no-LLM banner) is correct
   </script>
 </body>
 </html>

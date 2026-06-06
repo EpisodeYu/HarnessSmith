@@ -165,8 +165,8 @@ def test_budget_stop_on_max_tokens(tmp_path):
 
 def test_budget_stop_on_max_cost(tmp_path):
     config = _config(tmp_path, budget={"max_cost_usd": 0.5})
-    config.llms[0].prompt_cost_per_1k = 1.0
-    config.llms[0].completion_cost_per_1k = 1.0
+    config.llms[0].input_cost_per_million = 1000.0
+    config.llms[0].output_cost_per_million = 1000.0
     result = run("x", client=_AlwaysToolLLM(), config=config)
     assert result.stop_reason == "max_cost"
     assert result.trace.cost_usd >= 0.5
@@ -174,8 +174,8 @@ def test_budget_stop_on_max_cost(tmp_path):
 
 def test_trace_records_tokens_and_cost(tmp_path):
     config = _config(tmp_path)
-    config.llms[0].prompt_cost_per_1k = 2.0
-    config.llms[0].completion_cost_per_1k = 4.0
+    config.llms[0].input_cost_per_million = 2000.0
+    config.llms[0].output_cost_per_million = 4000.0
     result = run("hi", client=MockLLM(), config=config)
 
     assert result.trace.prompt_tokens > 0

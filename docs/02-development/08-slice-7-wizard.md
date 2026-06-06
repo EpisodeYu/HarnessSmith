@@ -62,6 +62,19 @@
 - 重写 `web_index.html.j2` Config 视图:`GET /config` 读 → 渲染各功能 tab 表单(profiles/roles/context/budget/tools/prompts/paradigms/observability)→ Save 收集回 `POST /config`(整体 patch,后端 Pydantic 再校验,非法返 400)。**只改行为性**;结构性不可改(需重新生成)。
 - 语言切换(en/zh)纯前端 + `localStorage` 记忆;产物默认 `en`(通用),可切中文。
 
+#### 实现说明(2026-06-06 续:LLM 配置页 + 对话页易用性,人定向)
+
+在 §2.3 基础上对**产物端 web**做了一轮易用性优化(只动产物模板 `web_index.html.j2` 前端 + 运行期 `LLMProfileConfig`/`trace`/`llm` 三处,**不改 `HarnessSpec`**;LLM 维持 provider-agnostic Chat Completions):
+
+- **未配置 LLM → 对话禁用**:对话页加 "请先配置 LLM" 横幅(可点跳到 配置→LLM),`cfg.llms` 为空时禁用输入框/发送/范式下拉/流式;页面启动即拉 `/config` 判定(后端不变)。
+- **LLM 配置页多配置 + 分区**:`+ 添加配置` / 每条 `删除`;每条**默认只展开** name / model / API key / Base URL,采样旋钮(temperature / max_tokens / **reasoning effort**)收进「高级」`<details>`,单价收进「定价」`<details>`。
+- **env 变量名 + 写入 .env 合并**:API key 与 Base URL 各一行 = 「变量名输入框(默认 `OPENAI_API_KEY` / `OPENAI_BASE_URL`)+ 写入式值输入框 + 写入 .env 按钮」;复用 `POST /env`(write-only,值不回显),新增 Base URL 也能写 `.env`。提示文案「在 .env 设置该 key/url 的值(如已存在则覆盖)」。逻辑:不填值=沿用已有环境变量,填了=覆盖写入 `.env`。
+- **角色下拉**:`roles` 由自由文本改为下拉,固定展示 `generation` + `compaction`(各选已有 profile;compaction 空=回落 generation),保留任何额外已配角色。
+- **单价改 per-million + 货币无关**:运行期 `LLMProfileConfig` 字段 `prompt_cost_per_1k`/`completion_cost_per_1k` → **`input_cost_per_million`/`output_cost_per_million`**(`trace.compute_cost` 改 `/1_000_000`);UI 标签「输入/输出 cost」、占位「价格 / 百万 token」,**不定死货币**(用户填本地价)。对话页结尾 `cost=` 去掉硬编码 `$`。`budget.max_cost_usd`/`trace.cost_usd` 内部名暂留(非本轮范围)。
+- **思考深度 = `reasoning_effort`(调研后定)**:Chat Completions 顶层 `reasoning_effort`,取值 `none/minimal/low/medium/high/xhigh`(随模型,非推理模型会拒绝)→ **默认不传(下拉首项「模型默认」),仅显式选了才发**;`llm.py` 只在 set 时塞进请求。对齐 Cursor/Claude 的 low/high/max 心智但用 API 真实取值。
+- **temperature 默认值(调研后定)**:推理模型(GPT-5.x / o 系)**拒绝任何 temperature、要求省略**;普通模型省略即用 provider 默认(≈1)。故**默认留空=不传**才是正确且 provider-agnostic 的做法(非硬编码 1);UI 占位「模型默认(≈1)」。
+- 自验证:快测 110 + golden 11(含 web/mcp/范式/skills/wizard + Docker×2 + uvx)全绿;真实 `serve` 浏览器走查:无 LLM 横幅+禁用生效、多配置/高级/定价分区、key&url 写 `.env`、`reasoning_effort`+per-million 单价经 `POST /config` 正确回存。
+
 ### 2.4 依赖隔离
 - fastapi/uvicorn 进 `harnessforge[wizard]` extra;`harnessforge wizard` 懒加载;核心 CLI、`uvx harnessforge new`、产物均不含。测试断言核心 `dependencies` 不含 fastapi/uvicorn。
 
