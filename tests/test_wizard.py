@@ -64,6 +64,40 @@ def test_meta_lists_paradigms_and_catalog(client):
     assert "fetch" in {s["name"] for s in m["catalog"]}
 
 
+def test_meta_catalog_curates_order_defaults_and_hides_niche(client):
+    """The wizard surfaces a curated subset: default-on (fetch/ddg/git) first,
+    desktop-commander last; github (needs token) and time (niche) are hidden."""
+    catalog = client.get("/meta").json()["catalog"]
+    names = [s["name"] for s in catalog]
+    assert names == ["fetch", "ddg-search", "git", "desktop-commander"]
+    assert "github" not in names and "time" not in names
+    checked = {s["name"] for s in catalog if s["default_checked"]}
+    assert checked == {"fetch", "ddg-search", "git"}
+
+
+def test_meta_exposes_generate_base_under_repo_root(client):
+    base = client.get("/meta").json()["generate_base"]
+    assert base.endswith("generate")  # <repo-root>/generate
+
+
+def test_wizard_ui_defaults_web_mcp_skills_checked(client):
+    """Web / MCP / Skills capabilities are checked by default in the form."""
+    html = client.get("/").text
+    for box in ('id="iface_web" type="checkbox" checked',
+                'id="mcp_enabled" type="checkbox" checked',
+                'id="skills_enabled" type="checkbox" checked'):
+        assert box in html, box
+
+
+def test_wizard_ui_has_two_generate_methods(client):
+    """The Generate section offers one-click + CLI, plus the jump-to-product button."""
+    html = client.get("/").text
+    for needed in ('id="generate"', 'id="produce"', 'id="open-product"', 'id="target_dir"'):
+        assert needed in html, needed
+    # 'github'/'time' must not be hard-coded as catalog options in the page.
+    assert "github" not in html.lower()
+
+
 def test_spec_valid_returns_yaml_and_new_command(client):
     r = client.post("/spec", json={"spec": _valid_spec(), "mcp_servers": ["fetch"]})
     assert r.status_code == 200
@@ -73,6 +107,19 @@ def test_spec_valid_returns_yaml_and_new_command(client):
     assert "project_slug: my_ca" in data["yaml"]
     assert "language: zh" in data["yaml"]  # threads into the product default UI language
     assert "--mcp-server fetch" in data["new_command"]
+
+
+def test_spec_command_fills_target_dir_when_provided(client):
+    r = client.post(
+        "/spec", json={"spec": _valid_spec(), "target_dir": "/tmp/generate/my_ca"}
+    )
+    cmd = r.json()["new_command"]
+    assert cmd.startswith("harnessforge new /tmp/generate/my_ca --spec spec.yaml")
+
+
+def test_spec_command_uses_placeholder_without_target_dir(client):
+    cmd = client.post("/spec", json={"spec": _valid_spec()}).json()["new_command"]
+    assert cmd.startswith("harnessforge new <target-dir> --spec spec.yaml")
 
 
 def test_baked_defaults_fill_behavioral_fields(client):
@@ -142,6 +189,58 @@ def test_generate_refuses_non_empty_dir(client, tmp_path):
     (out / "x.txt").write_text("hi", encoding="utf-8")
     r = client.post("/generate", json={"spec": _valid_spec(), "target_dir": str(out)})
     assert r.status_code == 400 and r.json()["ok"] is False
+
+
+def test_generate_launches_product_when_requested(client, tmp_path, monkeypatch):
+    """One-click generate + ``launch`` stands the Web product up and returns a URL.
+    The spawn is stubbed so the test never runs uv / opens a port."""
+    import harnessforge.wizard.app as app_mod
+
+    calls = {}
+
+    def fake_launch(target_dir, project_slug, **kw):
+        calls["target_dir"] = str(target_dir)
+        calls["project_slug"] = project_slug
+        return "http://127.0.0.1:8123"
+
+    monkeypatch.setattr(app_mod, "_launch_product", fake_launch)
+    out = tmp_path / "gen"
+    r = client.post(
+        "/generate",
+        json={"spec": _valid_spec(), "target_dir": str(out), "launch": True},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["url"] == "http://127.0.0.1:8123"
+    assert calls["project_slug"] == "my_ca"
+
+
+def test_generate_does_not_launch_without_web(client, tmp_path, monkeypatch):
+    """A CLI-only spec (no Web) is render-only even with ``launch`` requested."""
+    import harnessforge.wizard.app as app_mod
+
+    monkeypatch.setattr(
+        app_mod, "_launch_product",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not launch")),
+    )
+    spec = {**_valid_spec(), "interfaces": {"cli": True, "web": False}}
+    out = tmp_path / "gen"
+    r = client.post("/generate", json={"spec": spec, "target_dir": str(out), "launch": True})
+    assert r.status_code == 200
+    assert "url" not in r.json()
+
+
+def test_generate_render_only_by_default(client, tmp_path, monkeypatch):
+    """Without ``launch`` the generate stays render-only (no product spawned)."""
+    import harnessforge.wizard.app as app_mod
+
+    monkeypatch.setattr(
+        app_mod, "_launch_product",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not launch")),
+    )
+    out = tmp_path / "gen"
+    r = client.post("/generate", json={"spec": _valid_spec(), "target_dir": str(out)})
+    assert r.status_code == 200 and "url" not in r.json()
 
 
 def test_core_dependencies_exclude_wizard_deps():

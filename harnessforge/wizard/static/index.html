@@ -48,61 +48,70 @@
       <h2 class="font-semibold" data-i18n="caps_heading">能力(结构开关)</h2>
       <div>
         <label class="flex items-center gap-2 text-sm font-medium">
-          <input id="iface_web" type="checkbox" />
+          <input id="iface_web" type="checkbox" checked />
           <span data-i18n="iface_web_label">生成 Web 接口(SSE chat + 分页配置面板)</span>
         </label>
         <p class="mt-1 text-xs text-slate-500" data-i18n="iface_web_hint">关时产物不含 fastapi/uvicorn,零 Web 痕迹(只有 CLI)。</p>
       </div>
       <div>
         <label class="flex items-center gap-2 text-sm font-medium">
-          <input id="mcp_enabled" type="checkbox" />
+          <input id="mcp_enabled" type="checkbox" checked />
           <span data-i18n="mcp_enable_label">启用 MCP 工具能力</span>
         </label>
         <p class="mt-1 text-xs text-slate-500" data-i18n="mcp_hint">关时产物零 MCP 痕迹。开后可从 catalog 预选 server(落运行期 config.yaml)。</p>
-        <div id="catalog-wrap" class="mt-2 hidden">
+        <div id="catalog-wrap" class="mt-2">
           <label class="block text-sm font-medium" data-i18n="catalog_label">预选 MCP server</label>
           <div id="catalog-list" class="mt-1 space-y-1"></div>
         </div>
       </div>
       <div>
         <label class="flex items-center gap-2 text-sm font-medium">
-          <input id="skills_enabled" type="checkbox" />
+          <input id="skills_enabled" type="checkbox" checked />
           <span data-i18n="skills_enable_label">启用标准 Agent Skills</span>
         </label>
         <p class="mt-1 text-xs text-slate-500" data-i18n="skills_hint">关时产物零 skills 痕迹。开后生成 skills.py + read_skill + 示例 skill。</p>
       </div>
     </section>
 
-    <!-- Output -->
+    <!-- Generate -->
     <section class="space-y-4 border-t pt-4">
-      <h2 class="font-semibold" data-i18n="output_heading">产出</h2>
-      <div class="flex flex-wrap items-center gap-3">
-        <button id="produce" type="button" class="rounded-lg bg-slate-800 px-4 py-2 text-sm text-white" data-i18n="produce_btn">校验并产出 spec</button>
-        <a id="download" class="hidden rounded-lg border px-4 py-2 text-sm" data-i18n="download_btn" download="spec.yaml">下载 spec.yaml</a>
-        <span id="produce-status" class="text-sm text-slate-500"></span>
-      </div>
-      <div id="errors" class="hidden rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700"></div>
-      <textarea id="spec-yaml" rows="14" class="hidden w-full rounded-lg border bg-white p-3 font-mono text-xs" readonly></textarea>
-      <div id="newcmd-wrap" class="hidden text-xs">
-        <span class="text-slate-500" data-i18n="newcmd_label">或用 CLI 接力:</span>
-        <code id="newcmd" class="block mt-1 rounded bg-slate-100 p-2 font-mono"></code>
-      </div>
+      <h2 class="font-semibold" data-i18n="generate_heading">生成产物</h2>
 
-      <div class="border-t pt-4 space-y-3">
-        <h3 class="font-medium" data-i18n="generate_heading">一键生成产物(可选)</h3>
+      <!-- Method 1: one-click -->
+      <div class="space-y-3 rounded-lg border p-4">
+        <h3 class="font-medium" data-i18n="oneclick_heading">一键生成</h3>
         <div>
           <label class="block text-sm font-medium" data-i18n="target_label">目标目录</label>
-          <input id="target_dir" class="mt-1 w-full rounded-lg border px-3 py-2 font-mono" placeholder="./my-agent" />
+          <input id="target_dir" class="mt-1 w-full rounded-lg border px-3 py-2 font-mono" placeholder="./generate/agent_harness" />
+          <p class="mt-1 text-xs text-slate-500" data-i18n="target_hint">默认生成到 HarnessForge/generate/&lt;包名&gt;,可手改。</p>
         </div>
         <label class="flex items-center gap-2 text-sm">
           <input id="gen_git" type="checkbox" /> <span data-i18n="git_label">git init</span>
         </label>
-        <div class="flex items-center gap-3">
-          <button id="generate" type="button" class="rounded-lg bg-emerald-700 px-4 py-2 text-sm text-white" data-i18n="generate_btn">生成</button>
+        <div class="flex flex-wrap items-center gap-3">
+          <button id="generate" type="button" class="rounded-lg bg-emerald-700 px-4 py-2 text-sm text-white" data-i18n="oneclick_btn">一键生成</button>
+          <a id="open-product" class="hidden rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white" target="_blank" rel="noopener"></a>
           <span id="generate-status" class="text-sm text-slate-500"></span>
         </div>
-        <p class="text-xs text-slate-500" data-i18n="next_hint">生成后:进目录 → uv sync → 在产物配置页 / .env 设置 LLM key 等 → 运行。</p>
+        <p class="text-xs text-slate-500" data-i18n="oneclick_hint">勾选 Web 时,生成后自动拉起产物 Web(首次需安装依赖,稍候),再点「跳转」打开。在配置页 / .env 设置 LLM key 后即可对话。</p>
       </div>
+
+      <!-- Method 2: CLI -->
+      <div class="space-y-3 rounded-lg border p-4">
+        <h3 class="font-medium" data-i18n="cli_heading">CLI 生成</h3>
+        <div class="flex flex-wrap items-center gap-3">
+          <button id="produce" type="button" class="rounded-lg bg-slate-800 px-4 py-2 text-sm text-white" data-i18n="produce_btn">校验并产出 spec</button>
+          <a id="download" class="hidden rounded-lg border px-4 py-2 text-sm" data-i18n="download_btn" download="spec.yaml">下载 spec.yaml</a>
+          <span id="produce-status" class="text-sm text-slate-500"></span>
+        </div>
+        <textarea id="spec-yaml" rows="12" class="hidden w-full rounded-lg border bg-white p-3 font-mono text-xs" readonly></textarea>
+        <div id="newcmd-wrap" class="hidden text-xs">
+          <span class="text-slate-500" data-i18n="newcmd_label">下载 spec.yaml 后,在其所在目录运行:</span>
+          <code id="newcmd" class="mt-1 block rounded bg-slate-100 p-2 font-mono"></code>
+        </div>
+      </div>
+
+      <div id="errors" class="hidden rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700"></div>
     </section>
   </main>
 
@@ -125,11 +134,16 @@
         mcp_hint: "关时产物零 MCP 痕迹。开后可从 catalog 预选 server(落运行期 config.yaml)。",
         catalog_label: "预选 MCP server", skills_enable_label: "启用标准 Agent Skills",
         skills_hint: "关时产物零 skills 痕迹。开后生成 skills.py + read_skill + 示例 skill。",
-        output_heading: "产出", produce_btn: "校验并产出 spec", download_btn: "下载 spec.yaml",
-        newcmd_label: "或用 CLI 接力:", generate_heading: "一键生成产物(可选)",
-        target_label: "目标目录", git_label: "git init", generate_btn: "生成",
-        next_hint: "生成后:进目录 → uv sync → 在产物配置页 / .env 设置 LLM key 等 → 运行。",
+        generate_heading: "生成产物",
+        oneclick_heading: "一键生成",
+        target_label: "目标目录", target_hint: "默认生成到 HarnessForge/generate/<包名>,可手改。",
+        git_label: "git init", oneclick_btn: "一键生成",
+        oneclick_hint: "勾选 Web 时,生成后自动拉起产物 Web(首次需安装依赖,稍候),再点「跳转」打开。在配置页 / .env 设置 LLM key 后即可对话。",
+        cli_heading: "CLI 生成", produce_btn: "校验并产出 spec", download_btn: "下载 spec.yaml",
+        newcmd_label: "下载 spec.yaml 后,在其所在目录运行:",
         ok_produced: "spec 已校验通过。", ok_generated: "已生成", err_fix: "请修正以下字段:",
+        open_product: "跳转到", generating: "正在生成…", launching: "正在拉起产物 Web(首次需安装依赖,稍候)…",
+        ready: "产物已就绪,点「跳转」打开。", launch_timeout: "产物已在后台启动;若「跳转」打不开,请稍后重试。",
       },
       en: {
         app_title: "HarnessForge wizard",
@@ -146,11 +160,16 @@
         mcp_hint: "Off = zero MCP footprint. On = preselect servers from the catalog (written to runtime config.yaml).",
         catalog_label: "Preselect MCP servers", skills_enable_label: "Enable standard Agent Skills",
         skills_hint: "Off = zero skills footprint. On = generate skills.py + read_skill + a sample skill.",
-        output_heading: "Output", produce_btn: "Validate & produce spec", download_btn: "Download spec.yaml",
-        newcmd_label: "Or relay via the CLI:", generate_heading: "Generate the repo (optional)",
-        target_label: "Target directory", git_label: "git init", generate_btn: "Generate",
-        next_hint: "After generating: cd in → uv sync → set the LLM key etc. in the config page / .env → run.",
+        generate_heading: "Generate the product",
+        oneclick_heading: "One-click generate",
+        target_label: "Target directory", target_hint: "Defaults to HarnessForge/generate/<package>; editable.",
+        git_label: "git init", oneclick_btn: "Generate",
+        oneclick_hint: "With Web enabled, the product web is launched after generating (first run installs deps — hold on), then click Open. Set the LLM key in the config page / .env to chat.",
+        cli_heading: "CLI generate", produce_btn: "Validate & produce spec", download_btn: "Download spec.yaml",
+        newcmd_label: "After downloading spec.yaml, run from its directory:",
         ok_produced: "Spec validated.", ok_generated: "Generated at", err_fix: "Please fix these fields:",
+        open_product: "Open", generating: "Generating…", launching: "Launching the product web (first run installs deps — hold on)…",
+        ready: "Product is ready — click Open.", launch_timeout: "Product started in the background; if Open fails, retry shortly.",
       },
     };
 
@@ -163,30 +182,44 @@
     }
     $("lang").addEventListener("change", () => { lang = $("lang").value; applyI18n(); });
 
-    // display name -> slug
+    // display name -> slug -> target dir (each auto-derives until edited by hand)
     function deriveSlug(name) {
       return (name || "").toLowerCase().trim()
         .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^([0-9])/, "_$1");
     }
+    let generateBase = "";
     let slugEdited = false;
-    $("project_slug").addEventListener("input", () => { slugEdited = true; });
+    let targetEdited = false;
+    const currentSlug = () => $("project_slug").value.trim() || "agent_harness";
+    const displayName = () => $("display_name").value.trim();
+    function syncTarget() {
+      if (!targetEdited && generateBase) {
+        $("target_dir").value = generateBase.replace(/[\\/]+$/, "") + "/" + currentSlug();
+      }
+    }
+    $("project_slug").addEventListener("input", () => { slugEdited = true; syncTarget(); });
     $("display_name").addEventListener("input", () => {
       if (!slugEdited) $("project_slug").value = deriveSlug($("display_name").value);
+      syncTarget();
     });
+    $("target_dir").addEventListener("input", () => { targetEdited = true; });
 
     async function loadMeta() {
       const meta = await (await fetch("/meta")).json();
+      generateBase = meta.generate_base || "";
+      syncTarget();
       const pl = $("paradigms-list");
-      meta.paradigms.forEach((p, i) => {
+      // All paradigms checked by default; the first selected is the runtime default.
+      meta.paradigms.forEach((p) => {
         pl.insertAdjacentHTML("beforeend",
-          "<label class='flex items-start gap-2 text-sm'><input type='checkbox' class='par mt-1' value='" + p.name + "' " + (i === 0 ? "checked" : "") + "/>" +
+          "<label class='flex items-start gap-2 text-sm'><input type='checkbox' class='par mt-1' value='" + p.name + "' checked/>" +
           "<span><span class='font-mono'>" + p.name + "</span> — <span class='text-slate-500'>" + p.description + "</span></span></label>");
       });
       const cl = $("catalog-list");
       meta.catalog.forEach((s) => {
         const req = s.requires ? " (needs " + s.requires + ")" : "";
         cl.insertAdjacentHTML("beforeend",
-          "<label class='flex items-start gap-2 text-sm'><input type='checkbox' class='cserver mt-1' value='" + s.name + "'/>" +
+          "<label class='flex items-start gap-2 text-sm'><input type='checkbox' class='cserver mt-1' value='" + s.name + "' " + (s.default_checked ? "checked" : "") + "/>" +
           "<span><span class='font-mono'>" + s.name + "</span>" + req + " — <span class='text-slate-500'>" + s.description + "</span></span></label>");
       });
     }
@@ -213,7 +246,11 @@
     }
 
     function payload() {
-      return { spec: buildSpec(), mcp_servers: $("mcp_enabled").checked ? checkedValues("cserver") : [] };
+      return {
+        spec: buildSpec(),
+        mcp_servers: $("mcp_enabled").checked ? checkedValues("cserver") : [],
+        target_dir: $("target_dir").value.trim(),
+      };
     }
 
     function showErrors(errors) {
@@ -240,17 +277,44 @@
       $("produce-status").textContent = t("ok_produced");
     });
 
+    // Poll the launched product until its port accepts connections (first run
+    // installs deps, which takes a moment). Cross-origin fetch resolves once the
+    // port is up; it rejects (connection refused) while still starting.
+    async function pollReady(url) {
+      $("generate-status").textContent = t("launching");
+      const deadline = Date.now() + 5 * 60 * 1000;
+      while (Date.now() < deadline) {
+        try {
+          await fetch(url, { mode: "no-cors", cache: "no-store" });
+          $("generate-status").textContent = t("ready");
+          return;
+        } catch (e) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+      $("generate-status").textContent = t("launch_timeout");
+    }
+
     $("generate").addEventListener("click", async () => {
-      $("generate-status").textContent = "...";
+      $("errors").classList.add("hidden");
+      $("open-product").classList.add("hidden");
+      $("generate-status").textContent = t("generating");
       const body = payload();
-      body.target_dir = $("target_dir").value.trim();
       body.git = $("gen_git").checked;
+      body.launch = $("iface_web").checked;  // only the Web product can be launched
       const resp = await fetch("/generate", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const data = await resp.json();
       if (!data.ok) { showErrors(data.errors || []); $("generate-status").textContent = ""; return; }
       $("generate-status").textContent = t("ok_generated") + " " + data.target_dir + " (" + data.files + " files)";
+      if (data.url) {
+        const btn = $("open-product");
+        btn.href = data.url;
+        btn.textContent = t("open_product") + " " + (displayName() || currentSlug());
+        btn.classList.remove("hidden");
+        pollReady(data.url);
+      }
     });
 
     loadMeta();

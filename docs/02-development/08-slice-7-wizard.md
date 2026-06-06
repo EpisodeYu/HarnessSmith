@@ -31,8 +31,8 @@
 - `spec.py` — `HarnessSpec` 新增 `display_name: str | None`(纯标签,不进 `config.yaml`)+ `language: Literal["en","zh"] = "en"`(产物 web 默认 UI 语言种子)。
 - `generator.py` — 渲染上下文加 `display_name`(= `spec.display_name or spec.project_slug`)+ `language`;`config.yaml` context 块改为**从 `spec.context` 种子化**(沿用 rules_files 式 seed,未设时输出与旧版字节一致)。
 - `wizard/`(新目录,`[wizard]` extra 门控):
-  - `wizard/app.py` — FastAPI:`GET /`(单页)、`GET /meta`(范式/catalog/presets 元数据)、`POST /spec`(对缺省行为性字段烤 `_BAKED_DEFAULTS` → `HarnessSpec` 校验 → spec YAML + `harnessforge new` 命令 / 字段级错误)、`POST /generate`(可选一键 `generate()` render-only,产物落盘后由用户 `uv sync`)。`_BAKED_DEFAULTS` 只在字段缺省时填(显式/手写 spec 优先)。
-  - `wizard/static/index.html` — 无构建**精简单页**:**首项语言下拉(中/英)** + `{zh,en}` i18n 字典(切换换 wizard UI),该选择写入 `spec.language`(贯穿到产物 UI 默认);**只两组结构选项**——基本(显示名→slug、`paradigms` 多选+默认)与 能力(`interfaces.web`、`mcp.enabled`+catalog 多选、`skills.enabled`)+ 产出;显示名→slug 前端派生。
+  - `wizard/app.py` — FastAPI:`GET /`(单页)、`GET /meta`(范式/catalog/presets 元数据 + `generate_base`)、`POST /spec`(对缺省行为性字段烤 `_BAKED_DEFAULTS` → `HarnessSpec` 校验 → spec YAML + `harnessforge new` 命令〔填入目标目录〕/ 字段级错误)、`POST /generate`(`generate()` 渲染;`launch:true` + Web 时额外**后台拉起产物 `uv run <slug> serve` 并回 URL**,否则保持 render-only)。`_BAKED_DEFAULTS` 只在字段缺省时填(显式/手写 spec 优先)。
+  - `wizard/static/index.html` — 无构建**精简单页**:**首项语言下拉(中/英)** + `{zh,en}` i18n 字典(切换换 wizard UI),该选择写入 `spec.language`(贯穿到产物 UI 默认);**只两组结构选项**——基本(显示名→slug、`paradigms` 多选+默认)与 能力(`interfaces.web`、`mcp.enabled`+catalog 多选、`skills.enabled`)+ 生成产物;显示名→slug→目标目录前端逐级派生。
 - `cli.py` — `harnessforge wizard`(懒加载 uvicorn + wizard app;**默认自动挑空闲端口**(`_find_free_port`,从 8000 起,`--port` 可固定)并打印可打开地址;未装 extra 给友好提示)。产物 `serve` 同样默认自动挑端口 + 打印地址。
 - `pyproject.toml` — 新增 `[project.optional-dependencies] wizard = [fastapi, uvicorn]`;`dev` 加 fastapi/uvicorn/httpx 供 `fastapi.testclient` 测试。
 
@@ -64,6 +64,18 @@
 
 ### 2.4 依赖隔离
 - fastapi/uvicorn 进 `harnessforge[wizard]` extra;`harnessforge wizard` 懒加载;核心 CLI、`uvx harnessforge new`、产物均不含。测试断言核心 `dependencies` 不含 fastapi/uvicorn。
+
+### 2.5 web 可操作性优化(实现说明,2026-06-06,人定向)
+
+降低 wizard 上手成本 + 把"生成→看到产物"打通成一键。**只动生成器侧 wizard,不改 spec/模板/产物生成口径**。
+
+- **默认勾选(开箱即用的"全家桶"默认)**:`paradigms` 全选(`agent` 仍是首项=运行期默认范式);能力 `interfaces.web` / `mcp.enabled` / `skills.enabled` 默认开;catalog 预选默认 `fetch` / `ddg-search` / `git`。这些只是**表单默认值**,用户可取消。
+- **catalog 在 wizard 的呈现 = 策展子集**(`app.py _WIZARD_CATALOG_ORDER` / `_WIZARD_CATALOG_DEFAULT`,经 `/meta` 的 `default_checked` 下发):显示 `fetch` / `ddg-search` / `git` / `desktop-commander`(默认勾的三项在前、DC 在最后),**隐藏 `github`(需 token + 无可启用工具)与 `time`(冷门)**。**catalog 本体不变**——`github`/`time` 仍在 `mcp_servers.yaml`,CLI `--mcp-server github/time` 照常可用;策展只作用于 wizard 表单(人 2026-06-06 选 wizard-only)。`git` vs `github`:`git`=本地仓库、免 key、读类默认开,做默认;`github`=remote MCP 平台 API、需 `GITHUB_MCP_TOKEN`,从表单隐藏。
+- **「生成产物」分两法**(原"产出"+"一键生成产物(可选)"合并):
+  - **一键生成**:目标目录默认 `<HarnessForge 根>/generate/<包名>`(`/meta.generate_base` + 前端按 slug 派生,可手改;`generate/` 已入 `.gitignore`),git init 复选。点击 → `POST /generate {launch:true}` 渲染产物;**当勾了 Web** 则后台 `uv run <slug> serve --port <自动空闲端口>`(**真实模式**,人 2026-06-06 选;首次 `uv run` 自动 sync 装依赖)→ 回 `url`。前端轮询该端口就绪(跨域 no-cors fetch),亮出**「跳转到 <显示名>」**按钮,新标签打开产物 web;在产物配置页 / `.env` 填 LLM key 即可对话。未勾 Web 时保持 render-only、不拉起。
+  - **CLI 生成**:校验并产出 spec → spec.yaml 下载 + 完整 `harnessforge new <默认目标目录> --spec spec.yaml [--mcp-server ...]` 命令(目标目录已填入)。
+- **进程语义**:拉起的产物 `serve` 以**独立 session 后台**运行(`start_new_session=True`,输出落 `<target>/.serve.log`),wizard 退出后产物仍在跑(便于已打开的标签继续用);`_LAUNCHED` 持有句柄防 GC。**仅生成器侧便利**,产物本身不依赖 wizard。
+- **测试**:`test_wizard.py` 增 catalog 策展/默认勾选/`generate_base`/命令填目标目录/`launch` 行为(spawn 经 monkeypatch 打桩,不实跑 uv);另实跑过一次真实拉起冒烟(产物 web 200、标题含显示名)。golden `test_golden_wizard_spec_generates_and_smoke_passes` 走 `/spec`(render-only)不受影响。
 
 ## 3. 退出门禁(对应 `01 §8` Non-blocker;✅ 实现并自验证)
 

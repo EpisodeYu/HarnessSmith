@@ -7,9 +7,11 @@ Routes:
   MCP catalog, presets).
 - ``POST /spec``     — validate the form via :class:`HarnessSpec`; return spec
   YAML + the matching ``harnessforge new`` command, or field-level errors.
-- ``POST /generate`` — optionally render the spec into an owned repo (the same
-  ``generate()`` the CLI uses; render-only so the UI stays snappy/offline — the
-  user runs ``uv sync`` after, or relays via ``harnessforge new --spec``).
+- ``POST /generate`` — render the spec into an owned repo (the same ``generate()``
+  the CLI uses). With ``launch: true`` (and a Web-enabled spec) it also stands the
+  product's web server up in the background (``uv run <slug> serve``) and returns a
+  URL to open; otherwise it stays render-only (the user runs ``uv sync`` after, or
+  relays via ``harnessforge new --spec``).
 
 Secrets are never collected or returned — only env-var NAMES. This module imports
 FastAPI, so it is only imported on demand (the ``harnessforge wizard`` command),
@@ -18,6 +20,8 @@ keeping the core CLI / ``uvx harnessforge new`` free of the wizard dependencies.
 
 from __future__ import annotations
 
+import socket
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -33,6 +37,12 @@ from ..spec import HarnessSpec
 _STATIC_DIR = Path(__file__).parent / "static"
 _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
+# HarnessForge repo root (wizard/app.py -> wizard -> harnessforge -> root). The
+# one-click form prefills its target dir under ``<root>/generate/<project_slug>``
+# (gitignored), so a quick local generate lands somewhere obvious.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_GENERATE_BASE = _REPO_ROOT / "generate"
+
 # The built-in loop paradigms (cf. spec.paradigms' Literal). agent is the default
 # tool-calling loop; plan/ask are read-only.
 PARADIGMS = [
@@ -40,6 +50,20 @@ PARADIGMS = [
     {"name": "plan", "description": "Read-only: investigates with low-risk tools and outputs a step-by-step plan."},
     {"name": "ask", "description": "Read-only: answers questions with low-risk tools; never mutates."},
 ]
+
+# Which catalog servers the wizard surfaces, in display order, and which are
+# checked by default. The catalog itself keeps every server (``--mcp-server``
+# still resolves e.g. github/time) — this only curates the *form*. ``git`` is the
+# practical local default (keyless, read tools on); ``github`` (needs a token, no
+# enabled tools) and ``time`` (niche) are hidden here. Desktop Commander is shown
+# but unchecked (all tools high-risk) and ordered last.
+_WIZARD_CATALOG_ORDER = ("fetch", "ddg-search", "git", "desktop-commander")
+_WIZARD_CATALOG_DEFAULT = frozenset({"fetch", "ddg-search", "git"})
+
+# Background product servers launched by the one-click "generate" flow. Held so
+# the Popen handles (and their log file objects) aren't garbage-collected; the
+# processes are detached (own session) and outlive the wizard on purpose.
+_LAUNCHED: list[subprocess.Popen] = []
 
 # Behavioral defaults baked into the spec when the (structural-only) wizard form
 # omits them. The wizard intentionally hides these — a generator can produce many
@@ -89,14 +113,20 @@ def _format_errors(exc: ValidationError) -> list[dict]:
 
 
 def _catalog_meta() -> list[dict]:
+    """Catalog servers the wizard surfaces: curated order + default-checked flag."""
+    catalog = load_catalog()
     servers = []
-    for _, s in sorted(load_catalog().items()):
+    for name in _WIZARD_CATALOG_ORDER:
+        s = catalog.get(name)
+        if s is None:
+            continue
         servers.append(
             {
                 "name": s.name,
                 "description": s.description,
                 "transport": s.transport,
                 "requires": s.requires,
+                "default_checked": name in _WIZARD_CATALOG_DEFAULT,
                 "tools": [
                     {"name": t.name, "risk": t.risk, "default_enabled": t.default_enabled}
                     for t in s.tools
@@ -104,6 +134,41 @@ def _catalog_meta() -> list[dict]:
             }
         )
     return servers
+
+
+def _find_free_port(preferred: int = 8000, host: str = "127.0.0.1") -> int:
+    """Return a bindable port: try ``preferred`` upward, else an OS-assigned one."""
+    for candidate in range(preferred, preferred + 64):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind((host, candidate))
+                return candidate
+            except OSError:
+                continue
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return sock.getsockname()[1]
+
+
+def _launch_product(target_dir: Path, project_slug: str, *, host: str = "127.0.0.1") -> str:
+    """Spawn the generated product's web server in the background; return its URL.
+
+    Runs ``uv run <slug> serve`` (real mode — uv syncs deps on first launch, which
+    can take a moment). Detached into its own session with output redirected to
+    ``<target>/.serve.log`` so the product keeps serving after the wizard stops.
+    Set the LLM key in the product's config page / .env to actually chat.
+    """
+    port = _find_free_port()
+    log = (target_dir / ".serve.log").open("w", encoding="utf-8")
+    proc = subprocess.Popen(  # noqa: S603 — local dev convenience, fixed argv
+        ["uv", "run", project_slug, "serve", "--host", host, "--port", str(port)],
+        cwd=str(target_dir),
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    _LAUNCHED.append(proc)
+    return f"http://{host}:{port}"
 
 
 def _resolve_prefill(spec: HarnessSpec, names: list[str]):
@@ -126,6 +191,7 @@ def create_app() -> FastAPI:
             "paradigms": PARADIGMS,
             "catalog": _catalog_meta(),
             "presets": available_presets(),
+            "generate_base": str(_GENERATE_BASE),
         }
 
     @app.post("/spec")
@@ -142,7 +208,8 @@ def create_app() -> FastAPI:
                 {"ok": False, "errors": [{"loc": "mcp_servers", "msg": str(exc)}]},
                 status_code=400,
             )
-        cmd = "harnessforge new <target-dir> --spec spec.yaml" + "".join(
+        target = str(body.get("target_dir") or "").strip() or "<target-dir>"
+        cmd = f"harnessforge new {target} --spec spec.yaml" + "".join(
             f" --mcp-server {s.name}" for s in servers
         )
         return {"ok": True, "yaml": _spec_yaml(spec), "new_command": cmd}
@@ -176,7 +243,7 @@ def create_app() -> FastAPI:
                 {"ok": False, "errors": [{"loc": "target_dir", "msg": str(exc)}]},
                 status_code=400,
             )
-        return {
+        resp = {
             "ok": True,
             "target_dir": str(result.target_dir),
             "project_slug": result.project_slug,
@@ -186,6 +253,16 @@ def create_app() -> FastAPI:
                 f'uv run {result.project_slug} run --mock "hello"'
             ),
         }
+        # One-click launch: stand the product's web up and hand back a URL. Only
+        # meaningful when the Web interface was generated; render-only otherwise.
+        if body.get("launch") and spec.interfaces.web:
+            try:
+                resp["url"] = _launch_product(
+                    Path(result.target_dir), result.project_slug
+                )
+            except OSError as exc:
+                resp["launch_error"] = str(exc)
+        return resp
 
     return app
 
