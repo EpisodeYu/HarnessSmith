@@ -59,6 +59,15 @@ def test_chat_stream_false_emits_no_tokens():
     assert "event: final" in body  # still returns the answer, just not streamed
 
 
+def test_registries_lists_registered_extensions():
+    """/registries reports what's registered in code (the extension universe) so
+    the panel can offer custom strategies/conditions/paradigms once imported."""
+    data = _client().get("/registries").json()
+    assert "agent" in data["paradigms"]
+    assert {"truncate", "summarize", "none"} <= set(data["strategies"])
+    assert {"max_tokens", "max_turns"} <= set(data["conditions"])
+
+
 def test_config_get_exposes_names_not_secrets():
     resp = _client().get("/config")
     assert resp.status_code == 200

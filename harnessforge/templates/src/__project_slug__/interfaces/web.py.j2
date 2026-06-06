@@ -29,9 +29,11 @@ from ..harness.config import (
     resolve_env,
     set_env_value,
 )
+from ..harness.context import CONDITIONS, STRATEGIES
 from ..harness.hooks import Hooks
 from ..harness.llm import ClientRouter, LLMResponse, OpenAIClient, ToolCall
 from ..harness.loop import run as run_loop
+from ..harness.paradigms import PARADIGMS
 
 _INDEX_HTML = (Path(__file__).parent / "web_index.html").read_text(encoding="utf-8")
 
@@ -135,6 +137,20 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
     def paradigms() -> dict:
         """The runtime paradigm roster, for the chat-mode dropdown."""
         return app.state.config.paradigms.model_dump(mode="json")
+
+    @app.get("/registries")
+    def registries() -> dict:
+        """What's registered in code — the extension universe behind the config
+        dropdowns. A custom ``@register_paradigm`` / ``@register_strategy`` /
+        ``@register_condition`` shows up here once its module is imported, so the
+        panel can offer it (and flag a config name that isn't registered).
+        ``/config`` holds what's currently *selected*; this holds what *exists*.
+        """
+        return {
+            "paradigms": list(PARADIGMS),
+            "strategies": list(STRATEGIES),
+            "conditions": list(CONDITIONS),
+        }
 
     @app.get("/config")
     def get_config() -> dict:

@@ -135,6 +135,42 @@ def set_key(
     )
 
 
+@app.command()
+def info(
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to config.yaml."
+    ),
+) -> None:
+    """List the registered extension points vs what config.yaml selects.
+
+    Paradigms / context strategies / context conditions registered in code,
+    alongside what's currently selected. A name your config selects but that
+    isn't registered is flagged — usually a typo, or a module you forgot to
+    import so its ``@register_*`` never ran.
+    """
+    from ..harness.context import CONDITIONS, STRATEGIES
+    from ..harness.paradigms import PARADIGMS
+
+    config = load_config(config_path)
+
+    def _section(label: str, registered: list[str], selected: set[str]) -> None:
+        typer.secho(label, fg=typer.colors.CYAN)
+        for name in registered:
+            mark = "  (selected)" if name in selected else ""
+            typer.echo(f"  - {name}{mark}")
+        for name in sorted(s for s in selected if s and s not in registered):
+            typer.secho(
+                f"  ! {name} — selected but NOT registered (import its module?)",
+                fg=typer.colors.YELLOW,
+            )
+
+    _section("paradigms (registered):", list(PARADIGMS), set(config.paradigms.enabled))
+    typer.echo(f"  default: {config.paradigms.default}")
+    _section("context strategies (registered):", list(STRATEGIES), {config.context.strategy})
+    _section("context conditions (registered):", list(CONDITIONS), set(config.context.triggers))
+    typer.echo(f"  combine: {config.context.combine}  triggers: {config.context.triggers}")
+
+
 {% if interfaces.web %}
 
 def _find_free_port(preferred: int, host: str = "127.0.0.1") -> int:

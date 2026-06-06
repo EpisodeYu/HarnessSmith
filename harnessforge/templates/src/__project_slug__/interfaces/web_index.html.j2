@@ -57,19 +57,18 @@
       <div data-cfg="context" class="hidden space-y-3">
         <p class="text-xs text-gray-500" data-i18n="ctx_hint">Compact the history when a trigger fires, using the chosen strategy.</p>
         <label class="block text-sm"><span data-i18n="ctx_strategy_label">Strategy</span>
-          <select id="cfg-ctx-strategy" class="mt-1 block rounded-lg border px-3 py-2">
-            <option value="truncate">truncate</option><option value="summarize">summarize</option><option value="none">none</option>
-          </select></label>
+          <select id="cfg-ctx-strategy" class="mt-1 block rounded-lg border px-3 py-2"></select></label>
         <label class="block text-sm"><span data-i18n="ctx_keep_label">keep_last_turns</span>
           <input id="cfg-ctx-keep" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
         <label class="block text-sm"><span data-i18n="ctx_combine_label">combine</span>
           <select id="cfg-ctx-combine" class="mt-1 block rounded-lg border px-3 py-2">
             <option value="or">or</option><option value="and">and</option>
           </select></label>
-        <label class="block text-sm"><span data-i18n="ctx_maxtokens_label">max_tokens</span>
-          <input id="cfg-ctx-maxtokens" type="number" min="1" placeholder="—" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
-        <label class="block text-sm"><span data-i18n="ctx_maxturns_label">max_turns</span>
-          <input id="cfg-ctx-maxturns" type="number" min="1" placeholder="—" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
+        <div>
+          <p class="text-sm" data-i18n="ctx_triggers_label">Triggers (threshold; blank = off)</p>
+          <div id="cfg-ctx-triggers" class="mt-1 space-y-2"></div>
+        </div>
+        <p class="text-xs text-gray-500" data-i18n="ctx_extend_hint">Define your own with @register_strategy / @register_condition in harness/context.py — they appear here once imported. See AGENTS.md.</p>
       </div>
 
       <div data-cfg="budget" class="hidden flex flex-wrap gap-4">
@@ -94,10 +93,11 @@
       </div>
 
       <div data-cfg="paradigms" class="hidden space-y-3">
-        <label class="block text-sm"><span data-i18n="paradigms_enabled">enabled (comma-separated)</span>
-          <input id="cfg-par-enabled" class="mt-1 block w-full rounded-lg border px-3 py-2 font-mono" /></label>
+        <p class="text-sm" data-i18n="paradigms_enabled">Enabled paradigms</p>
+        <div id="cfg-par-list" class="space-y-1"></div>
         <label class="block text-sm"><span data-i18n="paradigms_default">default</span>
-          <input id="cfg-par-default" class="mt-1 block w-48 rounded-lg border px-3 py-2 font-mono" /></label>
+          <select id="cfg-par-default" class="mt-1 block w-48 rounded-lg border px-3 py-2 font-mono"></select></label>
+        <p class="text-xs text-gray-500" data-i18n="par_extend_hint">Add your own with @register_paradigm in harness/paradigms/ — it appears here once imported. See AGENTS.md.</p>
       </div>
 
       <div data-cfg="observability" class="hidden space-y-3">
@@ -146,11 +146,14 @@
         set_url_ph: "set this URL's value in .env (overwrites if it exists)", set_url_btn: "Save to .env",
         key_saved: "saved to .env", key_need_name: "set the env-var name first",
         ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_combine_label: "combine (or/and)",
-        ctx_maxtokens_label: "max_tokens (trigger)", ctx_maxturns_label: "max_turns (trigger)",
+        ctx_triggers_label: "Triggers (condition → threshold; blank = off)",
+        ctx_extend_hint: "Add your own: @register_strategy / @register_condition in harness/context.py — they appear here once imported (see AGENTS.md).",
+        cfg_unregistered: "not registered in code — import its module?",
         ctx_hint: "Compact the history when a trigger fires (combine: or = any, and = all), using the chosen strategy.",
         tools_hint: "Allowlist — only enabled tools are offered to the model.",
         prompts_system: "system", prompts_persona: "persona", prompts_rules: "rules_files (one path per line)",
-        paradigms_enabled: "enabled (comma-separated)", paradigms_default: "default",
+        paradigms_enabled: "Enabled paradigms", paradigms_default: "default",
+        par_extend_hint: "Add your own: @register_paradigm in harness/paradigms/ — it appears here once imported (see AGENTS.md).",
         obs_trace: "write JSONL trace", obs_tracedir: "trace_dir",
       },
       zh: {
@@ -180,11 +183,14 @@
         set_url_ph: "在 .env 设置该 url 的值(如已存在则覆盖)", set_url_btn: "写入 .env",
         key_saved: "已写入 .env", key_need_name: "请先填环境变量名",
         ctx_strategy_label: "策略", ctx_keep_label: "保留最近轮数", ctx_combine_label: "组合方式 (or/and)",
-        ctx_maxtokens_label: "max_tokens(触发阈值)", ctx_maxturns_label: "max_turns(触发阈值)",
+        ctx_triggers_label: "触发条件(条件 → 阈值;留空=不启用)",
+        ctx_extend_hint: "可自定义:在 harness/context.py 用 @register_strategy / @register_condition 注册,import 后即在此出现(见 AGENTS.md)。",
+        cfg_unregistered: "代码中未注册 —— 是否忘了 import 其模块?",
         ctx_hint: "命中触发条件时按所选策略压缩历史(组合方式:or=任一命中,and=全部命中)。",
         tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
         prompts_system: "系统提示", prompts_persona: "人设", prompts_rules: "rule 文件(每行一个路径)",
-        paradigms_enabled: "启用范式(逗号分隔)", paradigms_default: "默认范式",
+        paradigms_enabled: "启用的范式", paradigms_default: "默认范式",
+        par_extend_hint: "可自定义:在 harness/paradigms/ 用 @register_paradigm 注册,import 后即在此出现(见 AGENTS.md)。",
         obs_trace: "写 JSONL trace", obs_tracedir: "trace 目录",
       },
     };
@@ -271,6 +277,10 @@
     const CFG_TABS = ["llm", "context", "budget", "tools", "prompts", "paradigms", "observability"];
     let cfgTab = "llm";
     let cfg = {};
+    // What's registered in code (GET /registries): the universe the Context +
+    // Paradigms dropdowns are built from. A configured name missing here is flagged.
+    let reg = { paradigms: [], strategies: [], conditions: [] };
+    const UNREG = " \u26a0";  // appended to a name selected in config but not registered
 
     function buildCfgTabs() {
       const nav = $("cfg-tabs");
@@ -397,19 +407,94 @@
       ["msg", "mode", "stream", "chat-send"].forEach((id) => { $(id).disabled = none; });
     }
 
+    // Build the Context tab from the registries: the strategy dropdown lists every
+    // registered strategy, and there's one threshold input per registered condition
+    // (built-ins + anything you @register and import). A configured name that isn't
+    // registered is still shown, flagged, so it round-trips instead of vanishing.
+    function buildContext() {
+      const ctx = cfg.context || {};
+      const sel = $("cfg-ctx-strategy"); sel.innerHTML = "";
+      const strategies = reg.strategies.slice();
+      if (ctx.strategy && !strategies.includes(ctx.strategy)) strategies.push(ctx.strategy);
+      strategies.forEach((name) => {
+        const ok = reg.strategies.includes(name);
+        const o = document.createElement("option");
+        o.value = name; o.textContent = name + (ok ? "" : UNREG);
+        if (!ok) o.title = t("cfg_unregistered");
+        sel.appendChild(o);
+      });
+      sel.value = ctx.strategy || "summarize";
+      $("cfg-ctx-keep").value = ctx.keep_last_turns ?? 6;
+      $("cfg-ctx-combine").value = ctx.combine || "or";
+      const trig = ctx.triggers || {};
+      const names = reg.conditions.slice();
+      Object.keys(trig).forEach((n) => { if (!names.includes(n)) names.push(n); });
+      const box = $("cfg-ctx-triggers"); box.innerHTML = "";
+      names.forEach((name) => {
+        const ok = reg.conditions.includes(name);
+        const label = document.createElement("label");
+        label.className = "flex items-center gap-2 text-sm";
+        const span = document.createElement("span");
+        span.className = "w-44 font-mono"; span.textContent = name + (ok ? "" : UNREG);
+        if (!ok) span.title = t("cfg_unregistered");
+        const inp = document.createElement("input");
+        inp.type = "number"; inp.min = "1"; inp.placeholder = "\u2014";
+        inp.className = "cfg-trigger w-40 rounded border px-2 py-1";
+        inp.dataset.cond = name;
+        inp.value = trig[name] ?? "";
+        label.appendChild(span); label.appendChild(inp);
+        box.appendChild(label);
+      });
+    }
+
+    // The default dropdown only offers currently-checked paradigms.
+    function parDefaultOptions() {
+      const sel = $("cfg-par-default");
+      const prev = sel.value;
+      const checked = Array.from(document.querySelectorAll(".cfg-par-cb"))
+        .filter((c) => c.checked).map((c) => c.dataset.name);
+      sel.innerHTML = "";
+      checked.forEach((name) => {
+        const o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o);
+      });
+      if (checked.includes(prev)) sel.value = prev;
+    }
+
+    // Build the Paradigms tab: a checkbox per registered paradigm (checked = in
+    // config.paradigms.enabled). A newly @register_paradigm'd one shows up here as
+    // an unchecked item to enable; an enabled-but-unregistered name is flagged.
+    function buildParadigms() {
+      const par = cfg.paradigms || {};
+      const enabled = par.enabled || [];
+      const names = reg.paradigms.slice();
+      enabled.forEach((n) => { if (!names.includes(n)) names.push(n); });
+      const box = $("cfg-par-list"); box.innerHTML = "";
+      names.forEach((name) => {
+        const ok = reg.paradigms.includes(name);
+        const label = document.createElement("label");
+        label.className = "flex items-center gap-2 text-sm";
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.className = "cfg-par-cb"; cb.dataset.name = name;
+        cb.checked = enabled.includes(name);
+        cb.addEventListener("change", parDefaultOptions);
+        const span = document.createElement("span");
+        span.className = "font-mono"; span.textContent = name + (ok ? "" : UNREG);
+        if (!ok) span.title = t("cfg_unregistered");
+        label.appendChild(cb); label.appendChild(span);
+        box.appendChild(label);
+      });
+      parDefaultOptions();
+      if (par.default && Array.from($("cfg-par-default").options).some((o) => o.value === par.default)) {
+        $("cfg-par-default").value = par.default;
+      }
+    }
+
     function renderConfig() {
       const pc = $("cfg-profiles");
       pc.innerHTML = "";
       (cfg.llms || []).forEach((p) => pc.appendChild(profileCard(p)));
       buildRoles();
-      // context
-      const ctx = cfg.context || {};
-      const trig = ctx.triggers || {};
-      $("cfg-ctx-strategy").value = ctx.strategy || "summarize";
-      $("cfg-ctx-keep").value = ctx.keep_last_turns ?? 6;
-      $("cfg-ctx-combine").value = ctx.combine || "or";
-      $("cfg-ctx-maxtokens").value = trig.max_tokens ?? "";
-      $("cfg-ctx-maxturns").value = trig.max_turns ?? "";
+      buildContext();
       // budget
       const b = cfg.budget || {};
       $("cfg-b-steps").value = b.max_steps ?? "";
@@ -429,10 +514,7 @@
       $("cfg-p-system").value = pr.system || "";
       $("cfg-p-persona").value = pr.persona || "";
       $("cfg-p-rules").value = (pr.rules_files || []).join("\n");
-      // paradigms
-      const par = cfg.paradigms || {};
-      $("cfg-par-enabled").value = (par.enabled || []).join(", ");
-      $("cfg-par-default").value = par.default || "";
+      buildParadigms();
       // observability
       const obs = cfg.observability || {};
       $("cfg-obs-trace").checked = !!obs.trace;
@@ -455,8 +537,9 @@
         combine: $("cfg-ctx-combine").value,
       };
       const triggers = {};
-      const mtok = numOrNull($("cfg-ctx-maxtokens").value); if (mtok != null) triggers.max_tokens = mtok;
-      const mturn = numOrNull($("cfg-ctx-maxturns").value); if (mturn != null) triggers.max_turns = mturn;
+      document.querySelectorAll("#cfg-ctx-triggers .cfg-trigger").forEach((el) => {
+        const v = numOrNull(el.value); if (v != null) triggers[el.dataset.cond] = v;
+      });
       patch.context.triggers = triggers;
       patch.budget = {
         max_steps: numOrNull($("cfg-b-steps").value), max_seconds: numOrNull($("cfg-b-seconds").value),
@@ -473,7 +556,8 @@
       prompts.rules_files = rules;
       patch.prompts = prompts;
       patch.paradigms = {
-        enabled: $("cfg-par-enabled").value.split(",").map((s) => s.trim()).filter(Boolean),
+        enabled: Array.from(document.querySelectorAll(".cfg-par-cb"))
+          .filter((c) => c.checked).map((c) => c.dataset.name),
         default: $("cfg-par-default").value.trim(),
       };
       patch.observability = { trace: $("cfg-obs-trace").checked, trace_dir: $("cfg-obs-tracedir").value.trim() || "traces" };
@@ -482,6 +566,7 @@
 
     async function loadConfig() {
       cfg = await (await fetch("/config")).json();
+      try { reg = await (await fetch("/registries")).json(); } catch (e) { /* keep last */ }
       renderConfig();
       gateChat();
       $("cfg-status").textContent = "";
@@ -545,7 +630,7 @@
         body: JSON.stringify(collectConfig()),
       });
       const data = await resp.json();
-      if (resp.ok) { cfg = data; renderConfig(); gateChat(); $("cfg-status").textContent = t("cfg_saved"); }
+      if (resp.ok) { cfg = data; renderConfig(); gateChat(); loadParadigms(); $("cfg-status").textContent = t("cfg_saved"); }
       else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });
 

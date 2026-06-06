@@ -404,6 +404,29 @@ def test_web_index_has_paged_config_and_language_switch(tmp_path, preset_spec):
         assert sub in idx
 
 
+def test_web_surfaces_registered_extensions(tmp_path, preset_spec):
+    """The Context/Paradigms tabs are built from a /registries endpoint, so a
+    custom @register_* shows up; config names that aren't registered are flagged."""
+    preset_spec.interfaces.web = True
+    out = tmp_path / "registries"
+    generate(preset_spec, out, git_init=False)
+    base = out / "src" / "coding_assistant"
+    web_py = (base / "interfaces" / "web.py").read_text(encoding="utf-8")
+    idx = (base / "interfaces" / "web_index.html").read_text(encoding="utf-8")
+    cli_py = (base / "interfaces" / "cli.py").read_text(encoding="utf-8")
+
+    # backend introspection endpoint reads the live registries (no secrets)
+    assert '"/registries"' in web_py
+    assert "STRATEGIES" in web_py and "CONDITIONS" in web_py and "PARADIGMS" in web_py
+    # frontend builds the dropdowns/checklist from it + hints + mismatch flag
+    assert "/registries" in idx
+    assert 'id="cfg-ctx-triggers"' in idx and 'id="cfg-par-list"' in idx
+    assert "ctx_extend_hint" in idx and "par_extend_hint" in idx
+    assert "cfg_unregistered" in idx
+    # CLI introspection mirrors it (available even without web)
+    assert "def info(" in cli_py
+
+
 def test_language_seeds_product_web_default(tmp_path, spec):
     """spec.language threads into the product web's default UI language."""
     spec.interfaces.web = True

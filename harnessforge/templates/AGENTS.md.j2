@@ -125,8 +125,11 @@ paradigms:
 ```
 
 Now `{{ project_slug }} run --mode mymode "..."` (or the web dropdown) routes to
-it. This is a written-out name→function dispatch over a fixed registry — **not** a
-runtime "paradigm engine" / dynamic graph / DSL. To make a read-only paradigm,
+it. Once imported, the registered paradigm appears in `{{ project_slug }} info`{% if interfaces.web %} and
+the web Paradigms tab (tick it to enable; it then joins the chat-mode dropdown){% endif %} —
+and an enabled name that isn't registered is flagged. This is a written-out
+name→function dispatch over a fixed registry — **not** a runtime "paradigm
+engine" / dynamic graph / DSL. To make a read-only paradigm,
 filter tools with `registry.active_names(config.enabled_tool_names(),
 allow_high_risk=False)` (that's exactly how `plan`/`ask` stay safe).
 
@@ -229,7 +232,9 @@ context:
 ```
 
 This is a runtime knob — change the strategy, the conditions, or their
-thresholds without regenerating.
+thresholds without regenerating. Once your module is imported, the registered
+strategy/condition shows up in `{{ project_slug }} info`{% if interfaces.web %} and the web Context
+tab's dropdowns{% endif %} — and a config name that isn't registered is flagged there.
 {% if interfaces.web %}
 ## Web interface
 
