@@ -20,7 +20,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
-from ..harness.config import Config, load_config
+from ..harness.config import Config, ConfigError, load_config, set_env_value
 from ..harness.hooks import Hooks
 from ..harness.llm import ClientRouter, LLMResponse, ToolCall
 from ..harness.loop import run as run_loop
@@ -132,6 +132,23 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
     def get_config() -> dict:
         # model_dump holds only env-var NAMES (api_key_env), never secret values.
         return app.state.config.model_dump(mode="json", include=set(_EDITABLE_FIELDS))
+
+    @app.post("/env")
+    async def set_env(request: Request):
+        """Write a secret VALUE into the local .env (write-only; never returned).
+
+        config.yaml stores only the env-var NAME; this fills its value in .env
+        (gitignored). The value is never echoed back, logged, or put in config.
+        """
+        body = await request.json()
+        name = str(body.get("name", "")).strip()
+        if not name:
+            return JSONResponse({"error": "name required"}, status_code=400)
+        try:
+            set_env_value(name, str(body.get("value", "")))
+        except ConfigError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return {"ok": True, "name": name}  # never return the value
 
     @app.post("/config")
     async def set_config(request: Request):

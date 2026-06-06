@@ -38,8 +38,10 @@
 
 产物侧(`harnessforge/templates/`,`interfaces.web` 门控):
 
-- `src/<pkg>/interfaces/web_index.html.j2` — Config 视图重组为**按功能子 tab**(LLM/Context/Budget/Tools/Prompts/Paradigms/Observability)+ 顶部**语言切换(en/zh,默认值由 `{{ language }}` 即 `spec.language` 种子化,localStorage 记忆)**;chat 视图行为不变;标题/header 用 `{{ display_name }}`。**后端 `web.py` `/config` 不变**(仍是同一组 `_EDITABLE_FIELDS`,分页与 i18n 纯前端)。
+- `src/<pkg>/interfaces/web_index.html.j2` — Config 视图重组为**按功能子 tab**(LLM/Context/Budget/Tools/Prompts/Paradigms/Observability)+ 顶部**语言切换(静态双语标签 `语言/Language`,默认值由 `{{ language }}` 即 `spec.language` 种子化,localStorage 记忆)**;LLM tab 每个 profile 带**写入式 set-key**(写 `.env`、不回显);chat 视图行为不变;标题/header 用 `{{ display_name }}`。**后端 `web.py` `/config` 不变**(仍是同一组 `_EDITABLE_FIELDS`);新增 `POST /env`(write-only 写 `.env`,不回显)。
 - `README.md.j2` / `web.py.j2` — 标题用 `{{ display_name }}`(回落 slug)。
+- **写入式 `.env` 密钥助手**(人 2026-06-06 决策 D):`config.py set_env_value(name, value)`(只写本地 gitignored `.env`、单行防注入、env 名校验)+ CLI `<pkg> set-key <ENV_NAME>`(隐藏输入)+ Web `POST /env` / LLM tab 输入框。**write-only**:值只进 `.env`,绝不进 `config.yaml`/spec/trace/日志/任何响应。降低"建 .env 粘 key"门槛(尤其 Windows 免配系统环境变量)。keyring 仍 v1+。
+- `cli.py`(产物)/ `cli.py`(生成器) — `serve` / `wizard` 默认 `--port 0` 自动挑空闲端口(`_find_free_port`,从 8000 起)并打印可打开地址。
 
 测试:`tests/test_wizard.py`(`fastapi.testclient`)+ `test_spec.py`/`test_generator.py` 增 display_name/context/分页断言 + `test_golden.py` 增 wizard 端到端 golden。
 
@@ -86,13 +88,15 @@
   - **显示名 → 派生 slug**:新增 `spec.display_name`(改 schema,触发 `CLAUDE.md §6.1`,**人 2026-06-06 签字**);wizard 输入显示名派生 `project_slug`。
   - **产物不做 wizard,只做分页配置页**:产物侧不做首启自动拉起 / 独立 wizard,只把 `/config` 按功能分页 + 中英切换;只改运行期行为性配置(守两轴)。LLM/prompts/budget/context 等行为性配置的**正式入口就是产物配置页**。
   - **LLM 规范**:本片维持 provider-agnostic;**原生 OpenAI+Anthropic 双规范登记 v1+**(人 2026-06-06:"要做双规范,但不做在 slice7,后续单独做,先记在 v1")。
+  - **写入式 `.env` 密钥助手 = 做 B+C(决策 D,人 2026-06-06)**:产物侧 Web LLM tab + CLI `set-key` 把 key 真值**只写本地 gitignored `.env`、write-only 不回显**(合规,见 §5 密钥红线);生成器 wizard 不收 key;keyring 留 v1+。理由:`.env` 已比 Windows 系统环境变量简单,助手只是免去"手建 .env 粘 key"。
+  - **端口自动侦测 + 双语语言标签**(人 2026-06-06):`wizard`/产物 `serve` 默认自动挑空闲端口并打印地址(避开端口占用);语言切换标签恒显示 `语言/Language` 让任何语言用户都能找到切换。
 - [ ] **③ 字段是否齐 / 对外可读(实现后真实验收)**:起 wizard + 产物 serve 点一遍,确认覆盖与中英措辞。
 - **软确认(非阻塞,`CLAUDE.md §5.3`)**:`POST /generate` 取 render-only(卡 UI 规避,始终提供 spec 下载 / `new --spec` 接力);无构建单页(Tailwind CDN);wizard 依赖进 `[wizard]` extra;后端 `_BAKED_DEFAULTS` 取默认 LLM(`gpt-4o-mini` + `OPENAI_API_KEY`/`OPENAI_BASE_URL`)、默认 system prompt、内置工具开、`budget.max_steps=8`(仅缺省时填,显式优先);采样/单价/context 等其余行为性走产物 `config.yaml` 模板默认 + 产物配置页。
 
 ## 5. 本 slice 注意
 
 - **不进产物 / 不绑框架**:wizard 仅生成器侧、FastAPI 非 agent 编排框架(`01 §1`);产物不依赖 wizard(守"生成后不再依赖 HarnessForge")。
-- **密钥红线**(`CLAUDE.md §6.5`):wizard 表单 / 回显 / 产出 spec、产物配置页 / `/config` 只存 env 变量名。
+- **密钥红线**(`CLAUDE.md §6.5`):wizard 表单 / 回显 / 产出 spec、产物配置页 / `/config` 只存 env 变量名。**写入式 `.env` 助手**(set-key / `POST /env`)把真值**只写本地 gitignored `.env`**、不回显、不进 git/spec/trace/日志——`.env` 本就是放真值的地方,合规;真·密钥库(keyring/OS 凭证)仍 v1+。**生成器 wizard 始终不收 key**(spec 不能含密钥)。
 - **配方 vs 活旋钮**(决策④,`01 §4`):wizard 产 `spec`(配方);产物分页 `/config` 改运行期行为性配置;结构性(接口/模块/范式拓扑=代码)只能重新生成。
 - **薄**:默认产物(`web:false`)零改动、零新增依赖;产物 Web 的分页/i18n 是单页前端内的事,`web.py` 后端不变、仍薄。
 - **覆盖随 spec 演进**:若 spec 再增字段,wizard 同步补。

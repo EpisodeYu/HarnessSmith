@@ -20,6 +20,14 @@ cp .env.example .env                 # then edit .env with your real key(s)
 uv run {{ project_slug }} run "What time is it in UTC?"
 ```
 
+Don't want to edit files (or set Windows env vars)? Store the key with a hidden
+prompt instead — it writes to `.env` (gitignored) and is never printed or
+committed (the web panel's LLM tab has the same "Save to .env" field):
+
+```bash
+uv run {{ project_slug }} set-key OPENAI_API_KEY
+```
+
 Prefer pip? A `requirements.txt` is provided as a fallback:
 
 ```bash

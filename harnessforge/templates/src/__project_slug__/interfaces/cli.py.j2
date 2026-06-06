@@ -110,6 +110,31 @@ def run(
 {% if spec.mcp.enabled %}    if mcp_manager is not None:
         mcp_manager.close()
 {% endif %}
+@app.command(name="set-key")
+def set_key(
+    name: str = typer.Argument(
+        ..., help="The env-var NAME to set (e.g. OPENAI_API_KEY)."
+    ),
+) -> None:
+    """Store a secret VALUE in the local .env (write-only; never printed/committed).
+
+    config.yaml only ever holds the env-var NAME; this fills in its value in .env
+    (gitignored) so you don't have to set OS environment variables by hand.
+    """
+    from ..harness.config import ConfigError, set_env_value
+
+    value = typer.prompt(f"Value for {name}", hide_input=True)
+    try:
+        set_env_value(name, value)
+    except ConfigError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    typer.secho(
+        f"Saved {name} to .env (gitignored). It is never printed or committed.",
+        fg=typer.colors.GREEN,
+    )
+
+
 {% if interfaces.web %}
 
 def _find_free_port(preferred: int, host: str = "127.0.0.1") -> int:

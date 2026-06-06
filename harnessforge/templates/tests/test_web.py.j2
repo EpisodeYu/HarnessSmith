@@ -6,9 +6,10 @@ Generated only when ``interfaces.web`` is enabled. They use the offline MockLLM
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
-from {{ project_slug }}.harness.config import Config
+from {{ project_slug }}.harness.config import Config, ConfigError, set_env_value
 from {{ project_slug }}.interfaces.web import create_app
 
 
@@ -92,3 +93,32 @@ def test_config_post_ignores_structural_and_secret_keys():
     assert "sk-leak" not in resp.text
     # structural identity is untouched (project_slug is not an editable field)
     assert "hacked" not in resp.text
+
+
+def test_set_env_value_writes_and_updates(tmp_path):
+    """The write-only .env helper creates then updates a KEY=value line in place."""
+    env = tmp_path / ".env"
+    set_env_value("OPENAI_API_KEY", "sk-secret-1", env)
+    assert "OPENAI_API_KEY=sk-secret-1" in env.read_text(encoding="utf-8")
+    set_env_value("OPENAI_API_KEY", "sk-secret-2", env)
+    text = env.read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY=sk-secret-2" in text and "sk-secret-1" not in text
+
+
+def test_set_env_value_rejects_bad_name(tmp_path):
+    with pytest.raises(ConfigError):
+        set_env_value("bad name", "x", tmp_path / ".env")
+
+
+def test_env_endpoint_writes_dotenv_without_echoing(tmp_path, monkeypatch):
+    """POST /env stores the value in the local .env and never returns/echoes it."""
+    monkeypatch.chdir(tmp_path)
+    resp = _client().post("/env", json={"name": "OPENAI_API_KEY", "value": "sk-do-not-echo"})
+    assert resp.status_code == 200
+    assert "sk-do-not-echo" not in resp.text  # write-only: value never returned
+    assert "OPENAI_API_KEY=sk-do-not-echo" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_env_endpoint_rejects_bad_name():
+    resp = _client().post("/env", json={"name": "bad name", "value": "x"})
+    assert resp.status_code == 400

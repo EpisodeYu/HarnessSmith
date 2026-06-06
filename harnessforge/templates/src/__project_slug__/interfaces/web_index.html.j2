@@ -114,6 +114,8 @@
         roles_label: "Roles", profile_name: "name", profile_model: "model",
         profile_key: "api_key_env", profile_baseurl: "base_url_env", profile_temp: "temperature",
         profile_maxtok: "max_tokens", profile_pcost: "prompt_cost_per_1k", profile_ccost: "completion_cost_per_1k",
+        set_key_ph: "set this key's value in .env (write-only)", set_key_btn: "Save to .env",
+        key_saved: "saved to .env", key_need_name: "set the api_key_env name first",
         ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_maxtokens_label: "max_context_tokens",
         tools_hint: "Allowlist — only enabled tools are offered to the model.",
         prompts_system: "system", prompts_persona: "persona", prompts_rules: "rules_files (one path per line)",
@@ -131,6 +133,8 @@
         roles_label: "角色", profile_name: "名称", profile_model: "model",
         profile_key: "api_key_env", profile_baseurl: "base_url_env", profile_temp: "temperature",
         profile_maxtok: "max_tokens", profile_pcost: "prompt_cost_per_1k", profile_ccost: "completion_cost_per_1k",
+        set_key_ph: "在 .env 设置该 key 的值(只写不回显)", set_key_btn: "写入 .env",
+        key_saved: "已写入 .env", key_need_name: "请先填 api_key_env 名称",
         ctx_strategy_label: "策略", ctx_keep_label: "保留最近轮数", ctx_maxtokens_label: "最大上下文 token",
         tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
         prompts_system: "系统提示", prompts_persona: "人设", prompts_rules: "rule 文件(每行一个路径)",
@@ -256,7 +260,11 @@
           f("p-name", "profile_name", p.name) + f("p-model", "profile_model", p.model, true) +
           f("p-key", "profile_key", p.api_key_env, true) + f("p-baseurl", "profile_baseurl", p.base_url_env, true) +
           f("p-temp", "profile_temp", p.temperature) + f("p-maxtok", "profile_maxtok", p.max_tokens) +
-          f("p-pcost", "profile_pcost", p.prompt_cost_per_1k) + f("p-ccost", "profile_ccost", p.completion_cost_per_1k);
+          f("p-pcost", "profile_pcost", p.prompt_cost_per_1k) + f("p-ccost", "profile_ccost", p.completion_cost_per_1k) +
+          "<div class='col-span-2 mt-1 flex items-center gap-2 border-t pt-2'>" +
+            "<input type='password' class='p-keyval flex-1 rounded border px-2 py-1' placeholder='" + t("set_key_ph") + "'/>" +
+            "<button type='button' class='p-setkey rounded border px-2 py-1 text-xs'>" + t("set_key_btn") + "</button>" +
+            "<span class='p-keystatus text-xs text-emerald-700'></span></div>";
         pc.appendChild(row);
       });
       // roles
@@ -348,6 +356,23 @@
       renderConfig();
       $("cfg-status").textContent = "";
     }
+    // Write-only secret helper: store an LLM key's VALUE into the local .env
+    // (gitignored). The value is sent once and never read back into the UI.
+    $("cfg-profiles").addEventListener("click", async (e) => {
+      const btn = e.target.closest(".p-setkey");
+      if (!btn) return;
+      const row = btn.closest(".profile");
+      const name = row.querySelector(".p-key").value.trim();
+      const status = row.querySelector(".p-keystatus");
+      if (!name) { status.textContent = t("key_need_name"); return; }
+      const resp = await fetch("/env", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, value: row.querySelector(".p-keyval").value }),
+      });
+      const data = await resp.json();
+      if (resp.ok) { row.querySelector(".p-keyval").value = ""; status.textContent = t("key_saved"); }
+      else { status.textContent = data.error || t("cfg_invalid"); }
+    });
     $("cfg-reload").addEventListener("click", loadConfig);
     $("cfg-save").addEventListener("click", async () => {
       const resp = await fetch("/config", {
