@@ -33,13 +33,6 @@ from ..spec import HarnessSpec
 _STATIC_DIR = Path(__file__).parent / "static"
 _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
-# The built-in demo tools the templates ship (tools.py). Real capabilities come
-# from MCP servers (the catalog); these two are safe, read-only examples.
-BUILTIN_TOOLS = [
-    {"name": "get_current_time", "description": "Return the current UTC time (ISO 8601)."},
-    {"name": "calculator", "description": "Evaluate a basic arithmetic expression."},
-]
-
 # The built-in loop paradigms (cf. spec.paradigms' Literal). agent is the default
 # tool-calling loop; plan/ask are read-only.
 PARADIGMS = [
@@ -48,35 +41,38 @@ PARADIGMS = [
     {"name": "ask", "description": "Read-only: answers questions with low-risk tools; never mutates."},
 ]
 
-
-# Optional, opt-in default-language directive appended to prompts.system. It is
-# *soft* (still match the user's actual input language) because modern models
-# already auto-detect input language — this only pins the default for ambiguous
-# input. Becomes editable text in config.yaml's prompts.system, so it's a normal
-# runtime knob afterwards.
-_LANG_DIRECTIVE = {
-    "en": "Respond in English by default; if the user writes in another language, reply in theirs.",
-    "zh": "默认用中文回答;如果用户使用其他语言,则用用户的语言回答。",
+# Behavioral defaults baked into the spec when the (structural-only) wizard form
+# omits them. The wizard intentionally hides these — a generator can produce many
+# products, each configuring its own LLM / prompts / budget at runtime in the
+# product's own config page / .env. Baking sensible defaults keeps the generated
+# product complete and runnable out of the box. Secrets are env-var NAMES only.
+# Only filled when absent/empty, so an explicit spec (or a hand-written one) wins.
+_BAKED_DEFAULTS: dict = {
+    "llms": [
+        {
+            "name": "default",
+            "model": "gpt-4o-mini",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url_env": "OPENAI_BASE_URL",
+        }
+    ],
+    "roles": {"generation": "default"},
+    "prompts": {"system": "You are a helpful assistant."},
+    "tools": [
+        {"name": "get_current_time", "enabled": True},
+        {"name": "calculator", "enabled": True},
+    ],
+    "budget": {"max_steps": 8},
 }
 
 
-def _apply_language_directive(spec_data: dict) -> dict:
-    """Append the default-language directive to prompts.system (opt-in)."""
-    directive = _LANG_DIRECTIVE.get(str(spec_data.get("language", "en")))
-    if not directive:
-        return spec_data
-    prompts = dict(spec_data.get("prompts") or {})
-    system = (prompts.get("system") or "").strip()
-    prompts["system"] = f"{system}\n\n{directive}" if system else directive
-    return {**spec_data, "prompts": prompts}
-
-
-def _spec_from_body(body: dict) -> dict:
-    """Pull the spec dict out of a request body, applying opt-in language directive."""
-    spec_data = dict(body.get("spec") or {})
-    if body.get("llm_language"):
-        spec_data = _apply_language_directive(spec_data)
-    return spec_data
+def _with_defaults(spec_data: dict) -> dict:
+    """Fill behavioral defaults the structural-only wizard form omits."""
+    out = dict(spec_data)
+    for key, value in _BAKED_DEFAULTS.items():
+        if not out.get(key):
+            out[key] = value
+    return out
 
 
 def _spec_yaml(spec: HarnessSpec) -> str:
@@ -128,7 +124,6 @@ def create_app() -> FastAPI:
     def meta() -> dict:
         return {
             "paradigms": PARADIGMS,
-            "builtin_tools": BUILTIN_TOOLS,
             "catalog": _catalog_meta(),
             "presets": available_presets(),
         }
@@ -137,7 +132,7 @@ def create_app() -> FastAPI:
     async def post_spec(request: Request):
         body = await request.json()
         try:
-            spec = HarnessSpec.model_validate(_spec_from_body(body))
+            spec = HarnessSpec.model_validate(_with_defaults(dict(body.get("spec") or {})))
         except ValidationError as exc:
             return JSONResponse({"ok": False, "errors": _format_errors(exc)}, status_code=400)
         try:
@@ -162,7 +157,7 @@ def create_app() -> FastAPI:
                 status_code=400,
             )
         try:
-            spec = HarnessSpec.model_validate(_spec_from_body(body))
+            spec = HarnessSpec.model_validate(_with_defaults(dict(body.get("spec") or {})))
         except ValidationError as exc:
             return JSONResponse({"ok": False, "errors": _format_errors(exc)}, status_code=400)
         try:

@@ -180,17 +180,16 @@ def test_golden_wizard_spec_generates_and_smoke_passes(tmp_path):
     from harnessforge.wizard.app import create_app
 
     client = TestClient(create_app())
+    # Structural-only form (what the slimmed wizard sends): the backend bakes the
+    # behavioral defaults (llms/prompts/budget/tools) that make it runnable.
     spec_data = {
         "display_name": "Wizard Bot",
         "project_slug": "wizard_bot",
+        "language": "zh",
         "paradigms": ["agent", "plan", "ask"],
-        "llms": [{"name": "default", "model": "gpt-4o-mini", "api_key_env": "OPENAI_API_KEY"}],
-        "roles": {"generation": "default"},
-        "prompts": {"system": "You are helpful."},
-        "tools": [{"name": "calculator", "enabled": True}],
         "interfaces": {"cli": True, "web": True},
-        "context": {"strategy": "truncate", "keep_last_turns": 4},
-        "budget": {"max_steps": 4},
+        "mcp": {"enabled": False},
+        "skills": {"enabled": False},
     }
     resp = client.post("/spec", json={"spec": spec_data})
     assert resp.status_code == 200, resp.text
