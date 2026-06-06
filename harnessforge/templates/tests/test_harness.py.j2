@@ -355,15 +355,15 @@ def test_no_rules_files_means_no_rules_section(tmp_path):
     assert "Project rules" not in prompt  # zero footprint when none are configured
 
 
-def test_context_truncate_is_noop_without_limit():
+def test_context_truncate_is_noop_without_triggers():
     messages = _conversation(8)
-    fitted = fit(messages, ContextConfig(strategy="truncate"))
+    fitted = fit(messages, ContextConfig(strategy="truncate", triggers={}))
     assert fitted == messages
 
 
 def test_context_truncate_keeps_system_and_recent_turns():
     messages = _conversation(10)
-    ctx = ContextConfig(strategy="truncate", max_context_tokens=50, keep_last_turns=2)
+    ctx = ContextConfig(strategy="truncate", triggers={"max_tokens": 50}, keep_last_turns=2)
     fitted = fit(messages, ctx)
 
     assert estimate_tokens(messages) > 50
@@ -375,9 +375,47 @@ def test_context_truncate_keeps_system_and_recent_turns():
 
 def test_context_summarize_injects_summary():
     messages = _conversation(10)
-    ctx = ContextConfig(strategy="summarize", max_context_tokens=50, keep_last_turns=2)
+    ctx = ContextConfig(strategy="summarize", triggers={"max_tokens": 50}, keep_last_turns=2)
     fitted = fit(messages, ctx, summarizer=MockLLM(final="SUMMARY TEXT"))
 
     assert fitted[0]["role"] == "system"
     assert any("SUMMARY TEXT" in (m.get("content") or "") for m in fitted)
     assert len(fitted) < len(messages)
+
+
+def test_context_max_turns_condition_triggers():
+    messages = _conversation(10)  # 10 user turns, comfortably under any token cap
+    ctx = ContextConfig(strategy="truncate", triggers={"max_turns": 3}, keep_last_turns=2)
+    assert fit(messages, ctx) is not messages
+    assert len(fit(messages, ctx)) < len(messages)  # the turn count alone tripped it
+
+
+def test_context_combine_and_requires_all_conditions():
+    messages = _conversation(10)  # exceeds max_tokens=50 but only has 10 turns
+    only_one = ContextConfig(
+        strategy="truncate", combine="and", keep_last_turns=2,
+        triggers={"max_tokens": 50, "max_turns": 999},  # turns NOT exceeded
+    )
+    assert fit(messages, only_one) == messages  # AND: one unmet -> no compaction
+    both = ContextConfig(
+        strategy="truncate", combine="and", keep_last_turns=2,
+        triggers={"max_tokens": 50, "max_turns": 3},  # both exceeded
+    )
+    assert len(fit(messages, both)) < len(messages)
+
+
+def test_context_custom_condition_and_strategy_are_pluggable():
+    """Extensibility: register a condition + strategy, then select them by name."""
+    from {{ project_slug }}.harness.context import register_condition, register_strategy
+
+    @register_condition("always")
+    def _always(messages, threshold):
+        return True
+
+    @register_strategy("system_only")
+    def _system_only(messages, ctx, *, summarizer=None):
+        return [m for m in messages if m.get("role") == "system"]
+
+    messages = _conversation(4)
+    fitted = fit(messages, ContextConfig(strategy="system_only", triggers={"always": 1}))
+    assert len(fitted) == 1 and fitted[0]["role"] == "system"

@@ -29,7 +29,7 @@
 生成器侧(`harnessforge/`):
 
 - `spec.py` — `HarnessSpec` 新增 `display_name: str | None`(纯标签,不进 `config.yaml`)+ `language: Literal["en","zh"] = "en"`(产物 web 默认 UI 语言种子)。
-- `generator.py` — 渲染上下文加 `display_name`(= `spec.display_name or spec.project_slug`)+ `language`;`config.yaml` context 块改为**从 `spec.context` 种子化**(沿用 rules_files 式 seed,未设时输出与旧版字节一致)。
+- `generator.py` — 渲染上下文加 `display_name`(= `spec.display_name or spec.project_slug`)+ `language`;`config.yaml` context 块改为**从 `spec.context` 种子化**(沿用 rules_files 式 seed)。**实现说明(2026-06-06 增强,人拍板)**:context 由单一 `max_context_tokens` 触发重构为**条件/策略两层薄注册表**——`triggers`(内置 `max_tokens`/`max_turns`,`combine: or/and` 组合)定何时压、`strategy`(truncate/summarize/none + `@register_strategy`/`@register_condition` 用户可自加)定怎么压;**默认从 `truncate`/无限制改为 `summarize` + `max_tokens: 192000` 触发、不限轮数**(因此 context 块不再与旧版字节一致;seed 键见 `spec.py` context 字段注释)。详见 §6 决策⑤。
 - `wizard/`(新目录,`[wizard]` extra 门控):
   - `wizard/app.py` — FastAPI:`GET /`(单页)、`GET /meta`(范式/catalog/presets 元数据 + `generate_base`)、`POST /spec`(对缺省行为性字段烤 `_BAKED_DEFAULTS` → `HarnessSpec` 校验 → spec YAML + `harnessforge new` 命令〔填入目标目录〕/ 字段级错误)、`POST /generate`(`generate()` 渲染;`launch:true` + Web 时额外**后台拉起产物 `uv run <slug> serve` 并回 URL**,否则保持 render-only)。`_BAKED_DEFAULTS` 只在字段缺省时填(显式/手写 spec 优先)。
   - `wizard/static/index.html` — 无构建**精简单页**:**首项语言下拉(中/英)** + `{zh,en}` i18n 字典(切换换 wizard UI),该选择写入 `spec.language`(贯穿到产物 UI 默认);**只两组结构选项**——基本(显示名→slug、`paradigms` 多选+默认)与 能力(`interfaces.web`、`mcp.enabled`+catalog 多选、`skills.enabled`)+ 生成产物;显示名→slug→目标目录前端逐级派生。
@@ -109,7 +109,8 @@
 - [x] **显示名机制**:`display_name` 渲染进产物 web 标题/header + README 标题,未设回落 slug(`test_generator.py::test_display_name_renders_in_titles_and_readme` / `test_display_name_falls_back_to_slug`)。
 - [x] **产物配置分页 + 语言**:`web_index.html` 含语言开关(en/zh)+ 按功能 `cfg-tabs`;`/config` 行为不变(`test_web.py` 全绿;`test_generator.py::test_web_index_has_paged_config_and_language_switch`)。
 - [x] **语言贯穿(UI)**:wizard 语言选择写入 `spec.language` → 产物 web 默认 UI 语言被种子化(`test_generator.py::test_language_seeds_product_web_default` / `test_language_defaults_to_en_in_product_web`;`test_wizard.py::test_language_threads_into_product_default`);`spec.language` 默认 `en`、非法值被拒(`test_spec.py::test_language_*`)。Agent 回答语言不在向导设(产物 Prompts 里改)。
-- [x] **context 种子化**:`spec.context` → `config.yaml` context 块;未设时字节一致(`test_context_block_seeds_from_spec` / `test_context_block_defaults_when_spec_omits_it`)。
+- [x] **context 种子化**:`spec.context`(`strategy`/`keep_last_turns`/`combine`/`triggers`)→ `config.yaml` context 块;未设回落模板默认(`test_context_block_seeds_from_spec` / `test_context_block_defaults_when_spec_omits_it`)。**2026-06-06 增强后默认 `summarize`+`max_tokens:192000`、不再与旧版字节一致**(见决策⑤)。
+- [x] **context 条件/策略两层(2026-06-06 增强)**:产物 `triggers`(`max_tokens`/`max_turns` + `combine: or/and`)+ 策略/条件薄注册表(`@register_strategy`/`@register_condition`)——`test_harness.py::test_context_max_turns_condition_triggers` / `test_context_combine_and_requires_all_conditions` / `test_context_custom_condition_and_strategy_are_pluggable`(产物自带)。
 - [x] **大改动回归**:动 schema(`display_name`)+ 跨 ≥3 文件 → golden 全量 + Docker 冒烟 + `uvx harnessforge new` 冒烟全绿;无框架断言(pyproject/lock 无 langchain/langgraph/adk)。
 - [x] `ReadLints` clean。
 - [ ] **wizard / 配置页对外可读(人审,§4②)**:起 `harnessforge wizard` 与产物 `serve` 实际点一遍,确认字段集/措辞/中英文案/默认对非作者用户友好。
@@ -125,6 +126,7 @@
   - **LLM 规范**:本片维持 provider-agnostic;**原生 OpenAI+Anthropic 双规范登记 v1+**(人 2026-06-06:"要做双规范,但不做在 slice7,后续单独做,先记在 v1")。
   - **写入式 `.env` 密钥助手 = 做 B+C(决策 D,人 2026-06-06)**:产物侧 Web LLM tab + CLI `set-key` 把 key 真值**只写本地 gitignored `.env`、write-only 不回显**(合规,见 §5 密钥红线);生成器 wizard 不收 key;keyring 留 v1+。理由:`.env` 已比 Windows 系统环境变量简单,助手只是免去"手建 .env 粘 key"。
   - **端口自动侦测 + 双语语言标签**(人 2026-06-06):`wizard`/产物 `serve` 默认自动挑空闲端口并打印地址(避开端口占用);语言切换标签恒显示 `语言/Language` 让任何语言用户都能找到切换。
+- [x] **⑤ context 条件/策略改造(人 2026-06-06 拍板,选择题确认)**:① **轮数 + token 是可组合的触发条件**(`triggers: {max_tokens, max_turns}` + `combine: or/and`,选 A:dict 形态);② **可扩展走薄注册表 + 装饰器**(`@register_strategy`/`@register_condition`,选 A,和 tools/paradigms 同套、守 §6 "非运行期抽象层"红线,**不**用 Protocol/ABC);③ **默认改为 192k token 触发压缩、不限轮数**;④ **默认策略 = `summarize`**(选 B,取代决策表原 `truncate` 默认;缺 compaction 角色时回落 truncate)。改 `context.py`/`config.py`/`config.yaml`/产物配置页 + `00-overview §3` 决策表 + `01 §3/§4`,属 §5.2 大改动跑全量回归。
 - [ ] **③ 字段是否齐 / 对外可读(实现后真实验收)**:起 wizard + 产物 serve 点一遍,确认覆盖与中英措辞。
 - **软确认(非阻塞,`CLAUDE.md §5.3`)**:`POST /generate` 取 render-only(卡 UI 规避,始终提供 spec 下载 / `new --spec` 接力);无构建单页(Tailwind CDN);wizard 依赖进 `[wizard]` extra;后端 `_BAKED_DEFAULTS` 取默认 LLM(`gpt-4o-mini` + `OPENAI_API_KEY`/`OPENAI_BASE_URL`)、默认 system prompt、内置工具开、`budget.max_steps=8`(仅缺省时填,显式优先);采样/单价/context 等其余行为性走产物 `config.yaml` 模板默认 + 产物配置页。
 

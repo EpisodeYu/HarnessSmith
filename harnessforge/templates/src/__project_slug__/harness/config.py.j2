@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -78,16 +78,29 @@ class ToolConfig(BaseModel):
 class ContextConfig(BaseModel):
     """How to keep the message history within the model's context window.
 
-    Runtime-only (lives here + in config.yaml, not in the spec). With
-    ``max_context_tokens`` unset it is a no-op, so the default matches a plain
-    loop. ``summarize`` folds older turns into a ``compaction``-role summary.
+    Runtime-only (lives here + in config.yaml, not in the spec). Two thin,
+    extensible registries drive it (see ``harness/context.py``): *conditions*
+    decide WHEN to compact, *strategies* decide HOW.
+
+    - ``triggers`` maps a registered condition name to its threshold; ``combine``
+      ("or"/"and") says whether ANY or ALL must fire. Built-in conditions:
+      ``max_tokens`` (estimated prompt tokens) and ``max_turns`` (user turns).
+      Empty ``triggers`` = never compact (a plain loop).
+    - ``strategy`` is a registered strategy name: ``truncate`` (keep system +
+      recent turns), ``summarize`` (fold older turns via the ``compaction``
+      role), or ``none`` (off). ``keep_last_turns`` = how many recent turns the
+      strategy keeps.
+
+    Add your own condition / strategy with ``@register_condition`` /
+    ``@register_strategy`` and reference it by name here.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    strategy: str = "truncate"  # "truncate" | "summarize" | "none"
-    max_context_tokens: int | None = Field(default=None, gt=0)
+    strategy: str = "summarize"  # registered strategy name, or "none"
     keep_last_turns: int = Field(default=6, ge=1)
+    combine: Literal["or", "and"] = "or"
+    triggers: dict[str, int] = Field(default_factory=lambda: {"max_tokens": 192000})
 
 
 class ObservabilityConfig(BaseModel):

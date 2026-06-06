@@ -1,13 +1,25 @@
 """Context-window management: keep the message history within budget.
 
-Applied before each LLM call. ``truncate`` (default) keeps the system message
-plus the last ``keep_last_turns`` turns; ``summarize`` folds the older turns
-into a ``compaction``-role summary and keeps the rest. With
-``max_context_tokens`` unset (or strategy ``none``) it is a no-op, so the
-default behavior matches a plain loop. Cheap and editable — no tokenizer dep.
+Applied before each LLM call. Two thin name->function registries drive it (the
+same shape as tools / paradigms — a written-out dispatch, not an engine):
+
+- a *condition* decides WHEN to compact. ``config.yaml``'s ``triggers`` maps a
+  registered condition name to its threshold; ``combine`` ("or"/"and") says
+  whether ANY or ALL of them must fire. Built-ins: ``max_tokens`` (estimated
+  prompt tokens) and ``max_turns`` (user turns).
+- a *strategy* decides HOW to compact. ``truncate`` keeps the system message
+  plus the last ``keep_last_turns`` turns; ``summarize`` folds the older turns
+  into a ``compaction``-role summary; ``none`` is off.
+
+Add your own with ``@register_condition`` / ``@register_strategy`` and reference
+it by name in ``config.yaml``. With ``strategy: none`` or empty ``triggers`` it
+is a no-op, so the default matches a plain loop. Cheap and editable — no
+tokenizer dep.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 from .config import ContextConfig
 from .llm import LLMClient
@@ -16,6 +28,35 @@ _SUMMARY_PROMPT = (
     "Summarize the earlier conversation below concisely, preserving facts, "
     "decisions, and any open tasks. Output only the summary."
 )
+
+# A condition answers "should we compact now?" from the live messages and the
+# threshold configured for it in config.yaml. A strategy rewrites the messages
+# to fit (and may use the optional summarizer client).
+Condition = Callable[[list[dict], int], bool]
+Strategy = Callable[..., list[dict]]
+
+CONDITIONS: dict[str, Condition] = {}
+STRATEGIES: dict[str, Strategy] = {}
+
+
+def register_condition(name: str) -> Callable[[Condition], Condition]:
+    """Register a trigger condition under ``name`` (referenced in `triggers`)."""
+
+    def decorator(fn: Condition) -> Condition:
+        CONDITIONS[name] = fn
+        return fn
+
+    return decorator
+
+
+def register_strategy(name: str) -> Callable[[Strategy], Strategy]:
+    """Register a compaction strategy under ``name`` (referenced by `strategy`)."""
+
+    def decorator(fn: Strategy) -> Strategy:
+        STRATEGIES[name] = fn
+        return fn
+
+    return decorator
 
 
 def estimate_tokens(messages: list[dict]) -> int:
@@ -27,6 +68,21 @@ def estimate_tokens(messages: list[dict]) -> int:
             args = call.get("function", {}).get("arguments") or ""
             total += len(str(args)) // 4
     return total
+
+
+def count_turns(messages: list[dict]) -> int:
+    """Number of user turns in the history (system messages don't count)."""
+    return sum(1 for m in messages if m.get("role") == "user")
+
+
+@register_condition("max_tokens")
+def _cond_max_tokens(messages: list[dict], threshold: int) -> bool:
+    return estimate_tokens(messages) > threshold
+
+
+@register_condition("max_turns")
+def _cond_max_turns(messages: list[dict], threshold: int) -> bool:
+    return count_turns(messages) > threshold
 
 
 def _split_keep_last_turns(messages: list[dict], keep_last_turns: int):
@@ -51,26 +107,64 @@ def _split_keep_last_turns(messages: list[dict], keep_last_turns: int):
     return system, dropped, kept
 
 
+@register_strategy("none")
+def _strategy_none(
+    messages: list[dict], ctx: ContextConfig, *, summarizer: LLMClient | None = None
+) -> list[dict]:
+    return messages
+
+
+@register_strategy("truncate")
+def _strategy_truncate(
+    messages: list[dict], ctx: ContextConfig, *, summarizer: LLMClient | None = None
+) -> list[dict]:
+    system, dropped, kept = _split_keep_last_turns(messages, ctx.keep_last_turns)
+    if not dropped:
+        return messages
+    return system + kept
+
+
+@register_strategy("summarize")
+def _strategy_summarize(
+    messages: list[dict], ctx: ContextConfig, *, summarizer: LLMClient | None = None
+) -> list[dict]:
+    system, dropped, kept = _split_keep_last_turns(messages, ctx.keep_last_turns)
+    if not dropped:
+        return messages
+    if summarizer is None:  # no compaction client wired -> fall back to truncate
+        return system + kept
+    convo = [{"role": "system", "content": _SUMMARY_PROMPT}, *dropped]
+    summary = summarizer.complete(convo, None).content or ""
+    note = {"role": "system", "content": f"Summary of earlier conversation:\n{summary}"}
+    return system + [note] + kept
+
+
+def should_compact(messages: list[dict], ctx: ContextConfig) -> bool:
+    """Evaluate the configured trigger conditions, combined by ``ctx.combine``.
+
+    Unknown condition names (e.g. a typo, or a custom one not imported) are
+    skipped. With no recognized triggers this is ``False`` (never compact).
+    """
+    hits = [
+        CONDITIONS[name](messages, threshold)
+        for name, threshold in ctx.triggers.items()
+        if name in CONDITIONS
+    ]
+    if not hits:
+        return False
+    return all(hits) if ctx.combine == "and" else any(hits)
+
+
 def fit(
     messages: list[dict],
     ctx: ContextConfig,
     *,
     summarizer: LLMClient | None = None,
 ) -> list[dict]:
-    """Return ``messages`` trimmed to fit ``ctx`` (no-op if already within budget)."""
-    if ctx.strategy == "none" or ctx.max_context_tokens is None:
+    """Return ``messages`` compacted to fit ``ctx`` (no-op unless triggered)."""
+    strategy = STRATEGIES.get(ctx.strategy)
+    if ctx.strategy == "none" or strategy is None:
         return messages
-    if estimate_tokens(messages) <= ctx.max_context_tokens:
+    if not should_compact(messages, ctx):
         return messages
-
-    system, dropped, kept = _split_keep_last_turns(messages, ctx.keep_last_turns)
-    if not dropped:
-        return messages
-
-    if ctx.strategy == "summarize" and summarizer is not None:
-        convo = [{"role": "system", "content": _SUMMARY_PROMPT}, *dropped]
-        summary = summarizer.complete(convo, None).content or ""
-        note = {"role": "system", "content": f"Summary of earlier conversation:\n{summary}"}
-        return system + [note] + kept
-
-    return system + kept
+    return strategy(messages, ctx, summarizer=summarizer)

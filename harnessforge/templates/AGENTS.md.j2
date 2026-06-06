@@ -182,6 +182,54 @@ regenerating.
 
 Every run writes a JSONL trace under the configured `trace_dir` with per-step
 token counts and cost. Inspect a run with `cat traces/run-*.jsonl`.
+
+## Tune the context window
+
+`harness/context.py` keeps the history within budget before each LLM call. It
+splits cleanly into *when* and *how*, each a thin name→function registry (same
+shape as tools / paradigms — a written-out dispatch, not an engine):
+
+```yaml
+context:
+  strategy: summarize     # how: truncate | summarize | none (or your own)
+  keep_last_turns: 6       # how many recent turns the strategy keeps
+  combine: or              # when: or = any trigger fires; and = all must fire
+  triggers:                # when: condition name -> threshold
+    max_tokens: 192000     # compact once the estimated prompt exceeds this
+    # max_turns: 40        # ...and/or after this many user turns
+```
+
+Built-in conditions are `max_tokens` (estimated prompt tokens) and `max_turns`
+(user turns); built-in strategies are `truncate`, `summarize` (folds older turns
+via the `compaction` role), and `none`. Empty `triggers` (or `strategy: none`)
+means it never fires — a plain loop.
+
+Add your own the same way you add a tool — write a function, register it, then
+name it in `config.yaml`:
+
+```python
+from {{ project_slug }}.harness.context import register_condition, register_strategy
+
+@register_condition("max_chars")        # when: (messages, threshold) -> bool
+def max_chars(messages, threshold):
+    return sum(len(m.get("content") or "") for m in messages) > threshold
+
+@register_strategy("head_tail")         # how: rewrite messages to fit
+def head_tail(messages, ctx, *, summarizer=None):
+    system = [m for m in messages if m.get("role") == "system"]
+    return system + messages[-2 * ctx.keep_last_turns:]
+```
+
+```yaml
+context:
+  strategy: head_tail
+  combine: or
+  triggers:
+    max_chars: 600000
+```
+
+This is a runtime knob — change the strategy, the conditions, or their
+thresholds without regenerating.
 {% if interfaces.web %}
 ## Web interface
 

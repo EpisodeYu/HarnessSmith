@@ -362,22 +362,30 @@ def test_display_name_falls_back_to_slug(tmp_path, spec):
 
 
 def test_context_block_seeds_from_spec(tmp_path, spec):
-    spec.context = {"strategy": "summarize", "keep_last_turns": 3, "max_context_tokens": 4000}
+    spec.context = {
+        "strategy": "truncate",
+        "keep_last_turns": 3,
+        "combine": "and",
+        "triggers": {"max_tokens": 4000, "max_turns": 20},
+    }
     out = tmp_path / "ctx"
     generate(spec, out, git_init=False)
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
-    assert "strategy: summarize" in config_yaml
+    assert "strategy: truncate" in config_yaml
     assert "keep_last_turns: 3" in config_yaml
-    assert "max_context_tokens: 4000" in config_yaml
+    assert "combine: and" in config_yaml
+    assert "max_tokens: 4000" in config_yaml
+    assert "max_turns: 20" in config_yaml
 
 
 def test_context_block_defaults_when_spec_omits_it(tmp_path, spec):
     out = tmp_path / "ctx_default"
     generate(spec, out, git_init=False)
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
-    assert "strategy: truncate" in config_yaml
+    assert "strategy: summarize" in config_yaml  # default trigger compacts at 192k
     assert "keep_last_turns: 6" in config_yaml
-    assert "# max_context_tokens: 8000" in config_yaml  # stays a commented hint
+    assert "combine: or" in config_yaml
+    assert "max_tokens: 192000" in config_yaml  # the default token trigger
 
 
 def test_web_index_has_paged_config_and_language_switch(tmp_path, preset_spec):

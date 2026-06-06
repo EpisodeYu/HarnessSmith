@@ -44,15 +44,20 @@ tools:
 {% endfor %}{% endif %}{% if spec.skills.enabled %}  - name: read_skill
     enabled: true   # standard Agent Skills: read a SKILL.md body on demand (low-risk)
 {% endif %}
-# Context-window management (runtime knob). truncate = keep system + recent turns;
-# summarize = fold older turns via the `compaction` role; none = off.
-# Unset max_context_tokens means no limit (default behaves like a plain loop).
-context:
-  strategy: {{ (spec.context or {}).get("strategy", "truncate") }}
-  keep_last_turns: {{ (spec.context or {}).get("keep_last_turns", 6) }}
-{% if (spec.context or {}).get("max_context_tokens") %}  max_context_tokens: {{ (spec.context or {}).get("max_context_tokens") }}
-{% else %}  # max_context_tokens: 8000
-{% endif %}
+# Context-window management (runtime knob). A condition in `triggers` decides
+# WHEN to compact (combined by `combine`: or/and); `strategy` decides HOW.
+# truncate = keep system + recent turns; summarize = fold older turns via the
+# `compaction` role; none = off. Built-in conditions: max_tokens (estimated
+# prompt tokens) and max_turns (user turns). Empty triggers = never compact.
+# Add your own with @register_condition / @register_strategy (see harness/context.py).
+{% set sctx = spec.context or {} %}{% set triggers = sctx.get("triggers", {"max_tokens": 192000}) %}context:
+  strategy: {{ sctx.get("strategy", "summarize") }}
+  keep_last_turns: {{ sctx.get("keep_last_turns", 6) }}
+  combine: {{ sctx.get("combine", "or") }}   # or = any trigger fires; and = all must fire
+  triggers:
+{% for name, value in triggers.items() %}    {{ name }}: {{ value }}
+{% endfor %}{% if not triggers %}    {}
+{% endif %}    # max_turns: 40   # also compact after N user turns (combine decides and/or)
 
 # Loop paradigms (runtime roster). `enabled` lists the selectable paradigms; pick
 # one per turn via `run --mode <name>` (CLI) or the web dropdown. `default` is

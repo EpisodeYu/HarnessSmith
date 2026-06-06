@@ -161,9 +161,15 @@ class HarnessSpec(BaseModel):
     observability: Observability = Field(default_factory=Observability)
     budget: Budget = Field(default_factory=Budget)
 
-    # Reserved for later slices: declared so specs stay forward-compatible under
-    # extra="forbid", but not used by the Slice 0 generator.
+    # Context-window management seed (runtime-authoritative — this only seeds the
+    # product's config.yaml `context` block). Optional keys: `strategy`
+    # (truncate/summarize/none), `keep_last_turns`, `combine` (or/and), and
+    # `triggers` (condition name -> threshold, e.g. {"max_tokens": 192000,
+    # "max_turns": 40}). Omitted -> the template defaults (summarize, compact at
+    # 192k tokens, no turn limit). Behavior lives in config.yaml; this is a seed.
     context: dict[str, Any] | None = None
+    # Reserved for later slices: declared so specs stay forward-compatible under
+    # extra="forbid", but not interpreted by the current generator.
     rag: dict[str, Any] | None = None
     secrets: dict[str, Any] | None = None
 

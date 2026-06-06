@@ -49,7 +49,7 @@
 - **第 2 个 preset**(rag-research 骨架,RAG 实现可桩)。
 - **极简 Web chat**:FastAPI + SSE 流式聊天页(不含 `/config` 面板)。
 - **多 LLM profile + 角色路由**:命名 profile + `generation`/`compaction`/`embedding` 角色,`client_for(role)` 解析。
-- **上下文管理**:`max_context_tokens` + **truncate 或 summarize 二选一**(先做 truncate,summarize 用 compaction profile)。
+- **上下文管理**(实现说明,2026-06-06 增强为条件/策略两层):**触发条件 `triggers`**(何时压,内置 `max_tokens`/`max_turns`,`combine: or/and` 组合)+ **策略 `strategy`**(怎么压,`truncate`/`summarize`/`none`,用户可 `@register_strategy` 自加)。两者都是薄注册表、按名分发(非抽象层)。运行期 `config.yaml` 权威,`spec.context` 仅种子;**默认 `summarize` + `max_tokens: 192000` 触发、不限轮数**(人 2026-06-06 定),summarize 走 compaction 角色、缺则回落 truncate。
 - **生成期 Web wizard**:单页表单产出 spec(L1 先用 CLI + preset 顶替,这里再补 GUI)。
 
 ### L3 — 推迟到 v1+(明确不在 MVP)
@@ -71,6 +71,7 @@
 - 薄抽象、清晰模块边界:loop / llm / tools / context 各单一职责,可独立替换。
 - 工具用注册表(装饰器)注册;新增 tool = 加函数 + 注册。
 - **循环范式同走薄注册表(装饰器)**(Slice 5,人 2026-06-05 定向):新增范式 = 加函数 + `@register_paradigm` + 配 `config.yaml` 的 `enabled`,运行期经 `--mode`/Web 下拉每轮选;内置范式各自自包含、互不 import(改 agent 不影响 ask)。此扩展点**扩展性/解耦优先于薄**,但仍是 own-code 薄注册表,**非**运行期范式抽象层/编排引擎(守 §6 红线)。
+- **上下文策略/条件同走薄注册表**(`@register_strategy`/`@register_condition`,2026-06-06):`triggers`(`max_tokens`/`max_turns`,`combine: or/and`)定何时压、`strategy`(truncate/summarize/none)定怎么压,运行期用户可自加;按名分发,**非运行期抽象层**(守 §6 红线)。
 - 生命周期 Hooks:`before_step / after_step / before_tool / after_tool / on_error`,挂护栏/日志不动核心。
 - **标准 SKILL(Agent Skills 开放标准)**(Slice 6,人 2026-06-05 定向):放 `skills/<name>/SKILL.md`(渐进披露:L1 发现+注入 → L2 文件工具/`read_skill` 读正文 → L3 脚本经工具跑),`spec.skills.enabled` 门控、不引框架;与 Claude/Cursor 等 25+ 工具可移植。
 - LLM / embedding / 向量存储走 Protocol 接口,可替换实现。

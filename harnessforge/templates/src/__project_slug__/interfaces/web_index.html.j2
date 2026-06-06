@@ -55,14 +55,21 @@
       </div>
 
       <div data-cfg="context" class="hidden space-y-3">
+        <p class="text-xs text-gray-500" data-i18n="ctx_hint">Compact the history when a trigger fires, using the chosen strategy.</p>
         <label class="block text-sm"><span data-i18n="ctx_strategy_label">Strategy</span>
           <select id="cfg-ctx-strategy" class="mt-1 block rounded-lg border px-3 py-2">
             <option value="truncate">truncate</option><option value="summarize">summarize</option><option value="none">none</option>
           </select></label>
         <label class="block text-sm"><span data-i18n="ctx_keep_label">keep_last_turns</span>
           <input id="cfg-ctx-keep" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
-        <label class="block text-sm"><span data-i18n="ctx_maxtokens_label">max_context_tokens</span>
-          <input id="cfg-ctx-maxtokens" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
+        <label class="block text-sm"><span data-i18n="ctx_combine_label">combine</span>
+          <select id="cfg-ctx-combine" class="mt-1 block rounded-lg border px-3 py-2">
+            <option value="or">or</option><option value="and">and</option>
+          </select></label>
+        <label class="block text-sm"><span data-i18n="ctx_maxtokens_label">max_tokens</span>
+          <input id="cfg-ctx-maxtokens" type="number" min="1" placeholder="—" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
+        <label class="block text-sm"><span data-i18n="ctx_maxturns_label">max_turns</span>
+          <input id="cfg-ctx-maxturns" type="number" min="1" placeholder="—" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
       </div>
 
       <div data-cfg="budget" class="hidden flex flex-wrap gap-4">
@@ -138,7 +145,9 @@
         set_key_ph: "set this key's value in .env (overwrites if it exists)", set_key_btn: "Save to .env",
         set_url_ph: "set this URL's value in .env (overwrites if it exists)", set_url_btn: "Save to .env",
         key_saved: "saved to .env", key_need_name: "set the env-var name first",
-        ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_maxtokens_label: "max_context_tokens",
+        ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_combine_label: "combine (or/and)",
+        ctx_maxtokens_label: "max_tokens (trigger)", ctx_maxturns_label: "max_turns (trigger)",
+        ctx_hint: "Compact the history when a trigger fires (combine: or = any, and = all), using the chosen strategy.",
         tools_hint: "Allowlist — only enabled tools are offered to the model.",
         prompts_system: "system", prompts_persona: "persona", prompts_rules: "rules_files (one path per line)",
         paradigms_enabled: "enabled (comma-separated)", paradigms_default: "default",
@@ -170,7 +179,9 @@
         set_key_ph: "在 .env 设置该 key 的值(如已存在则覆盖)", set_key_btn: "写入 .env",
         set_url_ph: "在 .env 设置该 url 的值(如已存在则覆盖)", set_url_btn: "写入 .env",
         key_saved: "已写入 .env", key_need_name: "请先填环境变量名",
-        ctx_strategy_label: "策略", ctx_keep_label: "保留最近轮数", ctx_maxtokens_label: "最大上下文 token",
+        ctx_strategy_label: "策略", ctx_keep_label: "保留最近轮数", ctx_combine_label: "组合方式 (or/and)",
+        ctx_maxtokens_label: "max_tokens(触发阈值)", ctx_maxturns_label: "max_turns(触发阈值)",
+        ctx_hint: "命中触发条件时按所选策略压缩历史(组合方式:or=任一命中,and=全部命中)。",
         tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
         prompts_system: "系统提示", prompts_persona: "人设", prompts_rules: "rule 文件(每行一个路径)",
         paradigms_enabled: "启用范式(逗号分隔)", paradigms_default: "默认范式",
@@ -393,9 +404,12 @@
       buildRoles();
       // context
       const ctx = cfg.context || {};
-      $("cfg-ctx-strategy").value = ctx.strategy || "truncate";
+      const trig = ctx.triggers || {};
+      $("cfg-ctx-strategy").value = ctx.strategy || "summarize";
       $("cfg-ctx-keep").value = ctx.keep_last_turns ?? 6;
-      $("cfg-ctx-maxtokens").value = ctx.max_context_tokens ?? "";
+      $("cfg-ctx-combine").value = ctx.combine || "or";
+      $("cfg-ctx-maxtokens").value = trig.max_tokens ?? "";
+      $("cfg-ctx-maxturns").value = trig.max_turns ?? "";
       // budget
       const b = cfg.budget || {};
       $("cfg-b-steps").value = b.max_steps ?? "";
@@ -435,8 +449,15 @@
         if (el.value.trim()) roles[el.dataset.role] = el.value.trim();
       });
       patch.roles = roles;
-      patch.context = { strategy: $("cfg-ctx-strategy").value, keep_last_turns: Number($("cfg-ctx-keep").value || 6) };
-      const mct = numOrNull($("cfg-ctx-maxtokens").value); if (mct != null) patch.context.max_context_tokens = mct;
+      patch.context = {
+        strategy: $("cfg-ctx-strategy").value,
+        keep_last_turns: Number($("cfg-ctx-keep").value || 6),
+        combine: $("cfg-ctx-combine").value,
+      };
+      const triggers = {};
+      const mtok = numOrNull($("cfg-ctx-maxtokens").value); if (mtok != null) triggers.max_tokens = mtok;
+      const mturn = numOrNull($("cfg-ctx-maxturns").value); if (mturn != null) triggers.max_turns = mturn;
+      patch.context.triggers = triggers;
       patch.budget = {
         max_steps: numOrNull($("cfg-b-steps").value), max_seconds: numOrNull($("cfg-b-seconds").value),
         max_tokens: numOrNull($("cfg-b-tokens").value), max_cost_usd: numOrNull($("cfg-b-cost").value),
