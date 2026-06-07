@@ -63,6 +63,15 @@
 - [x] **③ Web 续聊纳入本片**(人 2026-06-07)。
 - **软确认(非阻塞,`CLAUDE.md §5.3`)**:存储去掉 system 只存正文;`sessions` 作运行期 config(无 spec 字段);会话 id = `uuid4().hex[:12]`(同 trace `run_id` 风格)。
 
+## 4b. 后续增强(2026-06-07,人定向:对标 Google AI Studio)
+
+实现并验收(产物快测 web 32 / sessions 10、golden 11 含 docker、真实浏览器冒烟):
+
+- **① Web 改 AI-Studio 式布局**:`web_index.html` 重构为**全高度双栏壳**——左侧固定栏(应用名 + "+ 新会话" + session 列表 + 底部 "⚙ 配置" 入口 + 语言),右侧主区全屏(顶部当前会话标题栏 + 聊天/配置切换)。session 由原下拉改为**侧栏列表**(标题显示、高亮当前、点选续聊)。`show()` 改驱动配置激活态 + 主标题,不再用顶部页签。
+- **② 会话标题(LLM 生成,可配置 role)**:产物会话首轮**用 LLM 把首个问题压成短标题**,存入 `session.title`、经 SSE `title` 事件即时更新侧栏/标题栏。**标题 LLM = 可配置 role `title`**(与 `compaction` 同列,缺省回落 `generation`);`sessions.auto_title`(默认 true)开关;**Web 专属**(对标 Claude CLI:终端不自动起标题,故 CLI 不生成,仅会话文件带 `title` 字段)。时机=**先起标题再跑回答**(`title` 事件先于 `final`)。标题生成失败静默跳过(不影响对话,下轮重试)。prompt 参考 3GPP-Everything 的 `session_title.py`(只喂首问、要求仅输出标题、截断)。
+- **③ 空会话处理**:空草稿(未发消息)**点"新会话"为 no-op**、**退出不持久化**(服务端只在完成一轮后落盘,空草稿永不产生文件);输入为空时发送被拦截(沿用既有)。
+- 交付物:`harness/session.py`(+`title` 存储/`title_of`/summaries 带 title)、`harness/config.py`(`SessionsConfig.auto_title`)、`interfaces/web.py`(`_generate_title` + `/chat` auto_title + `title` SSE 事件 + `title` role 回落)、`interfaces/web_index.html`(壳重构 + 侧栏 + 标题 + i18n `chat_untitled`/`chat_sessions_empty`/`role_title`)、`config.yaml`(`title` role 注释 + `sessions.auto_title`)。测试:`test_web.py`(+4:title 事件/持久化、auto_title 关、已设标题跳过、侧栏壳)、`test_sessions.py`(+1:title 存储/保留)。
+
 ## 5. 本 slice 注意 / 留给后续
 
 - **会话 ↔ trace 是两件事**:一次会话(可跨多 run)累积消息正文;每个 run 仍各写一份 trace(角色/计数)。二者目录不同(`.harness/sessions/` vs `traces/`),互不耦合。

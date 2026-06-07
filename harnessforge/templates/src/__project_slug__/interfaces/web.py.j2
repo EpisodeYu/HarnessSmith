@@ -71,6 +71,41 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+_TITLE_PROMPT = (
+    "Generate a very short title naming the TOPIC of the user's request. "
+    "Reply in the SAME language as the request.\n\n"
+    "Rules:\n"
+    "- Output ONLY the title — no quotes, no surrounding punctuation, no commentary.\n"
+    "- A concise noun phrase, not a full sentence.\n"
+    "- <= 8 words, or <= 16 Chinese characters."
+)
+
+
+def _generate_title(client, question: str) -> str:
+    """Summarize the first user message into a short session title (best-effort).
+
+    Uses the ``title`` role's client (falls back to ``generation``). Any failure
+    returns "" so the caller just leaves the title empty (retried next turn) —
+    auto-titling must never break the chat.
+    """
+    q = (question or "").strip()
+    if not q:
+        return ""
+    try:
+        resp = client.complete(
+            [
+                {"role": "system", "content": _TITLE_PROMPT},
+                {"role": "user", "content": q[:2000]},
+            ],
+            None,
+        )
+    except Exception:
+        return ""
+    text = (resp.content or "").strip()
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    return line.strip("\"'").strip()[:60]
+
+
 def _safe_repo_path(path: str) -> Path | None:
     """Resolve ``path`` under the project dir, or ``None`` if it's empty, absolute,
     or escapes the project root. Confines rule-file reads/writes to this repo so the
@@ -95,6 +130,7 @@ def _chat_events(
     mode: str | None = None,
     session_id: str | None = None,
     history: list[dict] | None = None,
+    auto_title: bool = False,
 ):
     """Drive one ``run()`` in a worker thread and yield its events as SSE.
 
@@ -102,15 +138,23 @@ def _chat_events(
     ``event: token``; otherwise only step/tool/final events are emitted. ``mode``
     selects the loop paradigm (defaults to ``config.paradigms.default``).
     ``history`` resumes a prior conversation; the updated body is saved under
-    ``session_id`` when sessions are enabled.
+    ``session_id`` when sessions are enabled. When ``auto_title`` is set, the
+    first message is summarized into a session title (``title`` role) BEFORE the
+    answer so the sidebar names the session up front.
     """
     q: queue.Queue = queue.Queue()
     hooks = _StreamHooks(q)
     on_delta = (lambda text: q.put(("token", {"text": text}))) if stream else None
+    router = ClientRouter(config, mock=mock)
+
+    # Auto-title first (best-effort): the sidebar gets a name before the answer.
+    new_title = ""
+    if auto_title and message.strip():
+        title_role = "title" if "title" in config.roles else "generation"
+        new_title = _generate_title(router.client_for(title_role), message)
 
     def worker() -> None:
         try:
-            router = ClientRouter(config, mock=mock)
             result = run_loop(
                 message,
                 mode=mode,
@@ -122,7 +166,8 @@ def _chat_events(
             )
             if session_id is not None and config.sessions.enabled:
                 session_store.save(
-                    session_id, result.messages, config.sessions.dir, mode=result.mode
+                    session_id, result.messages, config.sessions.dir,
+                    mode=result.mode, title=new_title or None,
                 )
             q.put(("final", {
                 "answer": result.answer,
@@ -137,9 +182,12 @@ def _chat_events(
         finally:
             q.put(None)
 
-    # Tell the client which session this turn belongs to (so it can resume).
+    # Tell the client which session this turn belongs to (so it can resume),
+    # then the title (if we made one) so the sidebar updates immediately.
     if session_id is not None:
         yield _sse("session", {"id": session_id})
+    if new_title:
+        yield _sse("title", {"id": session_id, "title": new_title})
     threading.Thread(target=worker, daemon=True).start()
     while True:
         item = q.get()
@@ -172,10 +220,18 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
             history = session_store.load(session_id, cfg.sessions.dir) if session else []
         else:
             session_id, history = None, None
+        # Auto-title a session that has no title yet (new, or an earlier attempt
+        # failed). Skips sessions that already have one.
+        auto_title = bool(
+            cfg.sessions.enabled
+            and cfg.sessions.auto_title
+            and session_id is not None
+            and not session_store.title_of(session_id, cfg.sessions.dir)
+        )
         return StreamingResponse(
             _chat_events(
                 message, cfg, mock=app.state.mock, stream=stream, mode=mode,
-                session_id=session_id, history=history,
+                session_id=session_id, history=history, auto_title=auto_title,
             ),
             media_type="text/event-stream",
         )

@@ -6,42 +6,48 @@
   <title>{{ display_name }} — web</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-50 text-slate-800">
-  <main class="mx-auto max-w-3xl p-6 space-y-6">
-    <header class="flex items-center justify-between gap-3">
-      <h1 class="text-xl font-semibold">{{ display_name }}</h1>
-      <nav class="flex items-center gap-3 text-sm">
-        <span class="text-slate-500">语言/Language</span>
-        <select id="lang" class="rounded-lg border px-2 py-1" title="语言 / Language">
-          <option value="en">English</option>
+<body class="h-screen overflow-hidden bg-slate-50 text-slate-800">
+  <div class="flex h-screen">
+    <aside class="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-white">
+      <div class="px-3 py-3">
+        <h1 class="truncate text-base font-semibold" title="{{ display_name }}">{{ display_name }}</h1>
+      </div>
+      <div class="px-3 pb-2">
+        <button id="chat-new" type="button" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-left text-sm hover:bg-slate-50" data-i18n="chat_new">+ New chat</button>
+      </div>
+      <div id="session-list" class="flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 text-sm"></div>
+      <div class="flex items-center gap-2 border-t border-slate-200 px-3 py-2 text-sm">
+        <button id="tab-chat" type="button" class="hidden" data-i18n="nav_chat">Chat</button>
+        <button id="tab-config" type="button" class="flex-1 rounded-lg px-2 py-1 text-left text-slate-600 hover:bg-slate-100">⚙ <span data-i18n="nav_config">Config</span></button>
+        <select id="lang" class="rounded-lg border px-1 py-1 text-xs" title="语言 / Language">
+          <option value="en">EN</option>
           <option value="zh">中文</option>
         </select>
-        <button id="tab-chat" class="font-semibold underline" data-i18n="nav_chat">Chat</button>
-        <button id="tab-config" class="text-slate-500" data-i18n="nav_config">Config</button>
-      </nav>
-    </header>
-
-    <section id="view-chat" class="space-y-3">
-      <div id="no-llm" class="hidden rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-        <span data-i18n="no_llm">Please configure an LLM first.</span>
-        <button id="no-llm-link" type="button" class="ml-1 underline" data-i18n="no_llm_link">Go to Config → LLM</button>
       </div>
-      <div class="flex items-center gap-2 text-sm">
-        <button id="chat-new" type="button" class="rounded-lg border px-3 py-1" data-i18n="chat_new">New chat</button>
-        <select id="chat-sessions" class="flex-1 rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_sessions_title" title="Saved sessions (resume)"></select>
-      </div>
-      <div id="log" class="h-96 overflow-y-auto rounded-lg border bg-white p-4 text-sm space-y-2"></div>
-      <form id="chat-form" class="flex items-center gap-2">
-        <input id="msg" class="flex-1 rounded-lg border px-3 py-2" data-i18n-ph="chat_placeholder" placeholder="Ask something…" autocomplete="off" />
-        <select id="mode" class="rounded-lg border px-2 py-2 text-sm" data-i18n-title="chat_mode_title" title="Loop paradigm"></select>
-        <label class="flex items-center gap-1 text-sm text-slate-500">
-          <input id="stream" type="checkbox" checked /> <span data-i18n="chat_stream">stream</span>
-        </label>
-        <button id="chat-send" class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="chat_send">Send</button>
-      </form>
-    </section>
+    </aside>
 
-    <section id="view-config" class="hidden space-y-4">
+    <div class="flex min-w-0 flex-1 flex-col">
+      <div class="flex items-center gap-2 border-b border-slate-200 bg-white px-6 py-3">
+        <h2 id="main-title" class="truncate text-sm font-medium text-slate-700"></h2>
+      </div>
+
+      <section id="view-chat" class="flex min-h-0 flex-1 flex-col">
+        <div id="no-llm" class="m-4 hidden rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          <span data-i18n="no_llm">Please configure an LLM first.</span>
+          <button id="no-llm-link" type="button" class="ml-1 underline" data-i18n="no_llm_link">Go to Config → LLM</button>
+        </div>
+        <div id="log" class="flex-1 space-y-2 overflow-y-auto px-6 py-4 text-sm"></div>
+        <form id="chat-form" class="flex items-center gap-2 border-t border-slate-200 bg-white px-6 py-3">
+          <input id="msg" class="flex-1 rounded-lg border px-3 py-2" data-i18n-ph="chat_placeholder" placeholder="Ask something…" autocomplete="off" />
+          <select id="mode" class="rounded-lg border px-2 py-2 text-sm" data-i18n-title="chat_mode_title" title="Loop paradigm"></select>
+          <label class="flex items-center gap-1 text-sm text-slate-500">
+            <input id="stream" type="checkbox" checked /> <span data-i18n="chat_stream">stream</span>
+          </label>
+          <button id="chat-send" class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="chat_send">Send</button>
+        </form>
+      </section>
+
+      <section id="view-config" class="hidden flex-1 space-y-4 overflow-y-auto px-6 py-4">
       <p class="text-sm text-slate-500" data-i18n="cfg_intro">Runtime behavioral config (no secrets). Edits apply in-process.</p>
       <nav id="cfg-tabs" class="flex flex-wrap gap-1 border-b text-sm"></nav>
 
@@ -133,8 +139,9 @@
         <span id="cfg-unsaved" class="hidden text-sm font-medium text-amber-600" data-i18n="cfg_unsaved">unsaved</span>
         <span id="cfg-status" class="text-sm text-slate-500"></span>
       </div>
-    </section>
-  </main>
+      </section>
+    </div>
+  </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
@@ -146,6 +153,7 @@
         chat_send: "Send", chat_stream: "stream", chat_mode_title: "Loop paradigm",
         chat_new: "New chat", chat_sessions_title: "Saved sessions (resume)",
         chat_session_new_opt: "— new session —",
+        chat_untitled: "New chat", chat_sessions_empty: "No conversations yet",
         no_llm: "No LLM is configured yet — you can't chat until you add one.",
         no_llm_link: "Go to Config → LLM",
         cfg_intro: "Runtime behavioral config (no secrets). Edits apply in-process.",
@@ -160,6 +168,7 @@
         test_btn: "Test", test_running: "testing…",
         roles_label: "Roles", roles_hint: "Bind each role to a profile above.",
         role_generation: "generation (main loop)", role_compaction: "compaction (summarize)",
+        role_title: "title (session naming)",
         role_use_first: "(first profile)",
         profile_name: "name", profile_model: "model",
         profile_key_section: "API key", profile_url_section: "Base URL",
@@ -199,6 +208,7 @@
         chat_send: "发送", chat_stream: "流式", chat_mode_title: "循环范式",
         chat_new: "新会话", chat_sessions_title: "已保存会话(续聊)",
         chat_session_new_opt: "— 新会话 —",
+        chat_untitled: "新会话", chat_sessions_empty: "还没有会话",
         no_llm: "尚未配置任何 LLM —— 请先添加一个才能对话。",
         no_llm_link: "前往 配置 → LLM",
         cfg_intro: "运行期行为性配置(无密钥)。修改进程内即时生效。",
@@ -213,6 +223,7 @@
         test_btn: "测试", test_running: "测试中…",
         roles_label: "角色", roles_hint: "把每个角色绑定到上面的某个配置。",
         role_generation: "generation(主循环)", role_compaction: "compaction(压缩)",
+        role_title: "title(会话命名)",
         role_use_first: "(用第一个配置)",
         profile_name: "名称", profile_model: "model",
         profile_key_section: "API key", profile_url_section: "Base URL",
@@ -258,6 +269,8 @@
       document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
       document.querySelectorAll("[data-i18n-title]").forEach((el) => { el.title = t(el.dataset.i18nTitle); });
       buildCfgTabs();
+      renderSessionList();
+      updateMainTitle();
     }
     $("lang").addEventListener("change", () => {
       lang = $("lang").value; localStorage.setItem("hf_lang", lang); applyI18n();
@@ -287,26 +300,47 @@
     }
     loadParadigms();
 
-    // ---- chat sessions (resume across turns / reloads) ------------------
-    let currentSession = null;
+    // ---- chat sessions (AI-Studio-style left sidebar) ------------------
+    let currentSession = null;   // id of the open session (null = unsaved draft)
+    let currentTitle = "";       // its title (shown in the main header)
+    let sessionsCache = [];      // last /sessions payload (relabel on lang switch)
+
+    function chatIsEmpty() { return !currentSession && log.children.length === 0; }
+
+    function updateMainTitle() {
+      const inConfig = !$("view-config").classList.contains("hidden");
+      $("main-title").textContent = inConfig ? t("nav_config") : (currentTitle || t("chat_untitled"));
+    }
+
+    function renderSessionList() {
+      const box = $("session-list");
+      box.innerHTML = "";
+      if (!sessionsCache.length) {
+        const empty = document.createElement("p");
+        empty.className = "px-2 py-2 text-xs text-slate-400";
+        empty.textContent = t("chat_sessions_empty");
+        box.appendChild(empty);
+        return;
+      }
+      for (const s of sessionsCache) {
+        const item = document.createElement("button");
+        item.type = "button";
+        const active = s.id === currentSession;
+        item.className = "block w-full truncate rounded-lg px-2 py-1.5 text-left "
+          + (active ? "bg-slate-200 font-medium" : "hover:bg-slate-100");
+        item.textContent = s.title || s.preview || t("chat_untitled");
+        item.title = item.textContent;
+        item.addEventListener("click", () => openSession(s.id));
+        box.appendChild(item);
+      }
+    }
 
     async function loadSessions() {
       try {
         const data = await (await fetch("/sessions")).json();
-        const sel = $("chat-sessions");
-        sel.innerHTML = "";
-        const blank = document.createElement("option");
-        blank.value = ""; blank.textContent = t("chat_session_new_opt");
-        sel.appendChild(blank);
-        for (const s of data.sessions || []) {
-          const opt = document.createElement("option");
-          opt.value = s.id;
-          const when = s.updated ? new Date(s.updated * 1000).toLocaleString() : "";
-          opt.textContent = (s.preview || s.id) + (when ? " · " + when : "");
-          sel.appendChild(opt);
-        }
-        sel.value = currentSession || "";
-      } catch (err) { /* sessions disabled or none yet */ }
+        sessionsCache = data.sessions || [];
+      } catch (err) { sessionsCache = []; }
+      renderSessionList();
     }
 
     function renderHistory(messages) {
@@ -319,19 +353,30 @@
     }
 
     async function openSession(id) {
-      if (!id) { currentSession = null; log.innerHTML = ""; return; }
+      if (!id) return;
       try {
         const data = await (await fetch("/sessions/" + encodeURIComponent(id))).json();
         currentSession = id;
+        const meta = sessionsCache.find((s) => s.id === id);
+        currentTitle = meta ? (meta.title || "") : "";
         renderHistory(data.messages);
+        show("chat");
+        renderSessionList();
+        updateMainTitle();
       } catch (err) { line("error loading session", "text-red-600"); }
     }
 
+    // Point 3: a fresh empty draft — clicking "New chat" again is a no-op, and an
+    // empty draft is never persisted (the server only saves on a completed turn).
     $("chat-new").addEventListener("click", () => {
-      currentSession = null; log.innerHTML = ""; $("chat-sessions").value = "";
+      if (chatIsEmpty()) { show("chat"); return; }
+      currentSession = null; currentTitle = ""; log.innerHTML = "";
+      show("chat");
+      renderSessionList();
+      updateMainTitle();
     });
-    $("chat-sessions").addEventListener("change", () => openSession($("chat-sessions").value));
     loadSessions();
+    updateMainTitle();
 
     $("chat-form").addEventListener("submit", (e) => {
       e.preventDefault();
@@ -351,6 +396,13 @@
 
       es.addEventListener("session", (ev) => {
         currentSession = JSON.parse(ev.data).id;  // remember it so the next turn resumes
+      });
+      es.addEventListener("title", (ev) => {
+        const d = JSON.parse(ev.data);
+        currentTitle = d.title || "";
+        updateMainTitle();
+        const meta = sessionsCache.find((s) => s.id === d.id);
+        if (meta) { meta.title = currentTitle; renderSessionList(); }
       });
       es.addEventListener("token", (ev) => {
         if (answer === null) answer = line("", "text-slate-900 whitespace-pre-wrap");
@@ -503,11 +555,12 @@
       rc.querySelectorAll(".role-target").forEach((el) => { prev[el.dataset.role] = el.value; });
       rc.innerHTML = "";
       const roles = cfg.roles || {};
-      const names = ["generation", "compaction"];
+      const names = ["generation", "compaction", "title"];
       Object.keys(roles).forEach((r) => { if (!names.includes(r)) names.push(r); });
       names.forEach((role) => {
         const selected = (role in prev) ? prev[role] : (roles[role] || "");
-        const label = (role === "generation" || role === "compaction") ? t("role_" + role) : role;
+        const known = t("role_" + role);
+        const label = known === ("role_" + role) ? role : known;
         rc.insertAdjacentHTML("beforeend",
           "<label class='flex items-center gap-2 text-sm'><span class='w-44 font-mono'>" + label + "</span>" +
           "<select class='role-target rounded border px-2 py-1' data-role='" + role + "'>" +
@@ -970,8 +1023,9 @@
     function show(which) {
       $("view-chat").classList.toggle("hidden", which !== "chat");
       $("view-config").classList.toggle("hidden", which !== "config");
-      $("tab-chat").className = which === "chat" ? "font-semibold underline" : "text-slate-500";
-      $("tab-config").className = which === "config" ? "font-semibold underline" : "text-slate-500";
+      $("tab-config").classList.toggle("bg-slate-100", which === "config");
+      $("tab-config").classList.toggle("font-medium", which === "config");
+      updateMainTitle();
       // Don't reload over unsaved edits when coming back to Config — that silent
       // overwrite was the main way users lost a profile they forgot to Save.
       if (which === "config") { showCfg(cfgTab); if (!dirty) loadConfig(); }

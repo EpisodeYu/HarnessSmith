@@ -45,18 +45,25 @@ def load(session_id: str, sessions_dir: str) -> list[dict]:
     return _read(session_id, sessions_dir).get("messages", [])
 
 
+def title_of(session_id: str, sessions_dir: str) -> str:
+    """The session's stored title (``""`` if none yet / unknown session)."""
+    return _read(session_id, sessions_dir).get("title", "")
+
+
 def save(
     session_id: str,
     messages: list[dict],
     sessions_dir: str,
     *,
     mode: str = "agent",
+    title: str | None = None,
 ) -> None:
     """Persist the conversation body for ``session_id`` (creating the dir).
 
     Stores only the message body (no system prompt) and never a secret — keys
-    stay in ``.env`` and never reach ``messages``. ``created`` is preserved
-    across updates; ``updated`` is refreshed each save.
+    stay in ``.env`` and never reach ``messages``. ``created`` and any existing
+    ``title`` are preserved across updates (pass ``title`` to set/replace it);
+    ``updated`` is refreshed each save.
     """
     directory = Path(sessions_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -66,6 +73,7 @@ def save(
         "created": existing.get("created", time.time()),
         "updated": time.time(),
         "mode": mode,
+        "title": title or existing.get("title", ""),
         "messages": messages,
     }
     _path(session_id, sessions_dir).write_text(
@@ -124,6 +132,7 @@ def summaries(sessions_dir: str) -> list[dict]:
                 "id": data.get("id", path.stem),
                 "updated": data.get("updated", path.stat().st_mtime),
                 "mode": data.get("mode", ""),
+                "title": data.get("title", ""),
                 "preview": preview,
             }
         )

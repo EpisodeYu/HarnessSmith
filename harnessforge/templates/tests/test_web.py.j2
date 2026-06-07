@@ -33,26 +33,34 @@ def _client():
     return TestClient(create_app(_config(), mock=True))
 
 
-def _session_client(tmp_path, *, enabled=True):
+def _session_client(tmp_path, *, enabled=True, auto_title=True):
     config = Config.model_validate({
         "llms": [{"name": "default", "model": "mock-model"}],
         "roles": {"generation": "default"},
         "tools": [{"name": "get_current_time", "enabled": True}],
         "observability": {"trace": False},
-        "sessions": {"enabled": enabled, "dir": str(tmp_path / "sessions")},
+        "sessions": {
+            "enabled": enabled, "dir": str(tmp_path / "sessions"), "auto_title": auto_title
+        },
     })
     return TestClient(create_app(config, mock=True))
 
 
-def _sse_session_id(body: str) -> str | None:
-    """Pull the id out of the SSE ``event: session`` frame (or None if absent)."""
+def _sse_event_data(body: str, event: str) -> dict | None:
+    """Return the JSON payload of the first SSE frame named ``event`` (or None)."""
     import json
 
     lines = body.splitlines()
     for i, line in enumerate(lines):
-        if line.strip() == "event: session":
-            return json.loads(lines[i + 1].split("data: ", 1)[1])["id"]
+        if line.strip() == f"event: {event}":
+            return json.loads(lines[i + 1].split("data: ", 1)[1])
     return None
+
+
+def _sse_session_id(body: str) -> str | None:
+    """Pull the id out of the SSE ``event: session`` frame (or None if absent)."""
+    data = _sse_event_data(body, "session")
+    return data["id"] if data else None
 
 
 def test_index_is_served():
@@ -191,6 +199,55 @@ def test_chat_disabled_sessions_emit_nothing(tmp_path):
     assert "event: session" not in body
     assert client.get("/sessions").json() == {"sessions": []}
     assert not (tmp_path / "sessions").exists()
+
+
+def test_chat_first_turn_emits_title_and_persists(tmp_path):
+    """First turn auto-titles: a `title` event is emitted (before `final`) and the
+    title is stored on the session so the sidebar can name it."""
+    client = _session_client(tmp_path)
+    body = client.get(
+        "/chat", params={"message": "what is AMF?", "stream": "false"}
+    ).text
+    title = _sse_event_data(body, "title")
+    assert title and title["title"]  # mock returns a non-empty title
+    assert body.index("event: title") < body.index("event: final")
+
+    sid = title["id"]
+    listed = {s["id"]: s for s in client.get("/sessions").json()["sessions"]}
+    assert listed[sid]["title"] == title["title"]
+
+
+def test_chat_no_autotitle_when_disabled(tmp_path):
+    """sessions.auto_title=false: no title event, session has empty title."""
+    client = _session_client(tmp_path, auto_title=False)
+    body = client.get("/chat", params={"message": "hi", "stream": "false"}).text
+    assert "event: title" not in body
+    sid = _sse_session_id(body)
+    assert sid
+    assert client.get("/sessions").json()["sessions"][0]["title"] == ""
+
+
+def test_chat_autotitle_skipped_when_title_already_set(tmp_path):
+    """A session that already has a title is not re-titled on a later turn."""
+    from {{ project_slug }}.harness import session as session_store
+
+    sdir = str(tmp_path / "sessions")
+    session_store.save("kept", [{"role": "user", "content": "old"}], sdir, title="My title")
+    client = _session_client(tmp_path)
+    body = client.get(
+        "/chat", params={"message": "second", "stream": "false", "session": "kept"}
+    ).text
+    assert "event: title" not in body
+    assert session_store.title_of("kept", sdir) == "My title"  # unchanged
+
+
+def test_index_has_sidebar_session_layout():
+    """The page is an AI-Studio-style shell: fixed left session sidebar + main pane."""
+    body = _client().get("/").text
+    assert 'id="session-list"' in body  # left sidebar session list
+    assert 'id="chat-new"' in body and 'id="main-title"' in body
+    assert "renderSessionList" in body and "updateMainTitle" in body
+    assert 'event: title' in body or 'addEventListener("title"' in body
 
 
 def test_registries_lists_registered_extensions():

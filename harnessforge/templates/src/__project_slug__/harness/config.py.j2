@@ -117,12 +117,17 @@ class SessionsConfig(BaseModel):
     ``<dir>/<id>.json`` so a later ``--continue`` / ``--resume`` / web session
     picks it up. Only message text is stored — never secrets (keys stay in
     ``.env``). ``false`` = no persistence; runs stay single-shot.
+
+    ``auto_title`` (web only): on a session's first turn, summarize the first
+    message into a short title via the ``title`` role (falls back to
+    ``generation``) for the web sidebar. The CLI never auto-titles.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
     dir: str = ".harness/sessions"
+    auto_title: bool = True
 
 
 class BudgetConditionSpec(BaseModel):

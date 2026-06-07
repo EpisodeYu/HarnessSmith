@@ -100,6 +100,20 @@ def test_session_file_has_no_secret(tmp_path, monkeypatch):
     assert secret not in text
 
 
+def test_save_sets_and_preserves_title(tmp_path):
+    """`title` is set when given and preserved across title-less saves."""
+    sdir = str(tmp_path / "s")
+    session_store.save("x", [{"role": "user", "content": "q"}], sdir, title="My chat")
+    assert session_store.title_of("x", sdir) == "My chat"
+
+    # a later save without a title keeps the existing one
+    session_store.save("x", [{"role": "user", "content": "q2"}], sdir)
+    assert session_store.title_of("x", sdir) == "My chat"
+
+    # summaries surface the title for the sidebar
+    assert session_store.summaries(sdir)[0]["title"] == "My chat"
+
+
 def test_continue_picks_most_recent(tmp_path):
     import time
 

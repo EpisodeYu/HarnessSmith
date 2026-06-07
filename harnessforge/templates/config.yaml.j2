@@ -21,10 +21,12 @@ llms:
     # output_cost_per_million: 0.0
 {% endfor %}
 # Map roles to profile names above. `generation` is the main loop; `compaction`
-# (optional) is used by context summarize — falls back to generation if unset.
+# (optional) is used by context summarize; `title` (optional) names sessions in
+# the web sidebar. Both fall back to generation if unset.
 roles:
 {% for role, target in roles.items() %}  {{ role }}: {{ target }}
 {% endfor %}{% if "compaction" not in roles %}  # compaction: {{ (llms[0].name if llms else "default") }}
+{% endif %}{% if "title" not in roles %}  # title: {{ (llms[0].name if llms else "default") }}        # web session-title model (a small/cheap model is ideal)
 {% endif %}
 prompts:
 {% if spec.prompts.system %}  system: {{ spec.prompts.system | tojson }}
@@ -76,9 +78,12 @@ observability:
 # message body to <dir>/<id>.json so `run --continue` / `run --resume <id>` /
 # `chat` / the web session can pick it up. Stores message text only — NEVER
 # secrets (keys stay in .env). enabled: false = no persistence (single-shot runs).
+# auto_title (web only): summarize a session's first message into a short title
+# (via the `title` role) for the web sidebar; the CLI never auto-titles.
 sessions:
   enabled: true
   dir: .harness/sessions
+  auto_title: true
 
 # Per-run guardrails (reset each turn). Each entry in `conditions` is a limit;
 # `combine` decides when to stop: or = any limit hit (safe default), and = all
