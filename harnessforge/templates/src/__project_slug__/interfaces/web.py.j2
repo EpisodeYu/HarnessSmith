@@ -292,16 +292,32 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
 
     @app.get("/rules")
     def get_rules() -> dict:
-        """Return the content of each configured always-apply rule file
-        (``prompts.rules_files``) so the panel can edit it in place. A not-yet-written
-        (or out-of-repo) file comes back empty. These are plain markdown files you own
-        — the same AGENTS.md / CLAUDE.md / .cursor-rules pattern."""
-        rules = []
-        for path in app.state.config.prompts.rules_files:
+        """Return the content of each always-apply rule file the agent injects: the
+        explicit ``prompts.rules_files`` plus any auto-recognized convention file
+        present at the root (CLAUDE.md), flagged ``auto`` so the panel can show it
+        read-only. A not-yet-written (or out-of-repo) file comes back empty. These
+        are plain markdown files you own — the AGENTS.md / CLAUDE.md pattern."""
+        from ..harness.prompts import _CONVENTION_RULE_FILES
+
+        seen: set[str] = set()
+        rules: list[dict] = []
+
+        def _add(path: str, auto: bool) -> None:
+            key = str(Path(path))
+            if key in seen:
+                return
+            seen.add(key)
             resolved = _safe_repo_path(path)
             exists = resolved is not None and resolved.is_file()
+            if auto and not exists:
+                return  # only surface convention files that actually exist
             content = resolved.read_text(encoding="utf-8") if exists else ""
-            rules.append({"path": path, "content": content, "exists": exists})
+            rules.append({"path": path, "content": content, "exists": exists, "auto": auto})
+
+        for path in app.state.config.prompts.rules_files:
+            _add(path, False)
+        for path in _CONVENTION_RULE_FILES:
+            _add(path, True)
         return {"rules": rules}
 
     @app.post("/rules")

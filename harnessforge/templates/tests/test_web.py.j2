@@ -234,8 +234,18 @@ def test_rules_endpoint_writes_and_reads_within_repo(tmp_path, monkeypatch):
     assert client.post("/rules", json={"path": "RULES.md", "content": "Be concise."}).status_code == 200
     assert (tmp_path / "RULES.md").read_text(encoding="utf-8") == "Be concise."
     assert client.get("/rules").json()["rules"] == [
-        {"path": "RULES.md", "content": "Be concise.", "exists": True}
+        {"path": "RULES.md", "content": "Be concise.", "exists": True, "auto": False}
     ]
+
+
+def test_rules_endpoint_surfaces_auto_recognized_claude_md(tmp_path, monkeypatch):
+    """An auto-recognized root CLAUDE.md shows up in GET /rules (flagged auto) even
+    when it isn't in rules_files, so the Prompts tab can list and edit it."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "CLAUDE.md").write_text("House rules.", encoding="utf-8")
+    client = TestClient(create_app(_config(), mock=True))
+    rules = client.get("/rules").json()["rules"]
+    assert {"path": "CLAUDE.md", "content": "House rules.", "exists": True, "auto": True} in rules
 
 
 def test_rules_endpoint_rejects_paths_outside_repo(tmp_path, monkeypatch):
