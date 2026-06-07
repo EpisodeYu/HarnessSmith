@@ -114,6 +114,30 @@ def test_save_sets_and_preserves_title(tmp_path):
     assert session_store.summaries(sdir)[0]["title"] == "My chat"
 
 
+def test_set_title_and_delete(tmp_path):
+    """Rename replaces the title (keeping messages); delete removes the file."""
+    sdir = str(tmp_path / "s")
+    session_store.save("x", [{"role": "user", "content": "q"}], sdir, title="old")
+
+    assert session_store.set_title("x", "new name", sdir) is True
+    assert session_store.title_of("x", sdir) == "new name"
+    assert session_store.load("x", sdir) == [{"role": "user", "content": "q"}]
+    assert session_store.set_title("ghost", "n", sdir) is False  # unknown session
+
+    assert session_store.delete("x", sdir) is True
+    assert session_store.load("x", sdir) == []
+    assert session_store.delete("x", sdir) is False  # idempotent
+
+
+def test_path_traversal_is_confined(tmp_path):
+    """A malicious id can't escape the sessions dir (``.name`` strips path parts)."""
+    sdir = tmp_path / "s"
+    outside = tmp_path / "secret.json"
+    outside.write_text("{}", encoding="utf-8")
+    session_store.delete("../secret", str(sdir))
+    assert outside.exists()  # untouched — the traversal was neutralized
+
+
 def test_continue_picks_most_recent(tmp_path):
     import time
 

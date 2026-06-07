@@ -27,7 +27,9 @@ def new_id() -> str:
 
 
 def _path(session_id: str, sessions_dir: str) -> Path:
-    return Path(sessions_dir) / f"{session_id}.json"
+    # ``.name`` strips any path components so an id like ``../x`` can't escape the
+    # sessions dir (ids are normally uuid hex, but the web takes them from URLs).
+    return Path(sessions_dir) / f"{Path(session_id).name}.json"
 
 
 def _read(session_id: str, sessions_dir: str) -> dict:
@@ -79,6 +81,29 @@ def save(
     _path(session_id, sessions_dir).write_text(
         json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+
+def set_title(session_id: str, title: str, sessions_dir: str) -> bool:
+    """Rename a session (replace its title), preserving its messages. Returns
+    ``False`` if the session is unknown."""
+    data = _read(session_id, sessions_dir)
+    if not data:
+        return False
+    data["title"] = title
+    data["updated"] = time.time()
+    _path(session_id, sessions_dir).write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return True
+
+
+def delete(session_id: str, sessions_dir: str) -> bool:
+    """Delete a session file. Returns ``True`` if it existed (idempotent)."""
+    path = _path(session_id, sessions_dir)
+    if not path.is_file():
+        return False
+    path.unlink()
+    return True
 
 
 def latest(sessions_dir: str) -> str | None:

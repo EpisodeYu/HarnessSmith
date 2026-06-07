@@ -154,6 +154,9 @@
         chat_new: "New chat", chat_sessions_title: "Saved sessions (resume)",
         chat_session_new_opt: "— new session —",
         chat_untitled: "New chat", chat_sessions_empty: "No conversations yet",
+        session_rename: "Rename", session_delete: "Delete",
+        session_rename_prompt: "Rename this conversation:",
+        session_delete_confirm: "Delete this conversation? This can't be undone.",
         no_llm: "No LLM is configured yet — you can't chat until you add one.",
         no_llm_link: "Go to Config → LLM",
         cfg_intro: "Runtime behavioral config (no secrets). Edits apply in-process.",
@@ -209,6 +212,9 @@
         chat_new: "新会话", chat_sessions_title: "已保存会话(续聊)",
         chat_session_new_opt: "— 新会话 —",
         chat_untitled: "新会话", chat_sessions_empty: "还没有会话",
+        session_rename: "重命名", session_delete: "删除",
+        session_rename_prompt: "重命名这个会话:",
+        session_delete_confirm: "删除这个会话?此操作不可撤销。",
         no_llm: "尚未配置任何 LLM —— 请先添加一个才能对话。",
         no_llm_link: "前往 配置 → LLM",
         cfg_intro: "运行期行为性配置(无密钥)。修改进程内即时生效。",
@@ -323,16 +329,62 @@
         return;
       }
       for (const s of sessionsCache) {
-        const item = document.createElement("button");
-        item.type = "button";
         const active = s.id === currentSession;
-        item.className = "block w-full truncate rounded-lg px-2 py-1.5 text-left "
-          + (active ? "bg-slate-200 font-medium" : "hover:bg-slate-100");
-        item.textContent = s.title || s.preview || t("chat_untitled");
-        item.title = item.textContent;
-        item.addEventListener("click", () => openSession(s.id));
-        box.appendChild(item);
+        const row = document.createElement("div");
+        row.className = "flex items-center gap-0.5 rounded-lg px-1 "
+          + (active ? "bg-slate-200" : "hover:bg-slate-100");
+        const label = s.title || s.preview || t("chat_untitled");
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "min-w-0 flex-1 truncate px-1 py-1.5 text-left" + (active ? " font-medium" : "");
+        open.textContent = label;
+        open.title = label;
+        open.addEventListener("click", () => openSession(s.id));
+        const ren = document.createElement("button");
+        ren.type = "button";
+        ren.className = "shrink-0 px-1 text-xs text-slate-400 hover:text-slate-700";
+        ren.textContent = "✎";
+        ren.title = t("session_rename");
+        ren.addEventListener("click", (e) => { e.stopPropagation(); renameSession(s); });
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "shrink-0 px-1 text-xs text-slate-400 hover:text-red-600";
+        del.textContent = "🗑";
+        del.title = t("session_delete");
+        del.addEventListener("click", (e) => { e.stopPropagation(); deleteSession(s); });
+        row.append(open, ren, del);
+        box.appendChild(row);
       }
+    }
+
+    async function renameSession(s) {
+      const raw = window.prompt(t("session_rename_prompt"), s.title || "");
+      if (raw === null) return;  // cancelled
+      const next = raw.trim();
+      if (!next || next === s.title) return;
+      try {
+        const resp = await fetch("/sessions/" + encodeURIComponent(s.id), {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: next }),
+        });
+        if (!resp.ok) return;
+      } catch (err) { return; }
+      s.title = next;
+      if (s.id === currentSession) { currentTitle = next; updateMainTitle(); }
+      renderSessionList();
+    }
+
+    async function deleteSession(s) {
+      if (!window.confirm(t("session_delete_confirm"))) return;
+      try {
+        const resp = await fetch("/sessions/" + encodeURIComponent(s.id), { method: "DELETE" });
+        if (!resp.ok) return;
+      } catch (err) { return; }
+      sessionsCache = sessionsCache.filter((x) => x.id !== s.id);
+      if (s.id === currentSession) {
+        currentSession = null; currentTitle = ""; log.innerHTML = ""; updateMainTitle();
+      }
+      renderSessionList();
     }
 
     async function loadSessions() {
