@@ -154,9 +154,7 @@
         chat_new: "New chat", chat_sessions_title: "Saved sessions (resume)",
         chat_session_new_opt: "— new session —",
         chat_untitled: "New chat", chat_sessions_empty: "No conversations yet",
-        session_rename: "Rename", session_delete: "Delete",
-        session_rename_prompt: "Rename this conversation:",
-        session_delete_confirm: "Delete this conversation? This can't be undone.",
+        session_rename: "Rename", session_delete: "Delete", session_cancel: "Cancel",
         no_llm: "No LLM is configured yet — you can't chat until you add one.",
         no_llm_link: "Go to Config → LLM",
         cfg_intro: "Runtime behavioral config (no secrets). Edits apply in-process.",
@@ -212,9 +210,7 @@
         chat_new: "新会话", chat_sessions_title: "已保存会话(续聊)",
         chat_session_new_opt: "— 新会话 —",
         chat_untitled: "新会话", chat_sessions_empty: "还没有会话",
-        session_rename: "重命名", session_delete: "删除",
-        session_rename_prompt: "重命名这个会话:",
-        session_delete_confirm: "删除这个会话?此操作不可撤销。",
+        session_rename: "重命名", session_delete: "删除", session_cancel: "取消",
         no_llm: "尚未配置任何 LLM —— 请先添加一个才能对话。",
         no_llm_link: "前往 配置 → LLM",
         cfg_intro: "运行期行为性配置(无密钥)。修改进程内即时生效。",
@@ -310,6 +306,8 @@
     let currentSession = null;   // id of the open session (null = unsaved draft)
     let currentTitle = "";       // its title (shown in the main header)
     let sessionsCache = [];      // last /sessions payload (relabel on lang switch)
+    let editingId = null;        // row being inline-renamed
+    let confirmingId = null;     // row showing the inline delete confirmation
 
     function chatIsEmpty() { return !currentSession && log.children.length === 0; }
 
@@ -329,8 +327,48 @@
         return;
       }
       for (const s of sessionsCache) {
-        const active = s.id === currentSession;
         const row = document.createElement("div");
+        box.appendChild(row);
+
+        // Inline rename: the row's label becomes a text input (Enter / blur save,
+        // Esc cancels) — themed in-page editing, not a browser dialog.
+        if (s.id === editingId) {
+          row.className = "flex items-center rounded-lg bg-slate-50 px-1";
+          const input = document.createElement("input");
+          input.className = "w-full rounded border px-1 py-1 text-sm";
+          input.value = s.title || "";
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") { e.preventDefault(); commitRename(s, input.value); }
+            else if (e.key === "Escape") { e.preventDefault(); editingId = null; renderSessionList(); }
+          });
+          input.addEventListener("blur", () => commitRename(s, input.value));
+          row.appendChild(input);
+          setTimeout(() => { input.focus(); input.select(); }, 0);
+          continue;
+        }
+
+        // Inline delete confirmation: the row shows Delete / Cancel in place —
+        // themed in-page confirm, not a browser dialog.
+        if (s.id === confirmingId) {
+          row.className = "flex items-center gap-1 rounded-lg bg-red-50 px-1";
+          const name = document.createElement("span");
+          name.className = "min-w-0 flex-1 truncate px-1 py-1.5 text-slate-600";
+          name.textContent = s.title || s.preview || t("chat_untitled");
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "shrink-0 rounded bg-red-600 px-1.5 py-0.5 text-xs text-white hover:bg-red-700";
+          del.textContent = t("session_delete");
+          del.addEventListener("click", () => commitDelete(s));
+          const cancel = document.createElement("button");
+          cancel.type = "button";
+          cancel.className = "shrink-0 px-1.5 py-0.5 text-xs text-slate-500 hover:text-slate-800";
+          cancel.textContent = t("session_cancel");
+          cancel.addEventListener("click", () => { confirmingId = null; renderSessionList(); });
+          row.append(name, del, cancel);
+          continue;
+        }
+
+        const active = s.id === currentSession;
         row.className = "flex items-center gap-0.5 rounded-lg px-1 "
           + (active ? "bg-slate-200" : "hover:bg-slate-100");
         const label = s.title || s.preview || t("chat_untitled");
@@ -353,33 +391,38 @@
         del.title = t("session_delete");
         del.addEventListener("click", (e) => { e.stopPropagation(); deleteSession(s); });
         row.append(open, ren, del);
-        box.appendChild(row);
       }
     }
 
-    async function renameSession(s) {
-      const raw = window.prompt(t("session_rename_prompt"), s.title || "");
-      if (raw === null) return;  // cancelled
-      const next = raw.trim();
-      if (!next || next === s.title) return;
-      try {
-        const resp = await fetch("/sessions/" + encodeURIComponent(s.id), {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: next }),
-        });
-        if (!resp.ok) return;
-      } catch (err) { return; }
-      s.title = next;
-      if (s.id === currentSession) { currentTitle = next; updateMainTitle(); }
+    // Enter inline edit / confirm modes (one at a time).
+    function renameSession(s) { editingId = s.id; confirmingId = null; renderSessionList(); }
+    function deleteSession(s) { confirmingId = s.id; editingId = null; renderSessionList(); }
+
+    async function commitRename(s, value) {
+      if (editingId !== s.id) return;  // guard the blur+Enter / Esc race
+      editingId = null;
+      const next = (value || "").trim();
+      if (next && next !== s.title) {
+        try {
+          const resp = await fetch("/sessions/" + encodeURIComponent(s.id), {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: next }),
+          });
+          if (resp.ok) {
+            s.title = next;
+            if (s.id === currentSession) { currentTitle = next; updateMainTitle(); }
+          }
+        } catch (err) { /* keep the old title on failure */ }
+      }
       renderSessionList();
     }
 
-    async function deleteSession(s) {
-      if (!window.confirm(t("session_delete_confirm"))) return;
+    async function commitDelete(s) {
+      confirmingId = null;
       try {
         const resp = await fetch("/sessions/" + encodeURIComponent(s.id), { method: "DELETE" });
-        if (!resp.ok) return;
-      } catch (err) { return; }
+        if (!resp.ok) { renderSessionList(); return; }
+      } catch (err) { renderSessionList(); return; }
       sessionsCache = sessionsCache.filter((x) => x.id !== s.id);
       if (s.id === currentSession) {
         currentSession = null; currentTitle = ""; log.innerHTML = ""; updateMainTitle();

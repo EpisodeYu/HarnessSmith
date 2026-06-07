@@ -269,6 +269,10 @@ def test_index_has_sidebar_session_layout():
     assert "renderSessionList" in body and "updateMainTitle" in body
     assert 'event: title' in body or 'addEventListener("title"' in body
     assert "renameSession" in body and "deleteSession" in body  # sidebar controls
+    # inline edit/confirm (no native prompt/confirm dialogs)
+    assert "commitRename" in body and "commitDelete" in body
+    assert "editingId" in body and "confirmingId" in body
+    assert "window.prompt" not in body and "window.confirm" not in body
 
 
 def test_registries_lists_registered_extensions():
