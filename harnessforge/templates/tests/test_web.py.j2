@@ -438,3 +438,48 @@ def test_test_llm_requires_a_model(monkeypatch):
     data = resp.json()
     assert data["ok"] is False
     assert "model" in data["error"].lower()
+{% if spec.memory.enabled %}
+
+def _memory_client(tmp_path):
+    from {{ project_slug }}.harness.config import MemoryConfig
+
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "get_current_time", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "memory": {"backend": "file", "path": str(tmp_path / "memory.md")},
+    })
+    return TestClient(create_app(config, mock=True))
+
+
+def test_memory_endpoints_roundtrip(tmp_path):
+    """GET/POST/DELETE /memory read, overwrite, and clear the note; /registries
+    lists the registered backends."""
+    client = _memory_client(tmp_path)
+    assert client.get("/memory").json() == {"content": "", "read_only": False}
+
+    assert client.post("/memory", json={"content": "remember this"}).json()["ok"] is True
+    assert client.get("/memory").json()["content"] == "remember this"
+    assert "file" in client.get("/registries").json()["memory"]
+
+    assert client.delete("/memory").json()["ok"] is True
+    assert client.get("/memory").json()["content"] == ""
+
+
+def test_memory_read_only_rejects_writes(tmp_path):
+    from {{ project_slug }}.harness.config import MemoryConfig
+
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "memory": {"path": str(tmp_path / "memory.md"), "read_only": True},
+    })
+    client = TestClient(create_app(config, mock=True))
+    resp = client.post("/memory", json={"content": "nope"})
+    assert resp.status_code == 400
+    assert client.get("/memory").json()["read_only"] is True
+{% endif %}

@@ -416,4 +416,63 @@ or any file tool. Heavier skills ship `scripts/` (run with a shell tool) and
 `references/`/`assets/` (read with a file tool) — scripts are high-risk, so the
 tool stays off until you enable it. Set `disable-model-invocation: true` in the
 frontmatter to keep a skill out of the auto-prompt; reach it manually with
-`{{ project_slug }} run "/skill-name ..."`.{% endif %}
+`{{ project_slug }} run "/skill-name ..."`.{% endif %}{% if spec.memory.enabled %}
+
+## Long-term memory (cross-session)
+
+`harness/memory.py` gives the agent a small **self-maintained note that persists
+across sessions** — durable facts, user preferences, decisions — injected into
+every system prompt. It's tool-driven: the agent decides what's worth keeping and
+writes it with the `memory_append` / `memory_write` tools (and reads it back with
+`memory_read`). The built-in `file` backend keeps one human-readable markdown note
+(`config.yaml` → `memory.path`, default `.harness/memory.md`, gitignored, **never
+holds secrets**). Read it, edit it, or delete the file to forget. Manage it by
+hand with `{{ project_slug }} memory show | clear | path`{% if interfaces.web %} or the web `GET/POST/DELETE
+/memory` endpoints{% endif %}.
+
+Memory is a few notes the agent curates **on purpose** — distinct from RAG
+(external-corpus retrieval, not built here). Keep it small: only
+`inject_max_chars` of the note is injected (most-recent slice), so it stays thin.
+
+```yaml
+memory:
+  backend: file
+  path: .harness/memory.md
+  inject_max_chars: 4000
+  read_only: false   # true = only the read tool (the agent can't write memory)
+```
+
+### Write your own backend
+
+A *backend* decides where memory lives and what's recalled/recorded — the same
+name→thing dispatch as tools / paradigms / context (not an engine). Subclass
+`MemoryBackend`, override what you need, register it, and point `memory.backend`
+at its name. The contract is two core methods plus three optional lifecycle hooks
+(default no-ops — "override to opt in"):
+
+```python
+from {{ project_slug }}.harness.memory import MemoryBackend, register_memory
+from {{ project_slug }}.harness.tools import Tool, SAFE
+
+@register_memory("vecdb")
+class VecMemory(MemoryBackend):
+    def recall(self, query=""):           # text injected into the system prompt
+        return my_vector_search(query)
+    def record(self, messages):           # persist a completed turn (optional)
+        my_store.add(messages)
+    def tools(self):                       # optional: expose search/store tools
+        return [Tool(name="memory_search", description="...", parameters={...},
+                     func=my_search, risk=SAFE)]
+    # optional: on_session_end(messages)  -> a conversation ended (chat exit)
+    # optional: on_compact(dropped)       -> rescue insight before older turns drop
+```
+
+```yaml
+memory:
+  backend: vecdb        # your registered name
+```
+
+Import your module so `@register_memory` runs; it then shows in
+`{{ project_slug }} info`{% if interfaces.web %} and `GET /registries`{% endif %}, and an unknown
+`backend:` name is reported (and simply injects nothing) rather than crashing.
+This is a thin own-code registry — **no** framework, no cloud memory service.{% endif %}

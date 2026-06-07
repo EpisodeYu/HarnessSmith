@@ -126,7 +126,7 @@ flowchart LR
 ```
 
 生成器目录(仓库根 `/home/s1yu/HarnessForge`,独立 git repo,MIT;支持 `uvx harnessforge new` 免安装一次性运行):
-- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/**`display_name`**(Slice 7,人类可读显示名,渲染进产物 web 标题/header + README 标题,空则回落 `project_slug`;wizard 由它派生 slug;纯标签不进 `config.yaml`)/**`language`**(Slice 7,产物 web 默认 UI 语言 `en`/`zh`,种子化 web 默认、运行期浏览器可切;wizard 语言选择贯穿至此;Agent 回答语言靠模型按输入自动判断 / 产物 Prompts 改)/llms/roles/prompts(`system`/**`rules_files`**(Slice 6B,全局 rule 文件种子,渲染进运行期 `config.yaml`);`persona` 于 2026-06-07 移除——只是 system 后的冗余拼接段,见 `02-development/04-slice-3-product-web.md §4`)/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/observability/budget(2026-06-07 重做为 `combine` + `conditions` 薄注册表 + 可选 tumbling 时间窗,种子化 `config.yaml`;per-run scope,持久周期 v1+);context(Slice 7 起 wizard 采集并**种子化** `config.yaml` 的 context 块,沿用 rules_files 式 seed)/rag/secrets backend 字段预留但 MVP 不全实现)。
+- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/**`display_name`**(Slice 7,人类可读显示名,渲染进产物 web 标题/header + README 标题,空则回落 `project_slug`;wizard 由它派生 slug;纯标签不进 `config.yaml`)/**`language`**(Slice 7,产物 web 默认 UI 语言 `en`/`zh`,种子化 web 默认、运行期浏览器可切;wizard 语言选择贯穿至此;Agent 回答语言靠模型按输入自动判断 / 产物 Prompts 改)/llms/roles/prompts(`system`/**`rules_files`**(Slice 6B,全局 rule 文件种子,渲染进运行期 `config.yaml`);`persona` 于 2026-06-07 移除——只是 system 后的冗余拼接段,见 `02-development/04-slice-3-product-web.md §4`)/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/**memory.enabled**(Slice 8B,跨会话长期记忆开关;后端/路径/上限走运行期 `config.yaml memory`,不进 spec)/observability/budget(2026-06-07 重做为 `combine` + `conditions` 薄注册表 + 可选 tumbling 时间窗,种子化 `config.yaml`;per-run scope,持久周期 v1+);context(Slice 7 起 wizard 采集并**种子化** `config.yaml` 的 context 块,沿用 rules_files 式 seed)/rag/secrets backend 字段预留但 MVP 不全实现)。
 - `harnessforge/generator.py` — 渲染模板 → 写出仓库 + 拷入 `harness.spec.yaml` + `git init` + `uv lock` + 重跑警告不覆盖 + 生成后冒烟自检(`uv sync`+`pytest`+mock 跑一步)。
 - `harnessforge/cli.py` — Typer 入口(`new`、`--spec`、`--preset`、交互模式、`doctor` 预检、`--no-verify` 关闭冒烟自检)。
 - `harnessforge/catalog/mcp_servers.yaml` — 精选静态 MCP catalog(L2)。
@@ -146,6 +146,7 @@ flowchart LR
 - `src/<pkg>/harness/mcp.py`(L2,Slice 4,opt-in)— MCP client(stdio + 远程 HTTP/SSE),把 MCP 工具注册进上面的注册表;仅 `spec.mcp.enabled` 时生成。Slice 6 起经 MCP 预设(`fetch`/`git`/Desktop Commander)做**工具基线**。
 - `src/<pkg>/harness/paradigms/`(Slice 5,**始终生成**)— 范式注册表(`@register_paradigm` + `PARADIGMS` + `Paradigm` 契约 + 共享 plumbing)+ 内置范式 `agent`(默认,ReAct 式)/`plan`/`ask`(各自自包含、互不 import,按 `spec.paradigms` 渲染);运行期 `--mode`/`config.yaml paradigms.enabled` 选,用户可自加。事后反思(Reflexion)作 `AGENTS.md` 用户扩展范例(需真实成功信号),非内置范式。
 - `src/<pkg>/harness/skills.py`(Slice 6,opt-in)— 标准 Agent Skills 支持(发现 `SKILL.md` + L1 元数据注入 + `read_skill` 读正文);仅 `spec.skills.enabled` 时生成。
+- `src/<pkg>/harness/memory.py`(Slice 8B,opt-in)— 跨会话长期记忆:薄注册表 `@register_memory`(同 tools/context/budget/paradigms,按名分发)+ 内置 `file` 后端(自维护 markdown 笔记 `.harness/memory.md`,每轮注入系统提示、工具驱动写入、不落密钥)。后端契约 `recall`/`record` + 可选 `tools()`/`on_session_end`/`on_compact`;用户可换自有后端。仅 `spec.memory.enabled` 时生成(关闭零痕迹);记忆 ≠ RAG。
 - `src/<pkg>/harness/trace.py` — 每次 run 的 JSONL trace + token/成本计数。
 - `src/<pkg>/harness/prompts.py` — 系统提示拼装(system + **全局 rule 文件注入**(Slice 6B,`prompts.rules_files` 列出的 markdown 每轮注入,开放 `AGENTS.md`/`CLAUDE.md`/`.cursor/rules` 模式;空=零效果)+ skills/environment L2)。
 - `src/<pkg>/harness/context.py`(L2)— truncate / summarize。
@@ -170,7 +171,7 @@ flowchart LR
 
 自主细节(实现时可调):模板引擎 Jinja2;spec 用 Pydantic v2 + YAML;运行期配置 pydantic-settings;Web 无构建单页(Tailwind CDN);context 默认 `truncate`(summarize 为 L2 可选)。
 
-**明确不做(保护定位)**:不做生产级权限系统、云托管、**通用多 agent 编排框架 / 工作流编排 DSL / 动态图引擎 / 运行期范式抽象层**、在线 MCP registry、沙箱、**HarnessForge 侧的中心化配置管理/托管**(产物自持配置,守"生成后不再依赖 HarnessForge")。(注:**跨会话长期记忆不在本列——它非红线,已于 2026-06-07 排入 v1**,见 §3 L3 顶部排期更新;它须做成薄+spec 开关+不落密钥,不得演变为云托管记忆服务。)
+**明确不做(保护定位)**:不做生产级权限系统、云托管、**通用多 agent 编排框架 / 工作流编排 DSL / 动态图引擎 / 运行期范式抽象层**、在线 MCP registry、沙箱、**HarnessForge 侧的中心化配置管理/托管**(产物自持配置,守"生成后不再依赖 HarnessForge")。(注:**跨会话长期记忆不在本列——它非红线,已于 2026-06-07 排入 v1 并完成(Slice 8B)**,见 §3 L3 顶部排期更新与 `02-development/095-slice-8b-memory.md`;它做成了薄+spec 开关(`memory.enabled`,默认关、关闭零痕迹)+不落密钥+薄 `@register_memory` 注册表,**不得演变为云托管记忆服务**。)
 
 > **multi-agent 措辞细化(人已签,2026-06)**:红线是"**通用编排框架**",不是"≥2 个 agent"。**允许一个具体的、固定拓扑、生成为自有代码的 multi-agent 模式**(supervisor / "agent 即 tool",子 agent = 再跑一个 `run()`),**opt-in、排 v1+、不进默认产物**;它只是薄 loop 的组合,无运行期抽象层。详见 §3 L3 与 `02-development/00-overview.md §3` 决策表。
 

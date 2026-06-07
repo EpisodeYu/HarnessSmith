@@ -83,7 +83,14 @@ def _environment_note(config: Config) -> str:
     rules = _load_rules(config)
     if rules:
         parts.append(rules)
-{% if spec.skills.enabled %}    # Standard Agent Skills (L1): inject available skills' name+description so the
+{% if spec.memory.enabled %}    # Cross-session long-term memory: recalled notes the agent saved earlier,
+    # injected as reference material (see harness/memory.py). Empty = no-op.
+    from .memory import memory_section
+
+    memory = memory_section(config)
+    if memory:
+        parts.append(memory)
+{% endif %}{% if spec.skills.enabled %}    # Standard Agent Skills (L1): inject available skills' name+description so the
     # model knows they exist and can read the full SKILL.md on demand.
     activate_skills(config)
     skills_section = build_skills_prompt(config)

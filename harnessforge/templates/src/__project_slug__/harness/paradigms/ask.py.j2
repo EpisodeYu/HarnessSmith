@@ -99,7 +99,7 @@ def run(
             stop_reason, answer = stop
             break
 
-        messages = fit_context(messages, context_cfg, summarizer=summarizer)
+        messages = fit_context(messages, context_cfg, summarizer=summarizer{% if spec.memory.enabled %}, config=config{% endif %})
         hooks.before_step(step, messages)
         try:
             if on_delta is not None:

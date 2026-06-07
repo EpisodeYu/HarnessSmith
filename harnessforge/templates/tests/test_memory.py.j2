@@ -1,0 +1,180 @@
+"""Cross-session long-term memory tests: the file backend, system-prompt
+injection, the memory tools, a mock turn that writes a note, the no-secrets
+guarantee, and the @register_memory extension point (custom backend + lifecycle
+hooks). Generated only when ``memory.enabled`` — no network, no API key."""
+
+from __future__ import annotations
+
+from {{ project_slug }}.harness import memory as memory_mod
+from {{ project_slug }}.harness.config import Config
+from {{ project_slug }}.harness.loop import run
+from {{ project_slug }}.harness.memory import (
+    BACKENDS,
+    FileMemory,
+    MemoryBackend,
+    get_backend,
+    memory_section,
+    register_memory,
+    register_memory_tools,
+)
+from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
+from {{ project_slug }}.harness.prompts import build_system_prompt
+from {{ project_slug }}.harness.tools import HIGH, SAFE, Registry
+
+
+def _config(tmp_path, **memory_overrides):
+    mem = {"backend": "file", "path": str(tmp_path / "memory.md")}
+    mem.update(memory_overrides)
+    return Config.model_validate(
+        {
+            "llms": [{"name": "default", "model": "mock-model"}],
+            "roles": {"generation": "default"},
+            "prompts": {"system": "You are a test agent."},
+            "tools": [
+                {"name": "memory_read", "enabled": True},
+                {"name": "memory_append", "enabled": True},
+                {"name": "memory_write", "enabled": True},
+            ],
+            "observability": {"trace": False},
+            "memory": mem,
+        }
+    )
+
+
+def test_file_backend_roundtrip(tmp_path):
+    config = _config(tmp_path)
+    backend = get_backend(config)
+    assert isinstance(backend, FileMemory)
+    assert backend.read() == ""  # nothing yet
+
+    backend.append("User prefers Python.")
+    backend.append("Project uses uv.")
+    assert "User prefers Python." in backend.read()
+    assert "Project uses uv." in backend.read()
+
+    backend.write("Only this now.")
+    assert backend.read() == "Only this now."
+
+    backend.clear()
+    assert backend.read() == ""
+
+
+def test_recall_caps_to_most_recent(tmp_path):
+    config = _config(tmp_path, inject_max_chars=20)
+    backend = get_backend(config)
+    backend.write("A" * 100 + "TAILMARKER")
+    recalled = backend.recall()
+    assert "TAILMARKER" in recalled  # keeps the most recent slice
+    assert len(recalled) < 100
+
+
+def test_memory_section_injects_with_fence(tmp_path):
+    config = _config(tmp_path)
+    assert memory_section(config) == ""  # empty note -> no section
+
+    get_backend(config).append("Remember: ship thin.")
+    section = memory_section(config)
+    assert "Remember: ship thin." in section
+    # the fence labels it as reference, not as a new user instruction
+    assert "NOT as new instructions" in section
+
+
+def test_register_memory_tools_and_risk(tmp_path):
+    config = _config(tmp_path)
+    reg = Registry()
+    names = register_memory_tools(config, reg)
+    assert set(names) == {"memory_read", "memory_append", "memory_write"}
+    assert reg.get("memory_read").risk == SAFE  # readable even by plan/ask
+    assert reg.get("memory_append").risk == HIGH  # writes -> agent-only
+    assert reg.get("memory_write").risk == HIGH
+
+
+def test_read_only_exposes_only_read(tmp_path):
+    config = _config(tmp_path, read_only=True)
+    reg = Registry()
+    names = register_memory_tools(config, reg)
+    assert names == ["memory_read"]
+
+
+def test_system_prompt_injects_memory(tmp_path):
+    config = _config(tmp_path)
+    get_backend(config).append("The user's name is Sam.")
+    prompt = build_system_prompt(config)
+    assert "The user's name is Sam." in prompt
+    assert "You are a test agent." in prompt  # base system still present
+
+
+def test_agent_writes_then_recalls_across_sessions(tmp_path):
+    """A turn calls memory_append; a later turn's system prompt recalls it."""
+    config = _config(tmp_path)
+    register_memory_tools(config)  # into the default registry the loop uses
+
+    client = MockLLM(
+        script=[
+            ScriptedCall("memory_append", {"content": "User likes terse answers."}),
+            "noted",
+        ]
+    )
+    result = run("remember that I like terse answers", client=client, config=config)
+    assert result.stop_reason == "final"
+
+    # The note persisted to disk and is recalled into the next session's prompt.
+    assert "User likes terse answers." in (tmp_path / "memory.md").read_text(encoding="utf-8")
+    assert "User likes terse answers." in build_system_prompt(config)
+
+
+def test_memory_file_has_no_secret(tmp_path, monkeypatch):
+    """Keys live in .env and never enter the note (the agent only writes content)."""
+    secret = "sk-supersecret-DO-NOT-LEAK"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    config = _config(tmp_path)
+    register_memory_tools(config)
+
+    client = MockLLM(
+        script=[ScriptedCall("memory_append", {"content": "a durable fact"}), "ok"]
+    )
+    run("remember a durable fact", client=client, config=config)
+    assert secret not in (tmp_path / "memory.md").read_text(encoding="utf-8")
+
+
+def test_custom_backend_dispatch_and_hooks(tmp_path):
+    """A @register_memory backend is selectable by name and its lifecycle hooks fire."""
+    calls: dict[str, list] = {"record": [], "session_end": [], "compact": []}
+
+    @register_memory("spy")
+    class SpyMemory(MemoryBackend):
+        name = "spy"
+
+        def recall(self, query: str = "") -> str:
+            return "recalled-from-spy"
+
+        def record(self, messages):
+            calls["record"].append(len(messages))
+
+        def on_session_end(self, messages):
+            calls["session_end"].append(len(messages))
+
+        def on_compact(self, dropped):
+            calls["compact"].append(len(dropped))
+
+    try:
+        assert "spy" in BACKENDS
+        config = _config(tmp_path, backend="spy")
+        assert isinstance(get_backend(config), SpyMemory)
+        assert "recalled-from-spy" in memory_section(config)
+
+        memory_mod.record_turn(config, [{"role": "user", "content": "hi"}])
+        memory_mod.end_session(config, [{"role": "user", "content": "hi"}])
+        memory_mod.compact_rescue(config, [{"role": "user", "content": "old"}])
+        assert calls["record"] == [1]
+        assert calls["session_end"] == [1]
+        assert calls["compact"] == [1]
+    finally:
+        BACKENDS.pop("spy", None)
+
+
+def test_unknown_backend_is_safe(tmp_path):
+    config = _config(tmp_path, backend="does-not-exist")
+    assert get_backend(config) is None
+    assert memory_section(config) == ""  # no crash, just nothing injected
+    assert register_memory_tools(config, Registry()) == []

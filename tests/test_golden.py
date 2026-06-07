@@ -171,6 +171,25 @@ def test_golden_skills_enabled_generates_and_smoke_passes(tmp_path):
 
 
 @pytest.mark.golden
+def test_golden_memory_enabled_generates_and_smoke_passes(tmp_path):
+    """memory.enabled -> generate -> lock -> sync + import + mock step + pytest
+    (the generated test_memory.py: file backend, injection, tools, a mock turn
+    that writes a note, the no-secrets guarantee, and a custom @register_memory)."""
+    spec = load_spec(EXAMPLE_SPEC)
+    spec.memory.enabled = True
+    out = tmp_path / "memory"
+    result = generate(spec, out, git_init=False)
+
+    assert (out / "src" / result.project_slug / "harness" / "memory.py").is_file()
+    lock_dependencies(out)
+    lock_text = (out / "uv.lock").read_text(encoding="utf-8").lower()
+    for forbidden in FORBIDDEN:
+        assert forbidden not in lock_text, f"{forbidden} in uv.lock"
+
+    smoke_check(out, result.project_slug)
+
+
+@pytest.mark.golden
 def test_golden_wizard_spec_generates_and_smoke_passes(tmp_path):
     """The wizard's POST /spec output is a real spec: validate -> generate ->
     lock -> sync + import + mock step + pytest (web=true, so test_web runs)."""

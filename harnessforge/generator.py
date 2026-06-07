@@ -49,6 +49,10 @@ CONDITIONAL_TEMPLATES: dict[str, Callable[[HarnessSpec], bool]] = {
     "src/__project_slug__/harness/skills.py.j2": lambda spec: spec.skills.enabled,
     "tests/test_skills.py.j2": lambda spec: spec.skills.enabled,
     "skills/example-skill/SKILL.md.j2": lambda spec: spec.skills.enabled,
+    # Cross-session long-term memory (Slice 8B): the memory module + its test are
+    # rendered only when opted in; disabled leaves zero memory footprint.
+    "src/__project_slug__/harness/memory.py.j2": lambda spec: spec.memory.enabled,
+    "tests/test_memory.py.j2": lambda spec: spec.memory.enabled,
     # Paradigms (Slice 5): the registry + agent are always rendered; the other
     # built-in paradigm files appear only when selected in spec.paradigms.
     "src/__project_slug__/harness/paradigms/plan.py.j2": lambda spec: "plan" in spec.paradigms,

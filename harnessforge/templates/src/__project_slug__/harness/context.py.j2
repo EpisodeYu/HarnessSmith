@@ -160,11 +160,20 @@ def fit(
     ctx: ContextConfig,
     *,
     summarizer: LLMClient | None = None,
-) -> list[dict]:
+{% if spec.memory.enabled %}    config=None,
+{% endif %}) -> list[dict]:
     """Return ``messages`` compacted to fit ``ctx`` (no-op unless triggered)."""
     strategy = STRATEGIES.get(ctx.strategy)
     if ctx.strategy == "none" or strategy is None:
         return messages
     if not should_compact(messages, ctx):
         return messages
-    return strategy(messages, ctx, summarizer=summarizer)
+{% if spec.memory.enabled %}    # Let long-term memory rescue insight from the turns about to be dropped,
+    # before the strategy discards/summarizes them (no-op unless a backend hooks it).
+    if config is not None:
+        _, dropped, _ = _split_keep_last_turns(messages, ctx.keep_last_turns)
+        if dropped:
+            from .memory import compact_rescue
+
+            compact_rescue(config, dropped)
+{% endif %}    return strategy(messages, ctx, summarizer=summarizer)

@@ -46,6 +46,12 @@ tools:
     enabled: {{ entry.enabled | tojson }}
 {% endfor %}{% endif %}{% if spec.skills.enabled %}  - name: read_skill
     enabled: true   # standard Agent Skills: read a SKILL.md body on demand (low-risk)
+{% endif %}{% if spec.memory.enabled %}  - name: memory_read
+    enabled: true    # long-term memory: read your cross-session note (low-risk)
+  - name: memory_append
+    enabled: true    # long-term memory: append a durable note (writes a local file)
+  - name: memory_write
+    enabled: true    # long-term memory: replace the whole note (writes a local file)
 {% endif %}
 # Context-window management (runtime knob). A condition in `triggers` decides
 # WHEN to compact (combined by `combine`: or/and); `strategy` decides HOW.
@@ -129,4 +135,17 @@ mcp:
 # skills/<name>/SKILL.md to add one. Add .claude/skills / .cursor/skills to share.
 skills:
   dirs: ["skills"]
+{% endif %}{% if spec.memory.enabled %}
+# Cross-session long-term memory: a small self-maintained note injected into every
+# system prompt + read/write tools the agent calls (memory_read/append/write in
+# `tools:` above). `backend` names a registered backend (built-in: file). The note
+# lives at `path` (under .harness/, gitignored, never holds secrets). Memory is a
+# few notes the agent curates on purpose — distinct from RAG (corpus retrieval).
+# Add your own backend with @register_memory (see harness/memory.py), then set
+# `backend:` to its name.
+memory:
+  backend: file
+  path: .harness/memory.md
+  inject_max_chars: 4000   # cap injected note size (keeps the prompt thin)
+  read_only: false         # true = only the read tool (the agent can't write memory)
 {% endif %}

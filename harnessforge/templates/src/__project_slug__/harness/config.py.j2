@@ -266,6 +266,26 @@ class McpConfig(BaseModel):
     dirs: list[str] = Field(default_factory=lambda: ["skills"])
 
 
+{% endif %}{% if spec.memory.enabled %}class MemoryConfig(BaseModel):
+    """Cross-session long-term memory (opt-in): a small self-maintained note the
+    agent injects into every system prompt + read/write tools it calls.
+
+    Runtime knobs (this slice's only spec field is ``memory.enabled``).
+    ``backend`` names a registered backend (built-in: ``file`` — see
+    ``harness/memory.py``; add your own with ``@register_memory``). ``path`` is the
+    file backend's note (kept under ``.harness/``, gitignored, never holds
+    secrets). ``inject_max_chars`` caps how much of the note is injected so memory
+    stays thin. ``read_only`` offers only the read tool (the agent can't write).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    backend: str = "file"
+    path: str = ".harness/memory.md"
+    inject_max_chars: int = Field(default=4000, gt=0)
+    read_only: bool = False
+
+
 {% endif %}
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -283,6 +303,7 @@ class Config(BaseModel):
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
 {% if spec.mcp.enabled %}    mcp: McpConfig = Field(default_factory=McpConfig)
 {% endif %}{% if spec.skills.enabled %}    skills: SkillsConfig = Field(default_factory=SkillsConfig)
+{% endif %}{% if spec.memory.enabled %}    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 {% endif %}
     # Forward-compatible passthrough — declared so a richer spec still loads,
     # but not interpreted in this slice.

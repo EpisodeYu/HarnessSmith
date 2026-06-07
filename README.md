@@ -6,7 +6,7 @@
 ![Status: MVP complete](https://img.shields.io/badge/status-MVP_complete-brightgreen.svg)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 
-> **Status:** The MVP (Slices 0–7) is complete and the founding hypothesis is signed off. `harnessforge new` generates a thin, framework-free harness — native function-calling loop, multi-paradigm runtime (`agent`/`plan`/`ask`), tool registry, opt-in MCP (stdio + remote) and FastAPI web chat + `/config`, Agent Skills, combinable budgets, and a JSONL trace — that locks its deps, smoke-tests itself, and runs a mock function-calling turn (CLI + Docker). A single-page spec wizard is included. **Next (v1):** session persistence / resume, checkpoints, tool-call HITL, cross-session memory, RAG. Pre-release (v0.1.0) — install from a clone until it's published to PyPI. See [`docs/`](./docs/) for the full plan.
+> **Status:** The MVP (Slices 0–7) is complete and the founding hypothesis is signed off. `harnessforge new` generates a thin, framework-free harness — native function-calling loop, multi-paradigm runtime (`agent`/`plan`/`ask`), tool registry, opt-in MCP (stdio + remote) and FastAPI web chat + `/config`, Agent Skills, combinable budgets, and a JSONL trace — that locks its deps, smoke-tests itself, and runs a mock function-calling turn (CLI + Docker). A single-page spec wizard is included. **Next (v1):** session persistence / resume and cross-session memory are in; next up checkpoints, tool-call HITL, RAG. Pre-release (v0.1.0) — install from a clone until it's published to PyPI. See [`docs/`](./docs/) for the full plan.
 
 ---
 
@@ -47,7 +47,9 @@ Secrets never touch `config.yaml`, the spec snapshot, or git — `config.yaml` h
 - **Context strategies** — `truncate` / `summarize` / `none` with combinable triggers (`max_tokens` / `max_turns`), extensible via `@register_strategy`.
 - **Agent Skills** — the open `SKILL.md` standard with progressive disclosure; no framework pulled in.
 
-**Roadmap (v1, not yet built):** session persistence / `--resume`, checkpoints (git snapshot + one-click revert), interactive tool-call confirmation (HITL), cross-session memory, RAG ingest on `sqlite-vec`, OS keyring secrets, online MCP registry, and `forge add` incremental regeneration.
+**Built since (v1):** session persistence / `--resume` + `chat` REPL, and **cross-session long-term memory** (a self-maintained note injected each turn, with a thin `@register_memory` backend registry — opt-in via the spec, zero footprint when off).
+
+**Roadmap (v1, not yet built):** checkpoints (git snapshot + one-click revert), interactive tool-call confirmation (HITL), RAG ingest on `sqlite-vec`, OS keyring secrets, online MCP registry, and `forge add` incremental regeneration.
 
 ## Usage
 
@@ -113,7 +115,7 @@ flowchart LR
 
 ## 中文简介
 
-HarnessForge 是一个"配置即生成"的代码生成器:通过 CLI / Web 向导采集需求,产出一套**不绑定 agent 编排框架(LangChain/LangGraph/ADK)**、你完全拥有可删改的独立 agent harness 代码仓库,生成后不再依赖 HarnessForge。三个差异点:**无 agent 框架锁定(不是"无依赖")**、**own-your-code(eject 即所得)**、**配置即生成**。MVP(切片 0–7)已完成:黄金路径(原生 function-calling + 工具注册表 + 可组合预算 + JSONL trace + uv/Docker 可运行性保障)之上,MCP(stdio/远程)、多 LLM profile + 角色路由、Web chat + 运行期 `/config`、多范式(agent/plan/ask)运行期可切、Agent Skills、单页生成向导均已落地。v1 推进会话持久化 / checkpoints / 工具调用 HITL 确认 / 跨会话记忆 / RAG。预发布版本(v0.1.0),发布到 PyPI 前从源码运行,详见 [`docs/`](./docs/)。
+HarnessForge 是一个"配置即生成"的代码生成器:通过 CLI / Web 向导采集需求,产出一套**不绑定 agent 编排框架(LangChain/LangGraph/ADK)**、你完全拥有可删改的独立 agent harness 代码仓库,生成后不再依赖 HarnessForge。三个差异点:**无 agent 框架锁定(不是"无依赖")**、**own-your-code(eject 即所得)**、**配置即生成**。MVP(切片 0–7)已完成:黄金路径(原生 function-calling + 工具注册表 + 可组合预算 + JSONL trace + uv/Docker 可运行性保障)之上,MCP(stdio/远程)、多 LLM profile + 角色路由、Web chat + 运行期 `/config`、多范式(agent/plan/ask)运行期可切、Agent Skills、单页生成向导均已落地。v1 已落地会话持久化与跨会话长期记忆(自维护笔记 + 薄 `@register_memory` 后端注册表,spec 开关、关闭零痕迹),后续推进 checkpoints / 工具调用 HITL 确认 / RAG。预发布版本(v0.1.0),发布到 PyPI 前从源码运行,详见 [`docs/`](./docs/)。
 
 ## License
 

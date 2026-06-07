@@ -630,3 +630,68 @@ def test_skills_enabled_generates_support(tmp_path, spec):
     snapshot = (out / "harness.spec.yaml").read_text(encoding="utf-8")
     assert "enabled: true" in snapshot
     assert "dirs" not in snapshot  # dirs is a runtime knob, not in the spec
+
+
+# --- Slice 8B: cross-session long-term memory (opt-in, memory.enabled) -------
+
+
+def test_memory_disabled_omits_footprint(tmp_path, preset_spec):
+    """Default (memory.enabled=false) repo has zero memory footprint — and the
+    core modules touched by memory render byte-for-byte as without it (gated)."""
+    out = tmp_path / "nomem"
+    generate(preset_spec, out, git_init=False)
+    pkg = out / "src" / "coding_assistant"
+    assert not (pkg / "harness" / "memory.py").exists()
+    assert not (out / "tests" / "test_memory.py").exists()
+
+    config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
+    assert "MemoryConfig" not in config_py
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "memory:" not in config_yaml
+    assert "memory_read" not in config_yaml and "memory_append" not in config_yaml
+
+    prompts_py = (pkg / "harness" / "prompts.py").read_text(encoding="utf-8")
+    assert "memory" not in prompts_py.lower()
+
+    # the loop core (context + paradigms) carries none of the memory wiring
+    context_py = (pkg / "harness" / "context.py").read_text(encoding="utf-8")
+    assert "compact_rescue" not in context_py and "config=None" not in context_py
+    agent_py = (pkg / "harness" / "paradigms" / "agent.py").read_text(encoding="utf-8")
+    assert "config=config" not in agent_py
+
+    cli_py = (pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    assert "_setup_memory" not in cli_py and "def memory(" not in cli_py
+
+
+def test_memory_enabled_generates_support(tmp_path, spec):
+    spec.memory.enabled = True
+    out = tmp_path / "mem"
+    generate(spec, out, git_init=False)
+    pkg = out / "src" / "agent_harness"
+
+    assert (pkg / "harness" / "memory.py").is_file()
+    assert (out / "tests" / "test_memory.py").is_file()
+
+    config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
+    assert "class MemoryConfig" in config_py and "memory: MemoryConfig" in config_py
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "memory:" in config_yaml and "backend: file" in config_yaml
+    assert "memory_read" in config_yaml and "memory_append" in config_yaml
+
+    prompts_py = (pkg / "harness" / "prompts.py").read_text(encoding="utf-8")
+    assert "memory_section" in prompts_py
+
+    # memory wires into the loop core + interfaces, all gated on this flag
+    context_py = (pkg / "harness" / "context.py").read_text(encoding="utf-8")
+    assert "compact_rescue" in context_py
+    agent_py = (pkg / "harness" / "paradigms" / "agent.py").read_text(encoding="utf-8")
+    assert "config=config" in agent_py
+    cli_py = (pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    assert "_setup_memory" in cli_py and "def memory(" in cli_py
+
+    # memory.py is valid Python and the snapshot only records the enable flag
+    py_compile.compile(str(pkg / "harness" / "memory.py"), doraise=True)
+    snapshot = (out / "harness.spec.yaml").read_text(encoding="utf-8")
+    assert "memory" in snapshot and "enabled: true" in snapshot

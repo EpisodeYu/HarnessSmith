@@ -120,6 +120,23 @@ Supports the open [Agent Skills](https://modelcontextprotocol.io) standard
 the model loads the full instructions on demand with the `read_skill` tool. Drop
 a folder under `skills/<name>/SKILL.md` to add one (see `config.yaml` →
 `skills.dirs`); a sample lives in `skills/example-skill/`. See [`AGENTS.md`](./AGENTS.md).
+{% endif %}{% if spec.memory.enabled %}
+## Long-term memory (cross-session)
+
+The agent keeps a small, self-maintained note that persists **across sessions**
+(durable facts, your preferences, decisions), injected into every system prompt.
+It writes it itself with the `memory_append` / `memory_write` tools and reads it
+with `memory_read`. The built-in `file` backend is one human-readable markdown
+note (`.harness/memory.md`, gitignored, **never holds secrets**):
+
+```bash
+{{ project_slug }} memory show     # print the note
+{{ project_slug }} memory clear    # forget everything
+```
+
+It's a few notes the agent curates on purpose — distinct from RAG. Tune or turn
+it off under `memory:` in `config.yaml`, or plug in your own backend (vector DB,
+mem0, …) with `@register_memory` — see [`AGENTS.md`](./AGENTS.md).
 {% endif %}
 ## Layout
 
@@ -145,6 +162,7 @@ src/{{ project_slug }}/
     mock.py                 # offline MockLLM for tests / --mock
 {% if spec.mcp.enabled %}    mcp.py                  # optional MCP tool bridge (stdio + remote)
 {% endif %}{% if spec.skills.enabled %}    skills.py               # standard Agent Skills (SKILL.md discovery + read_skill)
+{% endif %}{% if spec.memory.enabled %}    memory.py               # cross-session long-term memory (@register_memory + file backend)
 {% endif %}  interfaces/
     cli.py                  # `run` (one turn, resumable) + `chat` (multi-turn REPL)
 {% if interfaces.web %}    web.py                  # `serve` — FastAPI SSE chat + live /config panel

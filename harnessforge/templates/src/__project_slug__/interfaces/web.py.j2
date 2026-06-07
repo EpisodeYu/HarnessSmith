@@ -31,7 +31,8 @@ from ..harness.config import (
 )
 from ..harness.budget import BUDGET_CONDITIONS
 from ..harness.context import CONDITIONS, STRATEGIES
-from ..harness.hooks import Hooks
+{% if spec.memory.enabled %}from ..harness.memory import BACKENDS as _MEMORY_BACKENDS
+{% endif %}from ..harness.hooks import Hooks
 from ..harness.llm import ClientRouter, LLMResponse, OpenAIClient, ToolCall
 from ..harness.loop import run as run_loop
 from ..harness.paradigms import PARADIGMS
@@ -169,7 +170,10 @@ def _chat_events(
                     session_id, result.messages, config.sessions.dir,
                     mode=result.mode, title=new_title or None,
                 )
-            q.put(("final", {
+{% if spec.memory.enabled %}            from ..harness.memory import record_turn
+
+            record_turn(config, result.messages)
+{% endif %}            q.put(("final", {
                 "answer": result.answer,
                 "mode": result.mode,
                 "stop_reason": result.stop_reason,
@@ -201,7 +205,10 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
     app = FastAPI(title="{{ display_name }} — web")
     app.state.config = config or load_config()
     app.state.mock = mock
+{% if spec.memory.enabled %}    from ..harness.memory import register_memory_tools
 
+    register_memory_tools(app.state.config)
+{% endif %}
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
         return _INDEX_HTML
@@ -290,7 +297,8 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
             "strategies": list(STRATEGIES),
             "conditions": list(CONDITIONS),
             "budget_conditions": list(BUDGET_CONDITIONS),
-        }
+{% if spec.memory.enabled %}            "memory": list(_MEMORY_BACKENDS),
+{% endif %}        }
 {% if spec.mcp.enabled %}
     @app.get("/mcp/discover")
     async def mcp_discover() -> dict:
@@ -458,7 +466,46 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(str(body.get("content", "")), encoding="utf-8")
         return {"ok": True}
+{% if spec.memory.enabled %}
+    @app.get("/memory")
+    def get_memory() -> dict:
+        """Return the agent's long-term memory note + whether it's read-only. The
+        note is plain markdown you own (the agent maintains it with the memory
+        tools); it never holds secrets (keys stay in .env)."""
+        from ..harness.memory import get_backend
 
+        backend = get_backend(app.state.config)
+        reader = getattr(backend, "read", None) if backend is not None else None
+        content = reader() if reader is not None else (backend.recall() if backend else "")
+        return {"content": content, "read_only": app.state.config.memory.read_only}
+
+    @app.post("/memory")
+    async def set_memory(request: Request):
+        """Overwrite the whole memory note (manual curation). Rejected when memory
+        is configured read-only or the backend has no writable note."""
+        from ..harness.memory import get_backend
+
+        cfg = app.state.config
+        if cfg.memory.read_only:
+            return JSONResponse({"error": "memory is read-only"}, status_code=400)
+        backend = get_backend(cfg)
+        if backend is None or not hasattr(backend, "write"):
+            return JSONResponse(
+                {"error": "memory backend has no writable note"}, status_code=400
+            )
+        backend.write(str((await request.json()).get("content", "")))
+        return {"ok": True}
+
+    @app.delete("/memory")
+    def clear_memory() -> dict:
+        """Forget everything (clear the note). Idempotent."""
+        from ..harness.memory import get_backend
+
+        backend = get_backend(app.state.config)
+        if backend is not None and hasattr(backend, "clear"):
+            backend.clear()
+        return {"ok": True}
+{% endif %}
     return app
 
 

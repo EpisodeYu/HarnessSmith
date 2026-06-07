@@ -80,6 +80,12 @@ def _expand_skill(config, prompt: str) -> str:
         typer.secho(body, fg=typer.colors.YELLOW, err=True)
         return prompt
     return f"{body}\n\n{rest}".strip()
+{% endif %}{% if spec.memory.enabled %}
+def _setup_memory(config) -> None:
+    """Register the configured memory backend's tools so the loop can offer them."""
+    from ..harness.memory import register_memory_tools
+
+    register_memory_tools(config)
 {% endif %}
 
 @app.command()
@@ -129,6 +135,7 @@ def run(
         prompt = typer.prompt("You")
 {% if spec.skills.enabled %}    prompt = _expand_skill(config, prompt)
 {% endif %}{% if spec.mcp.enabled %}    mcp_manager = _start_mcp(config)
+{% endif %}{% if spec.memory.enabled %}    _setup_memory(config)
 {% endif %}    # Resolve the session to resume (or mint a new one) and load its history.
     sessions_cfg = config.sessions
     session_id, history = (
@@ -171,7 +178,10 @@ def run(
         typer.echo(result.answer)  # non-stream, or a budget-stop message
     if sessions_cfg.enabled and session_id is not None:
         session_store.save(session_id, result.messages, sessions_cfg.dir, mode=result.mode)
-    summary = (
+{% if spec.memory.enabled %}    from ..harness.memory import record_turn
+
+    record_turn(config, result.messages)
+{% endif %}    summary = (
         f"[{result.mode}] [{result.stop_reason}] steps={result.steps} "
         f"tokens={result.trace.total_tokens} cost=${result.trace.cost_usd:.4f}"
     )
@@ -231,6 +241,7 @@ def chat(
         session_id, history = session_store.new_id(), []
     history = list(history)
 {% if spec.mcp.enabled %}    mcp_manager = _start_mcp(config)
+{% endif %}{% if spec.memory.enabled %}    _setup_memory(config)
 {% endif %}    router = ClientRouter(config, mock=mock)
     state = {"printed": False}
 
@@ -283,11 +294,17 @@ def chat(
                 fg=typer.colors.BRIGHT_BLACK,
             )
             history = result.messages
-            if sessions_cfg.enabled:
+{% if spec.memory.enabled %}            from ..harness.memory import record_turn
+
+            record_turn(config, history)
+{% endif %}            if sessions_cfg.enabled:
                 session_store.save(
                     session_id, history, sessions_cfg.dir, mode=result.mode
                 )
-    finally:
+{% if spec.memory.enabled %}        from ..harness.memory import end_session
+
+        end_session(config, history)
+{% endif %}    finally:
 {% if spec.mcp.enabled %}        if mcp_manager is not None:
             mcp_manager.close()
 {% else %}        pass
@@ -403,7 +420,49 @@ def info(
     typer.echo(f"  combine: {config.context.combine}  triggers: {config.context.triggers}")
     _section("budget conditions (registered):", list(BUDGET_CONDITIONS), set(config.budget.conditions))
     typer.echo(f"  combine: {config.budget.combine}")
+{% if spec.memory.enabled %}    from ..harness.memory import BACKENDS as MEMORY_BACKENDS
 
+    _section("memory backends (registered):", list(MEMORY_BACKENDS), {config.memory.backend})
+{% endif %}
+
+{% if spec.memory.enabled %}
+@app.command()
+def memory(
+    action: str = typer.Argument(
+        "show", help="show | clear | path — inspect or reset long-term memory."
+    ),
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to config.yaml."
+    ),
+) -> None:
+    """Inspect or reset the agent's long-term memory note.
+
+    ``show`` prints it, ``path`` prints the file location, ``clear`` erases it.
+    Memory is the agent's self-maintained cross-session note — normally it edits
+    it itself with the memory tools; this is the manual escape hatch.
+    """
+    from ..harness.memory import get_backend
+
+    config = load_config(config_path)
+    backend = get_backend(config)
+    if backend is None:
+        typer.secho(
+            f"unknown memory backend {config.memory.backend!r} "
+            "(is its module imported so @register_memory ran?)",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if action == "path":
+        typer.echo(str(getattr(backend, "path", config.memory.path)))
+    elif action == "clear":
+        if hasattr(backend, "clear"):
+            backend.clear()
+        typer.secho("memory cleared.", fg=typer.colors.GREEN)
+    else:  # show (default)
+        reader = getattr(backend, "read", backend.recall)
+        typer.echo(reader() or "(memory is empty)")
+{% endif %}
 
 {% if interfaces.web %}
 
@@ -447,6 +506,7 @@ def serve(
     config = load_config(config_path)
 {% if spec.mcp.enabled %}    # Launched servers live for the process lifetime (uvicorn runs until Ctrl-C).
     _start_mcp(config)
+{% endif %}{% if spec.memory.enabled %}    _setup_memory(config)
 {% endif %}    typer.secho(
         f"Serving on http://{host}:{bind_port}  (open this; Ctrl-C to stop)",
         fg=typer.colors.GREEN,

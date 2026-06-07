@@ -78,6 +78,27 @@ class Skills(BaseModel):
     enabled: bool = False
 
 
+class Memory(BaseModel):
+    """Opt-in cross-session long-term memory (Slice 8B).
+
+    Like :class:`Mcp` / :class:`Skills`, generation-time decides ONLY whether the
+    capability exists: ``enabled`` renders ``harness/memory.py`` (a thin
+    ``@register_memory`` backend registry with a built-in file backend), the
+    memory read/write tools, system-prompt injection, and a ``memory`` block in
+    ``config.yaml``. *Which* backend / where the note lives / how much to inject
+    are runtime knobs in ``config.yaml`` — not spec fields. Disabled leaves the
+    generated repo with zero memory footprint (byte-identical to no-memory).
+
+    Memory is a few self-maintained notes the agent curates on purpose (the agent
+    writes them with the memory tools); it is distinct from RAG (external-corpus
+    retrieval, v1+). No secrets are ever written — keys stay in ``.env``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+
+
 class Observability(BaseModel):
     """Tracing / cost-accounting settings."""
 
@@ -186,6 +207,7 @@ class HarnessSpec(BaseModel):
     interfaces: Interfaces = Field(default_factory=Interfaces)
     mcp: Mcp = Field(default_factory=Mcp)
     skills: Skills = Field(default_factory=Skills)
+    memory: Memory = Field(default_factory=Memory)
     observability: Observability = Field(default_factory=Observability)
     budget: Budget = Field(default_factory=Budget)
 
