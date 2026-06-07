@@ -36,6 +36,16 @@ def test_index_is_served():
     assert "<html" in resp.text.lower()
 
 
+def test_index_has_unsaved_config_guard():
+    """The config panel ships an unsaved-edits guard so a forgotten Save doesn't
+    silently drop a just-entered LLM profile (marker + leave/unload confirms)."""
+    body = _client().get("/").text
+    assert 'id="cfg-unsaved"' in body  # the visible "unsaved" marker
+    assert "cfg_leave_confirm" in body  # confirm when switching away from Config
+    assert "beforeunload" in body  # confirm on refresh/close while dirty
+    assert "if (!dirty) loadConfig()" in body  # don't overwrite edits on tab return
+
+
 def test_chat_streams_tool_call_and_final_over_sse():
     resp = _client().get("/chat", params={"message": "hello"})
     assert resp.status_code == 200

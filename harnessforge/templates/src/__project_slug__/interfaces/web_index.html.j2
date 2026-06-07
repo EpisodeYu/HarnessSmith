@@ -115,6 +115,7 @@
       <div class="flex items-center gap-3 border-t pt-3">
         <button id="cfg-save" class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="cfg_save">Save</button>
         <button id="cfg-reload" class="rounded-lg border px-4 py-2" data-i18n="cfg_reload">Reload</button>
+        <span id="cfg-unsaved" class="hidden text-sm font-medium text-amber-600" data-i18n="cfg_unsaved">unsaved</span>
         <span id="cfg-status" class="text-sm text-slate-500"></span>
       </div>
     </section>
@@ -132,6 +133,9 @@
         no_llm_link: "Go to Config → LLM",
         cfg_intro: "Runtime behavioral config (no secrets). Edits apply in-process.",
         cfg_save: "Save", cfg_reload: "Reload", cfg_saved: "saved", cfg_invalid: "rejected",
+        cfg_unsaved: "unsaved",
+        cfg_leave_confirm: "You have unsaved config changes — they won't apply until you Save. Switch to Chat anyway?",
+        cfg_reload_confirm: "Reload discards your unsaved changes. Continue?",
         subtab_llm: "LLM", subtab_context: "Context", subtab_budget: "Budget",
         subtab_tools: "Tools", subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
         subtab_observability: "Observability",
@@ -174,6 +178,9 @@
         no_llm_link: "前往 配置 → LLM",
         cfg_intro: "运行期行为性配置(无密钥)。修改进程内即时生效。",
         cfg_save: "保存", cfg_reload: "重载", cfg_saved: "已保存", cfg_invalid: "被拒绝",
+        cfg_unsaved: "未保存",
+        cfg_leave_confirm: "有未保存的配置修改 —— 不点保存不会生效。仍要切换到对话?",
+        cfg_reload_confirm: "重载会丢弃未保存的修改,确定继续?",
         subtab_llm: "LLM", subtab_context: "上下文", subtab_budget: "预算",
         subtab_tools: "工具", subtab_prompts: "提示词", subtab_paradigms: "范式",
         subtab_observability: "可观测",
@@ -293,6 +300,10 @@
     const CFG_TABS = ["llm", "context", "budget", "tools", "prompts", "paradigms", "observability"];
     let cfgTab = "llm";
     let cfg = {};
+    // Tracks unsaved edits in the config view. Edits live only in the DOM until
+    // Save (POST /config); this flag drives the "unsaved" marker, the leave/reload
+    // guards, and stops a tab switch back to Config from reloading over the edits.
+    let dirty = false;
     // What's registered in code (GET /registries): the universe the Context +
     // Paradigms dropdowns are built from. A configured name missing here is flagged.
     let reg = { paradigms: [], strategies: [], conditions: [], budget_conditions: [] };
@@ -616,11 +627,22 @@
       return patch;
     }
 
+    // Flip the unsaved marker + highlight the Save button so a forgotten Save is
+    // visible. Programmatic value-setting (renderConfig) never fires input/change,
+    // so this is only ever set true by real user edits.
+    function setDirty(v) {
+      dirty = v;
+      $("cfg-unsaved").classList.toggle("hidden", !v);
+      $("cfg-save").classList.toggle("ring-2", v);
+      $("cfg-save").classList.toggle("ring-amber-400", v);
+    }
+
     async function loadConfig() {
       cfg = await (await fetch("/config")).json();
       try { reg = await (await fetch("/registries")).json(); } catch (e) { /* keep last */ }
       renderConfig();
       gateChat();
+      setDirty(false);
       $("cfg-status").textContent = "";
     }
     $("cfg-add-profile").addEventListener("click", () => {
@@ -675,14 +697,21 @@
       if (resp.ok) { row.querySelector(sel.val).value = ""; status.textContent = t("key_saved"); }
       else { status.textContent = data.error || t("cfg_invalid"); }
     });
-    $("cfg-reload").addEventListener("click", loadConfig);
+    // Mark dirty on any real edit in the config view (delegated; programmatic
+    // value-setting during render doesn't bubble input/change, so no false flags).
+    $("view-config").addEventListener("input", () => setDirty(true));
+    $("view-config").addEventListener("change", () => setDirty(true));
+
+    $("cfg-reload").addEventListener("click", () => {
+      if (!dirty || confirm(t("cfg_reload_confirm"))) loadConfig();
+    });
     $("cfg-save").addEventListener("click", async () => {
       const resp = await fetch("/config", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(collectConfig()),
       });
       const data = await resp.json();
-      if (resp.ok) { cfg = data; renderConfig(); gateChat(); loadParadigms(); $("cfg-status").textContent = t("cfg_saved"); }
+      if (resp.ok) { cfg = data; renderConfig(); gateChat(); loadParadigms(); setDirty(false); $("cfg-status").textContent = t("cfg_saved"); }
       else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });
 
@@ -691,11 +720,24 @@
       $("view-config").classList.toggle("hidden", which !== "config");
       $("tab-chat").className = which === "chat" ? "font-semibold underline" : "text-slate-500";
       $("tab-config").className = which === "config" ? "font-semibold underline" : "text-slate-500";
-      if (which === "config") { showCfg(cfgTab); loadConfig(); }
+      // Don't reload over unsaved edits when coming back to Config — that silent
+      // overwrite was the main way users lost a profile they forgot to Save.
+      if (which === "config") { showCfg(cfgTab); if (!dirty) loadConfig(); }
     }
-    $("tab-chat").addEventListener("click", () => show("chat"));
+    // Leaving Config with unsaved edits: remind that they won't apply until Saved.
+    function leaveConfigOk() {
+      if (!dirty || $("view-config").classList.contains("hidden")) return true;
+      return confirm(t("cfg_leave_confirm"));
+    }
+    $("tab-chat").addEventListener("click", () => { if (leaveConfigOk()) show("chat"); });
     $("tab-config").addEventListener("click", () => show("config"));
     $("no-llm-link").addEventListener("click", () => { show("config"); showCfg("llm"); });
+    // A reload/close drops in-DOM edits entirely — let the browser confirm.
+    window.addEventListener("beforeunload", (e) => {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    });
 
     applyI18n();
     loadConfig();  // populate cfg up front so the chat gate (no-LLM banner) is correct

@@ -75,6 +75,9 @@ framework.
 A thin FastAPI app: a token-by-token streaming (SSE) chat plus a live `/config`
 panel for the runtime behavioral config (prompts, budget, enabled tools,
 context, sampling). Streaming is toggleable; secrets are never shown or editable.
+Panel edits only take effect when you hit **Save** — the panel marks unsaved
+changes and warns before you switch tabs or reload, so a configured LLM profile
+isn't lost by forgetting to save.
 
 ```bash
 uv run {{ project_slug }} serve                 # http://127.0.0.1:8000

@@ -85,6 +85,7 @@
   - **Web 依赖落位** = 方案 A(`web=true` 直接进 `dependencies`,不动冒烟/容器链路);"关掉不含"已三处(pyproject/lock/req)兑现 plan 的真实意图。
   - **`/config` 持久化** = 仅进程内生效,**不回写** `config.yaml`(改判:保护用户带注释的配置文件,避免 dump 丢注释;重启从盘重载,文件 watch 热重载属 v1+)。
   - **条件渲染机制** = `generator.CONDITIONAL_TEMPLATES`(相对模板路径 → `predicate(spec)`),Slice 4/5 直接复用。
+  - **配置面板"未保存"守卫(2026-06-07 UX 细化,Agent 自主)**:面板编辑仅在 DOM、点 Save 才 `POST /config` 生效,用户常忘按 Save 致刚配的 LLM profile 丢失。落地为**未保存提醒**而非自动保存(自动保存会与服务端 Pydantic 校验/重渲染/即时生效心智三处打架,且违反"薄"):脏标记(任一编辑亮"未保存"+高亮 Save)、切走 Chat / 刷新前 `confirm`、切回 Config 时 `!dirty` 才 `loadConfig()`(修根因——原先每次切回都无脑重载覆盖未保存编辑)。纯前端 `web_index.html`,产物 HTML 自带断言(`test_web.py::test_index_has_unsaved_config_guard`)。
 
 ## 5. 本 slice 注意
 
