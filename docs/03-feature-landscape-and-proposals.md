@@ -116,6 +116,7 @@
 ### T2-G · MCP 健康自检 / 状态面板（缺口 #19，backlog 已登记）
 
 - `<pkg> mcp status` / 扩 `doctor` + `/config` 健康视图：probe 每个配置 server 连通性 + 工具计数 + 不可达标红 + 缺 Node 提示。**复用现有 `McpManager.errors`/`discovered`**，几乎是免费的。对齐 Cursor 的 MCP 面板。低风险、中价值。
+- **部分已落地（2026-06-07，人定向 Scope 1）**：`GET /mcp/discover`（复用 `McpManager.discovered`，连通失败按 server 报 `error`）+ Web Tools 标签自动扫描，把已配置 server 的工具直接列出、勾选即入 allowlist（免手写 `<server>__<tool>` YAML），详见 `02-development/04-slice-3-product-web.md §4`。**剩余仍为 v1+**：`<pkg> mcp status`/`doctor` 健康视图、面板内增删/编辑 server（= `/config` 可改 `mcp`，触安全面）、热重连。
 
 ### T2-H · sandbox-aware shell 工具 wrapper（缺口 #11，谨慎）
 

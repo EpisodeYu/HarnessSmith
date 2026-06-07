@@ -154,6 +154,57 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
             "conditions": list(CONDITIONS),
             "budget_conditions": list(BUDGET_CONDITIONS),
         }
+{% if spec.mcp.enabled %}
+    @app.get("/mcp/discover")
+    async def mcp_discover() -> dict:
+        """Connect every configured MCP server and list its tools, so the panel can
+        offer them without hand-writing the ``<server>__<tool>`` allowlist.
+
+        Read-only: it lists what each server exposes (and which names are already
+        allowlisted/enabled); actually enabling a tool still goes through POST
+        /config. Per-server failures are reported in ``error`` (never fatal), and
+        a slow/missing server is skipped under ``connect_timeout_seconds``.
+        """
+        from ..harness.mcp import McpManager
+
+        config = app.state.config
+        if not config.mcp.servers:
+            return {"servers": []}
+        enabled = config.enabled_tool_names()
+        listed = {tool.name for tool in config.tools}
+
+        def _scan() -> tuple[dict, dict]:
+            manager = McpManager(config.mcp)
+            try:
+                manager.start()  # connects all servers (failures isolated into .errors)
+                return (
+                    {
+                        server: [(t.name, t.description or "") for t in tools]
+                        for server, tools in manager.discovered.items()
+                    },
+                    dict(manager.errors),
+                )
+            finally:
+                manager.close()
+
+        discovered, errors = await run_in_threadpool(_scan)
+        servers = []
+        for server in config.mcp.servers:
+            tools = []
+            for name, description in discovered.get(server.name, []):
+                full = f"{server.name}__{name}"
+                tools.append({
+                    "name": full,
+                    "short": name,
+                    "description": description,
+                    "listed": full in listed,
+                    "enabled": full in enabled,
+                })
+            servers.append(
+                {"name": server.name, "error": errors.get(server.name), "tools": tools}
+            )
+        return {"servers": servers}
+{% endif %}
 
     @app.get("/config")
     def get_config() -> dict:

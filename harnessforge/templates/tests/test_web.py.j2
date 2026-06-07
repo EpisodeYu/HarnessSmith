@@ -55,6 +55,49 @@ def test_index_groups_tools_by_source():
     assert "tools_group_custom" in body  # user-registered tools sort to the top
     assert "<details" in body and 'indexOf("__")' in body  # MCP folded by server
     assert "tools_extend_hint" in body  # footnote: register + allowlist in config.yaml
+{% if spec.mcp.enabled %}
+import sys
+from pathlib import Path
+
+_DUMMY = str(Path(__file__).parent / "_mcp_dummy_server.py")
+
+
+def test_mcp_discover_returns_empty_without_servers():
+    """Discovery returns an empty list (no connection attempted) when no MCP
+    servers are configured — the Tools tab's auto-scan is then a no-op."""
+    resp = _client().get("/mcp/discover")
+    assert resp.status_code == 200
+    assert resp.json() == {"servers": []}
+
+
+def test_mcp_discover_lists_real_server_tools():
+    """Against a real stdio server, /mcp/discover lists its full tool set with each
+    tool's allowlist state — so the panel can offer them without hand-edited YAML.
+    Here `echo` is allowlisted+enabled; `add` is discovered but unlisted."""
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "dummy__echo", "enabled": True}],
+        "observability": {"trace": False},
+        "mcp": {"servers": [{"name": "dummy", "command": sys.executable, "args": [_DUMMY]}]},
+    })
+    data = TestClient(create_app(config, mock=True)).get("/mcp/discover").json()
+    servers = {s["name"]: s for s in data["servers"]}
+    assert "dummy" in servers and servers["dummy"]["error"] is None, data
+    tools = {t["short"]: t for t in servers["dummy"]["tools"]}
+    assert {"echo", "add"} <= set(tools)
+    assert tools["echo"]["name"] == "dummy__echo"
+    assert tools["echo"]["listed"] is True and tools["echo"]["enabled"] is True
+    assert tools["add"]["listed"] is False  # discovered but not in the allowlist
+
+
+def test_index_has_mcp_discovery_ui():
+    """The Tools tab ships the scan button + discoverMcp() so a configured
+    server's tools appear without hand-writing the <server>__<tool> allowlist."""
+    body = _client().get("/").text
+    assert "/mcp/discover" in body and "function discoverMcp()" in body
+    assert 'id="cfg-mcp-scan"' in body
+{% endif %}
 
 
 def test_chat_streams_tool_call_and_final_over_sse():

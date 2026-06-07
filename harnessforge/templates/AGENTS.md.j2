@@ -316,6 +316,12 @@ paradigms); everything else is `risk="high"` (mutating; agent-only). A server is
 launched **only when at least one of its tools is enabled**, so the off-by-default
 Desktop Commander stays dormant until you opt in. Secrets (`env` / `auth_env`)
 are referenced by env-var **name** and resolved from `.env` at runtime.
+{% if interfaces.web %}
+You don't have to write the `<server>__<tool>` lines by hand: in the web **Config
+→ Tools** tab, hit **Scan MCP** (it runs on first open too) — each configured
+server's tools are listed under a collapsed group; tick one to add it to the
+allowlist and Save. You still declare the server itself in `config.yaml mcp:`.
+{% endif %}
 
 ```yaml
 mcp:
