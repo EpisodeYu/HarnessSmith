@@ -46,6 +46,16 @@ def test_index_has_unsaved_config_guard():
     assert "if (!dirty) loadConfig()" in body  # don't overwrite edits on tab return
 
 
+def test_index_groups_tools_by_source():
+    """The Tools tab groups the flat allowlist: your tools first, then built-ins,
+    then each MCP server's tools folded into a collapsed group (named by server)."""
+    body = _client().get("/").text
+    assert "function buildTools()" in body
+    assert "BUILTIN_TOOLS" in body and "get_current_time" in body
+    assert "tools_group_custom" in body  # user-registered tools sort to the top
+    assert "<details" in body and 'indexOf("__")' in body  # MCP folded by server
+
+
 def test_chat_streams_tool_call_and_final_over_sse():
     resp = _client().get("/chat", params={"message": "hello"})
     assert resp.status_code == 200

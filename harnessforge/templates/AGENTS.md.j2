@@ -36,6 +36,13 @@ tools:
 A tool is only exposed to the model when it is **enabled in `config.yaml`** — the
 allowlist. Mark dangerous tools (shell, file writes) with `risk="high"` and keep
 them disabled until you explicitly opt in.
+{% if interfaces.web %}
+Once allowlisted it also appears in the web **Config → Tools** tab, listed under
+**Your tools** at the top (the generated built-ins follow; each MCP server's
+tools fold into a collapsed group below). The tab is a toggle view of the
+allowlist — it doesn't auto-discover a tool you registered but haven't added to
+`config.yaml`.
+{% endif %}
 
 ## Swap the model / provider
 

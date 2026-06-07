@@ -86,6 +86,7 @@
   - **`/config` 持久化** = 仅进程内生效,**不回写** `config.yaml`(改判:保护用户带注释的配置文件,避免 dump 丢注释;重启从盘重载,文件 watch 热重载属 v1+)。
   - **条件渲染机制** = `generator.CONDITIONAL_TEMPLATES`(相对模板路径 → `predicate(spec)`),Slice 4/5 直接复用。
   - **配置面板"未保存"守卫(2026-06-07 UX 细化,Agent 自主)**:面板编辑仅在 DOM、点 Save 才 `POST /config` 生效,用户常忘按 Save 致刚配的 LLM profile 丢失。落地为**未保存提醒**而非自动保存(自动保存会与服务端 Pydantic 校验/重渲染/即时生效心智三处打架,且违反"薄"):脏标记(任一编辑亮"未保存"+高亮 Save)、切走 Chat / 刷新前 `confirm`、切回 Config 时 `!dirty` 才 `loadConfig()`(修根因——原先每次切回都无脑重载覆盖未保存编辑)。纯前端 `web_index.html`,产物 HTML 自带断言(`test_web.py::test_index_has_unsaved_config_guard`)。
+  - **Tools 标签分组(2026-06-07 UX 细化,Agent 自主)**:原 `cfg.tools`(config.yaml 的 allowlist)在面板平铺成一长串,MCP 工具(命名 `<server>__<tool>`)与内置混在一起很乱。改为前端按名分组渲染:**"你的工具"(非 `__` 且非内置,置顶)→ 内置工具 → 每个 MCP server 一个默认折叠的 `<details>`(标题显示 server 名 + 启用/总数)**。仅前端展示层重排,`data-i` 仍是 `cfg.tools` 原索引,`collectConfig` 按索引回写不变;内置集合 `BUILTIN_TOOLS`(`get_current_time`/`calculator`/skills 开时 `read_skill`)由 jinja 注入。**用户自定义 tool 现状**:`@registry.tool` 注册 + 在 config.yaml `tools:` allowlist 才会被模型用到并显示在页面(面板是 allowlist 的开关视图,**不**从 registry 自动发现未入 allowlist 的 tool)——已入 allowlist 的自定义 tool 即归入置顶"你的工具"组。产物 HTML 自带断言(`test_web.py::test_index_groups_tools_by_source`);AGENTS.md "Add a tool" 同步说明分组位置。
 
 ## 5. 本 slice 注意
 

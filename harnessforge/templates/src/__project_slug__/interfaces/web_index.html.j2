@@ -166,6 +166,7 @@
         bud_window_ph: "window s (rate)",
         bud_extend_hint: "Add your own: @register_budget_condition in harness/budget.py — it appears here once imported (see AGENTS.md).",
         tools_hint: "Allowlist — only enabled tools are offered to the model.",
+        tools_group_custom: "Your tools", tools_group_builtin: "Built-in tools", tools_group_mcp: "MCP",
         prompts_system: "system", prompts_persona: "persona", prompts_rules: "rules_files (one path per line)",
         paradigms_enabled: "Enabled paradigms", paradigms_default: "default",
         par_extend_hint: "Add your own: @register_paradigm in harness/paradigms/ — it appears here once imported (see AGENTS.md).",
@@ -211,6 +212,7 @@
         bud_window_ph: "窗口秒(速率)",
         bud_extend_hint: "可自定义:在 harness/budget.py 用 @register_budget_condition 注册,import 后即在此出现(见 AGENTS.md)。",
         tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
+        tools_group_custom: "你的工具", tools_group_builtin: "内置工具", tools_group_mcp: "MCP",
         prompts_system: "系统提示", prompts_persona: "人设", prompts_rules: "rule 文件(每行一个路径)",
         paradigms_enabled: "启用的范式", paradigms_default: "默认范式",
         par_extend_hint: "可自定义:在 harness/paradigms/ 用 @register_paradigm 注册,import 后即在此出现(见 AGENTS.md)。",
@@ -551,6 +553,55 @@
       }
     }
 
+    // The in-process tools this product ships in harness/tools.py (+ read_skill
+    // from skills.py when enabled). Any other name without "__" is one YOU
+    // registered — those sort to the very top. Only affects grouping, never
+    // behavior; keep in sync if you rename a built-in.
+    const BUILTIN_TOOLS = new Set(["get_current_time", "calculator"{% if spec.skills.enabled %}, "read_skill"{% endif %}]);
+
+    // Tools is a flat allowlist in config, grouped here for legibility: tools you
+    // registered first, then the built-ins, then each MCP server's tools folded
+    // into a collapsed group (a server can expose many — the noisy part). data-i
+    // stays the tool's index in cfg.tools so collectConfig round-trips by index.
+    function buildTools() {
+      const box = $("cfg-tools");
+      box.innerHTML = "";
+      const custom = [], builtin = [], servers = new Map();
+      (cfg.tools || []).forEach((tool, i) => {
+        const sep = tool.name.indexOf("__");
+        if (sep > 0) {
+          const server = tool.name.slice(0, sep);
+          if (!servers.has(server)) servers.set(server, []);
+          servers.get(server).push({ tool, i, short: tool.name.slice(sep + 2) });
+        } else if (BUILTIN_TOOLS.has(tool.name)) {
+          builtin.push({ tool, i, short: tool.name });
+        } else {
+          custom.push({ tool, i, short: tool.name });
+        }
+      });
+      const row = (e) =>
+        "<label class='flex items-center gap-2 text-sm'><input type='checkbox' class='tool-en' data-i='" + e.i + "' " +
+        (e.tool.enabled ? "checked" : "") + "/> <span class='font-mono'>" + e.short + "</span></label>";
+      const section = (titleKey, items) => {
+        if (!items.length) return;
+        box.insertAdjacentHTML("beforeend",
+          "<p class='text-xs font-medium text-slate-500'>" + t(titleKey) + "</p>" +
+          "<div class='mb-1 space-y-1 pl-1'>" + items.map(row).join("") + "</div>");
+      };
+      section("tools_group_custom", custom);
+      section("tools_group_builtin", builtin);
+      // One collapsed <details> per MCP server (collapsed = the noisy tools stay
+      // out of the way); the summary shows enabled/total at a glance.
+      for (const [server, items] of servers) {
+        const en = items.filter((e) => e.tool.enabled).length;
+        box.insertAdjacentHTML("beforeend",
+          "<details class='rounded border'><summary class='cursor-pointer px-2 py-1 text-sm'>" +
+          "<span class='font-medium'>" + t("tools_group_mcp") + " · " + server + "</span>" +
+          " <span class='text-xs text-slate-500'>(" + en + "/" + items.length + ")</span></summary>" +
+          "<div class='space-y-1 px-2 pb-2 pl-4'>" + items.map(row).join("") + "</div></details>");
+      }
+    }
+
     function renderConfig() {
       const pc = $("cfg-profiles");
       pc.innerHTML = "";
@@ -558,14 +609,7 @@
       buildRoles();
       buildContext();
       buildBudget();
-      // tools
-      const tc = $("cfg-tools");
-      tc.innerHTML = "";
-      (cfg.tools || []).forEach((tool, i) => {
-        tc.insertAdjacentHTML("beforeend",
-          "<label class='flex items-center gap-2 text-sm'><input type='checkbox' class='tool-en' data-i='" + i +
-          "' " + (tool.enabled ? "checked" : "") + "/> <span class='font-mono'>" + tool.name + "</span></label>");
-      });
+      buildTools();
       // prompts
       const pr = cfg.prompts || {};
       $("cfg-p-system").value = pr.system || "";
