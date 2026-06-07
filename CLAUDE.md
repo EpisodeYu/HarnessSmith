@@ -97,13 +97,14 @@
 - **plan**:读相关 slice 文档顶部"交付物";复述理解 + 实现计划(≤ 10 行);列会改的文件、新增测试、所需 `.env` key 名;命中 §6 就在 plan 阶段先停。
 - **implement**:先用 Read/Grep/SemanticSearch 看现有代码沿用风格;小步走能 commit 就 commit;不碰无关代码。
 - **self-verify**:跑 §5.1(大改动加 §5.2);自查 §1–§4 没违反;fail 先修不要假装看不见。
-- **handoff**:**先按 §9 把受影响文档更新到与实现一致**(门禁勾选、字段 / 行为描述、决策点结论);再按 `docs/02-development/00-overview.md §完成报告模板` 输出报告;Conventional Commits 提交。
+- **handoff**:**先按 §9 把受影响文档更新到与实现一致**(门禁勾选、字段 / 行为描述、决策点结论);再按 `docs/02-development/00-overview.md §完成报告模板` 输出报告;**改动构成一个完整功能且 §5.1 门禁全绿后,直接执行 commit(默认行为,无需先问"要不要提交")**,按 Conventional Commits。
 
 ## 8. 提交与分支
 
 - **Conventional Commits**:`feat: / fix: / refactor: / docs: / chore: / test: / perf: / build: / ci:`。
 - 一个 commit 一件事,不捎带无关改动。
-- `main` **不再受保护**:本片(§5.1)门禁全绿后,Agent **可直接 commit 并 push `main`**,无需 feature branch / PR。仍 **不 `--force` push、不跳 pre-commit hook**(除非人明确允许);测试未绿不得推 `main`。需要走 PR 时人会显式要求。
+- **完整功能 + 测试完毕 = 直接 commit(默认行为,不必先问人)**:当本次改动构成一个完整功能(`feat` / `fix` 等)且 §5.1 门禁全绿后,**直接执行 commit**,不要停下来征求"要不要提交"。多个独立功能各自单独 commit(承接"一个 commit 一件事")。纯文档 / 注释 / 重命名等小改动同理可直接提交。
+- `main` **不再受保护**:门禁全绿后,Agent **可直接 commit 并 push `main`**,无需 feature branch / PR。仍 **不 `--force` push、不跳 pre-commit hook**(除非人明确允许);测试未绿不得推 `main`。需要走 PR 时人会显式要求。
 
 ## 9. 文档维护
 
