@@ -532,3 +532,89 @@ def test_cli_info_lists_registered_and_flags_unregistered(tmp_path):
     assert "truncate" in result.output and "summarize" in result.output
     assert "max_tokens" in result.output
     assert "ghost" in result.output  # enabled but not registered -> flagged
+
+
+def _write_config(tmp_path, cfg_dict):
+    import yaml
+
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(cfg_dict), encoding="utf-8")
+    return cfg_file
+
+
+def _cli_text(result) -> str:
+    """All captured text (stdout + stderr), across Click versions that separate or
+    mix the two streams."""
+    text = result.output or ""
+    try:
+        if result.stderr:
+            text += result.stderr
+    except ValueError:  # older Click mixes stderr into output already
+        pass
+    return text
+
+
+def test_cli_run_without_llm_is_a_clean_error_not_a_traceback(tmp_path):
+    """`run` (non-mock) with no LLM profile fails fast with an actionable hint."""
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    cfg = _config(tmp_path).model_dump(mode="json")
+    cfg["llms"] = []
+    cfg["roles"] = {}
+    cfg_file = _write_config(tmp_path, cfg)
+
+    result = CliRunner().invoke(app, ["run", "--config", str(cfg_file), "hi"])
+    text = _cli_text(result)
+    assert result.exit_code == 2
+    assert "Traceback" not in text
+    assert "llms:" in text  # points at the fix
+
+
+def test_cli_test_llm_preflight_reports_missing_key_without_network(tmp_path, monkeypatch):
+    """`test-llm` fails fast (no network) when the api_key_env is unset."""
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    monkeypatch.delenv("HARNESS_UNSET_KEY_FOR_TEST", raising=False)
+    cfg = _config(tmp_path).model_dump(mode="json")
+    cfg["llms"] = [{"name": "default", "model": "m", "api_key_env": "HARNESS_UNSET_KEY_FOR_TEST"}]
+    cfg["roles"] = {"generation": "default"}
+    cfg_file = _write_config(tmp_path, cfg)
+
+    result = CliRunner().invoke(app, ["test-llm", "--config", str(cfg_file)])
+    assert result.exit_code == 1
+    assert "HARNESS_UNSET_KEY_FOR_TEST" in _cli_text(result)
+
+
+def test_cli_test_llm_requires_a_model(tmp_path, monkeypatch):
+    """`test-llm` reports an empty model up front, even with a key present."""
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-irrelevant")
+    cfg = _config(tmp_path).model_dump(mode="json")
+    cfg["llms"] = [{"name": "default", "model": ""}]
+    cfg["roles"] = {"generation": "default"}
+    cfg_file = _write_config(tmp_path, cfg)
+
+    result = CliRunner().invoke(app, ["test-llm", "--config", str(cfg_file)])
+    assert result.exit_code == 1
+    assert "model" in _cli_text(result).lower()
+
+
+def test_cli_test_llm_unknown_profile_is_a_clean_error(tmp_path):
+    """`test-llm --profile <missing>` fails cleanly with exit code 2."""
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    cfg_file = _write_config(tmp_path, _config(tmp_path).model_dump(mode="json"))
+    result = CliRunner().invoke(
+        app, ["test-llm", "--config", str(cfg_file), "--profile", "nope"]
+    )
+    assert result.exit_code == 2
+    assert "nope" in _cli_text(result)

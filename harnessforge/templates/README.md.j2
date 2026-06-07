@@ -28,6 +28,14 @@ committed (the web panel's LLM tab has the same "Save to .env" field):
 uv run {{ project_slug }} set-key OPENAI_API_KEY
 ```
 
+Check the connection before chatting — a one-shot probe of your configured
+endpoint (the CLI twin of the web LLM tab's "Test" button):
+
+```bash
+uv run {{ project_slug }} test-llm            # tests the generation role
+uv run {{ project_slug }} test-llm --profile default
+```
+
 Prefer pip? A `requirements.txt` is provided as a fallback:
 
 ```bash
