@@ -1,0 +1,148 @@
+"""Per-run budget guardrails: a thin name->condition registry.
+
+Same shape as the tool / paradigm / context registries — a written-out dispatch
+over a fixed set of registered functions, **not** an engine. A *budget condition*
+answers "should we stop now?" from the live :class:`BudgetTracker` and the
+threshold / window configured for it in ``config.yaml``. Built-ins:
+
+- ``max_steps``   — tool-call rounds taken this run.
+- ``max_seconds`` — wall-clock since the run started (the time axis itself, so a
+  ``window_seconds`` on it is ignored).
+- ``max_tokens``  — prompt + completion tokens this run.
+- ``max_cost``    — accumulated cost (needs per-1M prices on the LLM profile).
+
+``config.yaml``'s ``budget.conditions`` maps a registered condition name to its
+threshold; ``budget.combine`` ("or"/"and") says whether ANY or ALL must fire
+(``or`` is the safe guardrail default — stop at the first limit). Each condition
+may carry ``window_seconds`` to become a RATE: only the amount accumulated within
+the current *tumbling* window (reset every ``window_seconds``) counts toward the
+threshold. Without a window the threshold is cumulative over the run.
+
+Scope is per-run (the tracker is created fresh each turn). Persistent day/week/
+month quotas are a v1+ add-on. Add your own condition with
+``@register_budget_condition`` and reference it by name in ``config.yaml`` — it
+reads the same tracker (``step`` / ``elapsed()`` / ``total_tokens`` / ``cost_usd``
+and ``amount()`` for windowing). Empty ``conditions`` = no budget.
+"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+
+from .config import BudgetConfig
+
+# A condition: given the live tracker, its configured threshold, and an optional
+# window (seconds), return True to stop the run.
+Condition = Callable[["BudgetTracker", float, "float | None"], bool]
+
+BUDGET_CONDITIONS: dict[str, Condition] = {}
+
+
+def register_budget_condition(name: str) -> Callable[[Condition], Condition]:
+    """Register a budget condition under ``name`` (referenced in `conditions`)."""
+
+    def decorator(fn: Condition) -> Condition:
+        BUDGET_CONDITIONS[name] = fn
+        return fn
+
+    return decorator
+
+
+@dataclass
+class BudgetTracker:
+    """Live per-run telemetry the conditions read, plus tumbling-window bookkeeping.
+
+    The loop creates one tracker per run, calls :meth:`update` each step with the
+    current totals, then :meth:`check` to see whether the budget stops the run.
+    """
+
+    cfg: BudgetConfig
+    started: float = field(default_factory=time.monotonic)
+    step: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    # condition name -> (window_start_monotonic, cumulative value at that start)
+    _windows: dict[str, tuple[float, float]] = field(default_factory=dict, repr=False)
+
+    def update(self, *, step: int, total_tokens: int, cost_usd: float) -> None:
+        self.step = step
+        self.total_tokens = total_tokens
+        self.cost_usd = cost_usd
+
+    def elapsed(self) -> float:
+        return time.monotonic() - self.started
+
+    def amount(self, name: str, current: float, window: float | None) -> float:
+        """Value counted toward ``name``'s threshold: cumulative, or within window.
+
+        With ``window`` set, this returns only what accumulated since the current
+        tumbling window started (the window rolls every ``window`` seconds,
+        anchored at run start). Without a window it's the cumulative ``current``.
+        """
+        if window is None:
+            return current
+        now = time.monotonic()
+        start, baseline = self._windows.get(name, (self.started, 0.0))
+        if now - start >= window:  # window expired -> start a fresh one at `now`
+            start, baseline = now, current
+        self._windows[name] = (start, baseline)
+        return current - baseline
+
+    def check(self) -> tuple[str, str] | None:
+        """Return ``(stop_reason, message)`` if the budget fires now, else ``None``.
+
+        Conditions are combined by ``cfg.combine``: ``or`` stops as soon as one
+        fires; ``and`` only when every configured (and registered) condition does.
+        Unknown condition names — a typo, or a custom one whose module wasn't
+        imported — are skipped.
+        """
+        fired: list[str] = []
+        evaluated = 0
+        for name, cond in self.cfg.conditions.items():
+            fn = BUDGET_CONDITIONS.get(name)
+            if fn is None:
+                continue
+            evaluated += 1
+            if fn(self, cond.threshold, cond.window_seconds):
+                fired.append(name)
+        if not fired:
+            return None
+        if self.cfg.combine == "and" and len(fired) < evaluated:
+            return None
+        reason = fired[0] if self.cfg.combine == "or" else "+".join(fired)
+        return reason, _stop_message(self.cfg, fired)
+
+
+def _stop_message(cfg: BudgetConfig, fired: list[str]) -> str:
+    parts: list[str] = []
+    for name in fired:
+        cond = cfg.conditions[name]
+        if cond.window_seconds is not None:
+            parts.append(f"{name} >= {cond.threshold} / {cond.window_seconds}s")
+        else:
+            parts.append(f"{name} >= {cond.threshold}")
+    joined = (" and " if cfg.combine == "and" else " / ").join(parts)
+    return f"Stopped: budget reached before a final answer ({joined})."
+
+
+@register_budget_condition("max_steps")
+def _cond_max_steps(tracker: BudgetTracker, threshold: float, window: float | None) -> bool:
+    return tracker.amount("max_steps", tracker.step, window) >= threshold
+
+
+@register_budget_condition("max_seconds")
+def _cond_max_seconds(tracker: BudgetTracker, threshold: float, window: float | None) -> bool:
+    # Time is the axis itself, so a window on it is meaningless — ignore it.
+    return tracker.elapsed() >= threshold
+
+
+@register_budget_condition("max_tokens")
+def _cond_max_tokens(tracker: BudgetTracker, threshold: float, window: float | None) -> bool:
+    return tracker.amount("max_tokens", tracker.total_tokens, window) >= threshold
+
+
+@register_budget_condition("max_cost")
+def _cond_max_cost(tracker: BudgetTracker, threshold: float, window: float | None) -> bool:
+    return tracker.amount("max_cost", tracker.cost_usd, window) >= threshold

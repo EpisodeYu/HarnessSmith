@@ -100,7 +100,7 @@ _BAKED_DEFAULTS: dict = {
         {"name": "get_current_time", "enabled": True},
         {"name": "calculator", "enabled": True},
     ],
-    "budget": {"max_steps": 8},
+    "budget": {"conditions": {"max_steps": 8}},
 }
 
 

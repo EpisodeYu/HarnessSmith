@@ -144,32 +144,124 @@ class _AlwaysToolLLM:
 
 
 def test_budget_stop_on_max_steps(tmp_path):
-    config = _config(tmp_path, budget={"max_steps": 2})
+    config = _config(tmp_path, budget={"conditions": {"max_steps": 2}})
     result = run("x", client=_AlwaysToolLLM(), config=config)
     assert result.stop_reason == "max_steps"
     assert result.steps == 2
 
 
 def test_budget_stop_on_max_seconds(tmp_path):
-    config = _config(tmp_path, budget={"max_seconds": 0.01})
+    config = _config(tmp_path, budget={"conditions": {"max_seconds": 0.01}})
     result = run("x", client=_AlwaysToolLLM(sleep=0.02), config=config)
     assert result.stop_reason == "max_seconds"
 
 
 def test_budget_stop_on_max_tokens(tmp_path):
-    config = _config(tmp_path, budget={"max_tokens": 1500})
+    config = _config(tmp_path, budget={"conditions": {"max_tokens": 1500}})
     result = run("x", client=_AlwaysToolLLM(), config=config)
     assert result.stop_reason == "max_tokens"
     assert result.trace.total_tokens >= 1500
 
 
 def test_budget_stop_on_max_cost(tmp_path):
-    config = _config(tmp_path, budget={"max_cost_usd": 0.5})
+    config = _config(tmp_path, budget={"conditions": {"max_cost": 0.5}})
     config.llms[0].input_cost_per_million = 1000.0
     config.llms[0].output_cost_per_million = 1000.0
     result = run("x", client=_AlwaysToolLLM(), config=config)
     assert result.stop_reason == "max_cost"
     assert result.trace.cost_usd >= 0.5
+
+
+def test_budget_scalar_shorthand_equals_threshold(tmp_path):
+    """A bare number is coerced to {threshold: N} (the terse common case)."""
+    config = _config(tmp_path, budget={"conditions": {"max_steps": 3}})
+    assert config.budget.conditions["max_steps"].threshold == 3
+    assert config.budget.conditions["max_steps"].window_seconds is None
+
+
+def test_budget_combine_or_stops_at_first(tmp_path):
+    # or (the default): the reachable limit stops the run, the other is moot.
+    config = _config(
+        tmp_path,
+        budget={"combine": "or", "conditions": {"max_steps": 2, "max_tokens": 10_000_000}},
+    )
+    result = run("x", client=_AlwaysToolLLM(), config=config)
+    assert result.stop_reason == "max_steps"
+
+
+def test_budget_combine_and_requires_all(tmp_path):
+    # and: one exceeded condition must NOT stop — max_tokens fires immediately but
+    # max_steps never does, so the run finishes on its own.
+    config = _config(
+        tmp_path,
+        budget={"combine": "and", "conditions": {"max_steps": 999, "max_tokens": 1}},
+    )
+    client = MockLLM(script=[ScriptedCall("get_current_time", {}), "done"])
+    result = run("x", client=client, config=config)
+    assert result.stop_reason == "final"
+    assert result.answer == "done"
+
+
+def test_budget_combine_and_stops_when_all_fire(tmp_path):
+    config = _config(
+        tmp_path,
+        budget={"combine": "and", "conditions": {"max_steps": 2, "max_tokens": 1500}},
+    )
+    result = run("x", client=_AlwaysToolLLM(), config=config)
+    assert "max_steps" in result.stop_reason and "max_tokens" in result.stop_reason
+
+
+def test_unknown_budget_condition_is_skipped(tmp_path):
+    # A typo / not-imported condition name is ignored, not fatal.
+    config = _config(
+        tmp_path, budget={"conditions": {"max_steps": 2, "bogus": 1}}
+    )
+    result = run("x", client=_AlwaysToolLLM(), config=config)
+    assert result.stop_reason == "max_steps"
+
+
+def test_budget_cumulative_without_window():
+    from {{ project_slug }}.harness.budget import BudgetTracker
+    from {{ project_slug }}.harness.config import BudgetConfig
+
+    tracker = BudgetTracker(BudgetConfig())
+    assert tracker.amount("m", 1234, None) == 1234  # no window -> running total
+
+
+def test_budget_tumbling_window_resets_each_period():
+    import time
+
+    from {{ project_slug }}.harness.budget import BudgetTracker
+    from {{ project_slug }}.harness.config import BudgetConfig
+
+    tracker = BudgetTracker(BudgetConfig())
+    # Pretend the run started long ago so the first window has already expired.
+    tracker.started = time.monotonic() - 100.0
+    # window=10s expired -> a fresh window anchors now with baseline=current, so
+    # the in-window amount resets to 0 even though cumulative is 500...
+    assert tracker.amount("max_tokens", 500, window=10.0) == 0.0
+    # ...and subsequent growth within the same window counts from that baseline.
+    assert tracker.amount("max_tokens", 800, window=10.0) == 300.0
+
+
+def test_custom_budget_condition_registers_and_stops(tmp_path):
+    """Add a budget condition like a tool: a function + @register_budget_condition,
+    then reference its name in config.budget.conditions. No core file is edited."""
+    from {{ project_slug }}.harness.budget import (
+        BUDGET_CONDITIONS,
+        register_budget_condition,
+    )
+
+    @register_budget_condition("max_my_steps")
+    def _max_my_steps(tracker, threshold, window):
+        return tracker.step >= threshold
+
+    try:
+        config = _config(tmp_path, budget={"conditions": {"max_my_steps": 1}})
+        result = run("x", client=_AlwaysToolLLM(), config=config)
+        assert result.stop_reason == "max_my_steps"
+    finally:
+        BUDGET_CONDITIONS.pop("max_my_steps", None)
 
 
 def test_trace_records_tokens_and_cost(tmp_path):

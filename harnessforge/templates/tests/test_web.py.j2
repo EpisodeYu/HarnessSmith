@@ -21,7 +21,7 @@ def _config():
             "prompts": {"system": "You are a test agent."},
             "tools": [{"name": "get_current_time", "enabled": True}],
             "observability": {"trace": False},
-            "budget": {"max_steps": 4},
+            "budget": {"conditions": {"max_steps": 4}},
         }
     )
 
@@ -66,6 +66,9 @@ def test_registries_lists_registered_extensions():
     assert "agent" in data["paradigms"]
     assert {"truncate", "summarize", "none"} <= set(data["strategies"])
     assert {"max_tokens", "max_turns"} <= set(data["conditions"])
+    assert {"max_steps", "max_seconds", "max_tokens", "max_cost"} <= set(
+        data["budget_conditions"]
+    )
 
 
 def test_config_get_exposes_names_not_secrets():
@@ -87,9 +90,29 @@ def test_config_post_updates_runtime_config():
 
 
 def test_config_post_rejects_invalid_value():
-    resp = _client().post("/config", json={"budget": {"max_steps": -1}})
+    resp = _client().post(
+        "/config", json={"budget": {"conditions": {"max_steps": -1}}}
+    )
     assert resp.status_code == 400
     assert "error" in resp.json()
+
+
+def test_config_post_updates_budget_conditions():
+    client = _client()
+    resp = client.post(
+        "/config",
+        json={
+            "budget": {
+                "combine": "and",
+                "conditions": {"max_tokens": {"threshold": 5000, "window_seconds": 60}},
+            }
+        },
+    )
+    assert resp.status_code == 200
+    bud = resp.json()["budget"]
+    assert bud["combine"] == "and"
+    assert bud["conditions"]["max_tokens"]["threshold"] == 5000
+    assert bud["conditions"]["max_tokens"]["window_seconds"] == 60
 
 
 def test_config_post_ignores_structural_and_secret_keys():

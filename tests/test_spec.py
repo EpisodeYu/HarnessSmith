@@ -21,7 +21,7 @@ def test_example_spec_is_valid():
     assert spec.roles == {"generation": "default"}
     assert spec.interfaces.cli is True
     assert spec.prompts.system == "You are a helpful assistant."
-    assert spec.budget.max_steps == 8
+    assert spec.budget.conditions["max_steps"].threshold == 8
 
 
 def test_defaults_fill_in_minimal_spec():
@@ -30,7 +30,7 @@ def test_defaults_fill_in_minimal_spec():
     assert spec.interfaces.cli is True
     assert spec.observability.trace_dir == "traces"
     assert spec.prompts.system is None and spec.prompts.persona is None
-    assert spec.budget.max_steps is None
+    assert spec.budget.conditions == {} and spec.budget.combine == "or"
     assert spec.mcp.enabled is False  # MCP capability is opt-in (Slice 4)
     assert spec.paradigms == ["agent"]  # only the agent loop by default (Slice 5)
     assert spec.context is None and spec.rag is None and spec.secrets is None
@@ -93,10 +93,48 @@ def test_mcp_unknown_field_is_rejected():
         HarnessSpec.model_validate({"mcp": {"enabled": True, "servers": []}})
 
 
-@pytest.mark.parametrize("field", ["max_steps", "max_seconds", "max_cost_usd"])
-def test_non_positive_budget_is_rejected(field):
+@pytest.mark.parametrize("name", ["max_steps", "max_seconds", "max_cost"])
+def test_non_positive_budget_threshold_is_rejected(name):
     with pytest.raises(ValidationError):
-        HarnessSpec.model_validate({"budget": {field: 0}})
+        HarnessSpec.model_validate({"budget": {"conditions": {name: 0}}})
+
+
+def test_budget_scalar_is_coerced_to_threshold():
+    spec = HarnessSpec.model_validate({"budget": {"conditions": {"max_steps": 8}}})
+    cond = spec.budget.conditions["max_steps"]
+    assert cond.threshold == 8 and cond.window_seconds is None
+
+
+def test_budget_window_makes_a_rate():
+    spec = HarnessSpec.model_validate(
+        {"budget": {"conditions": {"max_tokens": {"threshold": 50000, "window_seconds": 60}}}}
+    )
+    cond = spec.budget.conditions["max_tokens"]
+    assert cond.threshold == 50000 and cond.window_seconds == 60
+
+
+def test_budget_combine_default_and_override():
+    assert HarnessSpec().budget.combine == "or"
+    assert HarnessSpec.model_validate({"budget": {"combine": "and"}}).budget.combine == "and"
+
+
+def test_budget_invalid_combine_is_rejected():
+    with pytest.raises(ValidationError):
+        HarnessSpec.model_validate({"budget": {"combine": "xor"}})
+
+
+def test_budget_non_positive_window_is_rejected():
+    with pytest.raises(ValidationError):
+        HarnessSpec.model_validate(
+            {"budget": {"conditions": {"max_tokens": {"threshold": 100, "window_seconds": 0}}}}
+        )
+
+
+def test_budget_condition_unknown_field_is_rejected():
+    with pytest.raises(ValidationError):
+        HarnessSpec.model_validate(
+            {"budget": {"conditions": {"max_steps": {"threshold": 1, "bogus": 2}}}}
+        )
 
 
 def test_unknown_top_level_field_is_rejected():

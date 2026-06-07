@@ -29,7 +29,9 @@ from ..trace import Trace
 class RunResult:
     answer: str
     steps: int
-    # "final" | "max_steps" | "max_seconds" | "max_tokens" | "max_cost"
+    # "final", or a fired budget condition name from harness/budget.py (e.g.
+    # "max_steps" / "max_tokens", or a combined "max_tokens+max_cost" under
+    # combine: and).
     stop_reason: str
     trace: Trace
     mode: str = "agent"  # which paradigm produced this result
@@ -98,10 +100,6 @@ def run_tool(registry: Registry, call: ToolCall, hooks: Hooks, trace: Trace) -> 
     return result
 
 
-def limit_message(kind: str, limit: object) -> str:
-    return f"Stopped: {kind} budget ({limit}) reached before a final answer."
-
-
 # Importing each built-in registers it. ``agent`` is always present (the
 # default); the others appear only when selected in spec.paradigms. Kept at the
 # bottom so the names above are defined before registration runs.
@@ -117,5 +115,4 @@ __all__ = [
     "get_paradigm",
     "assistant_message",
     "run_tool",
-    "limit_message",
 ]

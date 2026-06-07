@@ -71,11 +71,17 @@
         <p class="text-xs text-gray-500" data-i18n="ctx_extend_hint">Define your own with @register_strategy / @register_condition in harness/context.py — they appear here once imported. See AGENTS.md.</p>
       </div>
 
-      <div data-cfg="budget" class="hidden flex flex-wrap gap-4">
-        <label class="text-sm">max_steps<input id="cfg-b-steps" type="number" min="1" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
-        <label class="text-sm">max_seconds<input id="cfg-b-seconds" type="number" min="0" step="0.1" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
-        <label class="text-sm">max_tokens<input id="cfg-b-tokens" type="number" min="1" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
-        <label class="text-sm">max_cost_usd<input id="cfg-b-cost" type="number" min="0" step="0.01" class="mt-1 block w-32 rounded-lg border px-3 py-2" /></label>
+      <div data-cfg="budget" class="hidden space-y-3">
+        <p class="text-xs text-gray-500" data-i18n="bud_hint">Stop a run when its conditions fire.</p>
+        <label class="block text-sm"><span data-i18n="bud_combine_label">combine</span>
+          <select id="cfg-bud-combine" class="mt-1 block rounded-lg border px-3 py-2">
+            <option value="or">or</option><option value="and">and</option>
+          </select></label>
+        <div>
+          <p class="text-sm" data-i18n="bud_conditions_label">Conditions (threshold; optional window = rate)</p>
+          <div id="cfg-bud-conditions" class="mt-1 space-y-2"></div>
+        </div>
+        <p class="text-xs text-gray-500" data-i18n="bud_extend_hint">Define your own with @register_budget_condition in harness/budget.py — they appear here once imported. See AGENTS.md.</p>
       </div>
 
       <div data-cfg="tools" class="hidden space-y-2">
@@ -150,6 +156,11 @@
         ctx_extend_hint: "Add your own: @register_strategy / @register_condition in harness/context.py — they appear here once imported (see AGENTS.md).",
         cfg_unregistered: "not registered in code — import its module?",
         ctx_hint: "Compact the history when a trigger fires (combine: or = any, and = all), using the chosen strategy.",
+        bud_hint: "Stop a run when its conditions fire (combine: or = any, and = all). Blank threshold = off; add a window to make it a rate.",
+        bud_combine_label: "combine (or/and)",
+        bud_conditions_label: "Conditions (threshold; optional window seconds = rate)",
+        bud_window_ph: "window s (rate)",
+        bud_extend_hint: "Add your own: @register_budget_condition in harness/budget.py — it appears here once imported (see AGENTS.md).",
         tools_hint: "Allowlist — only enabled tools are offered to the model.",
         prompts_system: "system", prompts_persona: "persona", prompts_rules: "rules_files (one path per line)",
         paradigms_enabled: "Enabled paradigms", paradigms_default: "default",
@@ -187,6 +198,11 @@
         ctx_extend_hint: "可自定义:在 harness/context.py 用 @register_strategy / @register_condition 注册,import 后即在此出现(见 AGENTS.md)。",
         cfg_unregistered: "代码中未注册 —— 是否忘了 import 其模块?",
         ctx_hint: "命中触发条件时按所选策略压缩历史(组合方式:or=任一命中,and=全部命中)。",
+        bud_hint: "命中条件即停止本轮(组合方式:or=任一,and=全部)。阈值留空=不启用;填窗口秒数即变为速率。",
+        bud_combine_label: "组合方式 (or/and)",
+        bud_conditions_label: "条件(阈值;可选窗口秒数=速率)",
+        bud_window_ph: "窗口秒(速率)",
+        bud_extend_hint: "可自定义:在 harness/budget.py 用 @register_budget_condition 注册,import 后即在此出现(见 AGENTS.md)。",
         tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
         prompts_system: "系统提示", prompts_persona: "人设", prompts_rules: "rule 文件(每行一个路径)",
         paradigms_enabled: "启用的范式", paradigms_default: "默认范式",
@@ -279,7 +295,7 @@
     let cfg = {};
     // What's registered in code (GET /registries): the universe the Context +
     // Paradigms dropdowns are built from. A configured name missing here is flagged.
-    let reg = { paradigms: [], strategies: [], conditions: [] };
+    let reg = { paradigms: [], strategies: [], conditions: [], budget_conditions: [] };
     const UNREG = " \u26a0";  // appended to a name selected in config but not registered
 
     function buildCfgTabs() {
@@ -447,6 +463,41 @@
       });
     }
 
+    // Build the Budget tab from the registries (same shape as Context): a combine
+    // selector plus one row per registered budget condition (built-ins + anything
+    // you @register and import), each with a threshold and an optional window
+    // (seconds) that turns it into a rate. A configured-but-unregistered name is
+    // still shown, flagged, so it round-trips instead of vanishing.
+    function buildBudget() {
+      const bud = cfg.budget || {};
+      $("cfg-bud-combine").value = bud.combine || "or";
+      const conds = bud.conditions || {};
+      const names = reg.budget_conditions.slice();
+      Object.keys(conds).forEach((n) => { if (!names.includes(n)) names.push(n); });
+      const box = $("cfg-bud-conditions"); box.innerHTML = "";
+      names.forEach((name) => {
+        const ok = reg.budget_conditions.includes(name);
+        const cur = conds[name] || {};
+        const row = document.createElement("div");
+        row.className = "flex items-center gap-2 text-sm";
+        const span = document.createElement("span");
+        span.className = "w-44 font-mono"; span.textContent = name + (ok ? "" : UNREG);
+        if (!ok) span.title = t("cfg_unregistered");
+        const thr = document.createElement("input");
+        thr.type = "number"; thr.min = "0"; thr.step = "any"; thr.placeholder = "\u2014";
+        thr.className = "cfg-bud-threshold w-32 rounded border px-2 py-1";
+        thr.dataset.cond = name;
+        thr.value = cur.threshold ?? "";
+        const wnd = document.createElement("input");
+        wnd.type = "number"; wnd.min = "0"; wnd.step = "any"; wnd.placeholder = t("bud_window_ph");
+        wnd.className = "cfg-bud-window w-32 rounded border px-2 py-1";
+        wnd.dataset.cond = name;
+        wnd.value = cur.window_seconds ?? "";
+        row.appendChild(span); row.appendChild(thr); row.appendChild(wnd);
+        box.appendChild(row);
+      });
+    }
+
     // The default dropdown only offers currently-checked paradigms.
     function parDefaultOptions() {
       const sel = $("cfg-par-default");
@@ -495,12 +546,7 @@
       (cfg.llms || []).forEach((p) => pc.appendChild(profileCard(p)));
       buildRoles();
       buildContext();
-      // budget
-      const b = cfg.budget || {};
-      $("cfg-b-steps").value = b.max_steps ?? "";
-      $("cfg-b-seconds").value = b.max_seconds ?? "";
-      $("cfg-b-tokens").value = b.max_tokens ?? "";
-      $("cfg-b-cost").value = b.max_cost_usd ?? "";
+      buildBudget();
       // tools
       const tc = $("cfg-tools");
       tc.innerHTML = "";
@@ -541,10 +587,16 @@
         const v = numOrNull(el.value); if (v != null) triggers[el.dataset.cond] = v;
       });
       patch.context.triggers = triggers;
-      patch.budget = {
-        max_steps: numOrNull($("cfg-b-steps").value), max_seconds: numOrNull($("cfg-b-seconds").value),
-        max_tokens: numOrNull($("cfg-b-tokens").value), max_cost_usd: numOrNull($("cfg-b-cost").value),
-      };
+      const budConditions = {};
+      document.querySelectorAll("#cfg-bud-conditions .cfg-bud-threshold").forEach((el) => {
+        const v = numOrNull(el.value);
+        if (v == null) return;  // blank threshold = condition off
+        const name = el.dataset.cond;
+        const wEl = document.querySelector("#cfg-bud-conditions .cfg-bud-window[data-cond='" + name + "']");
+        const w = wEl ? numOrNull(wEl.value) : null;
+        budConditions[name] = w != null ? { threshold: v, window_seconds: w } : { threshold: v };
+      });
+      patch.budget = { combine: $("cfg-bud-combine").value, conditions: budConditions };
       patch.tools = (cfg.tools || []).map((tool, i) => {
         const cb = document.querySelector(".tool-en[data-i='" + i + "']");
         return { name: tool.name, enabled: cb ? cb.checked : tool.enabled };

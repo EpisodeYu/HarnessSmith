@@ -184,7 +184,8 @@ def test_config_yaml_renders_from_spec_without_secrets(tmp_path, preset_spec):
     assert "project_slug: coding_assistant" in config
     assert "api_key_env: OPENAI_API_KEY" in config  # env NAME only
     assert "get_current_time" in config and "calculator" in config
-    assert "max_steps: 8" in config
+    assert "combine: or" in config  # budget combine mode
+    assert "conditions:" in config and "max_steps: 8" in config  # seeded condition
     assert "sk-" not in config  # never a real secret value
 
 

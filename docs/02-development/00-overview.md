@@ -54,7 +54,7 @@ graph LR
 >
 > **工具基线 + 标准 SKILL(Slice 6,人 2026-06-05 定向)**:产物无内置实用工具 → 基线能力**全由 MCP 预设提供、不自写 built-in**(`fetch` 默认开 / `git` 读开写关 / Desktop Commander 预填一键开,离线靠生成期预热 + Docker 烤镜像;海量扩展走 marketplace 文档 + Composio 式 remote MCP,**不做联网 registry**)。并支持 **Agent Skills 开放标准**(`SKILL.md` 渐进披露:发现+注入 → 文件工具/`read_skill` 读正文 → 脚本经工具跑),`spec.skills.enabled` 门控、不引框架。详见 `07-slice-6-tools-and-skills.md`。
 
-> **周期预算(候选,v1+;人已定向)**:per-run 的 4 维上限(步数/时间/token/费用)已在 Slice 1 落地。"X/天·周·月"的周期配额需**跨 run 持久化用量账本**(本地 JSON,上 Web/多进程再换 sqlite+锁),**做成 spec 勾选的可选模块**(默认不生成,保持薄),与 Web/护栏一并做,不进当前 MVP 核心。
+> **周期预算(候选,v1+;人已定向)**:per-run 预算已重做为**可组合条件 + tumbling 时间窗 + `@register_budget_condition` 注册表**(2026-06-07,产物 `harness/budget.py`;详见决策表"预算"行)。**仍排 v1+ 的只剩"持久化"那层**:"X/天·周·月"配额(及跨 run/会话累计)需**跨 run 持久化用量账本**(本地 JSON,上 Web/多进程再换 sqlite+锁),**做成 spec 勾选的可选模块**(默认不生成,保持薄),与 Web/护栏一并做,不进当前 MVP 核心;届时复用同一条件/注册表模型,只把 `BudgetTracker` 的计量后端从 per-run 内存换成持久账本。
 
 **Agent 行为提示**:
 
@@ -84,7 +84,7 @@ graph LR
 | 配置控制面 | **spec = 配方(生成什么 + 初值);`config.yaml` = 运行期权威活旋钮(行为性配置全可改)**;结构性变更(接口/模块/范式拓扑=代码)需重新生成或 `forge add`。运行期配置面板**生成进产物自身 Web**(产物自持),**HarnessForge 不做中心化配置/托管**(守"生成后不再依赖 HarnessForge") |
 | **权限 / 控制面两轴**(人 2026-06-03 定向) | **结构轴(生成期 = 能力天花板,生成器拥有)vs 行为轴(运行期 = 天花板内调参,`config.yaml`/`/config` 拥有)**。安全相关"能力面"属**结构轴**:tool allowlist 运行期只能**收窄不能扩张**,锁某能力 = 生成期**不编译进去**(缺席强制);`/config` 关工具是便利收窄、**非安全保证**。own-code 下生成器只能设**天花板**、设不了对代码所有者的**地板**。威胁模型 **A 护栏**(可信会手滑)= 生成器搞定;**B 对手强制** = 靠容器 / 自托管 / 后端凭证作用域,**守"不做生产级权限系统"**。**拓扑(2026-06-05 补)**:① 分发仓库 = 代码所有者 = 只有天花板没地板;② 管理员托管 + 接口发布(更常见)= 边界在网络接口 = 能对终端用户**强制地板**、运行期配置可改也安全,**前提 `/config` 须与公开面隔离**(见 §2 Slice 8+ backlog)。详见 `01 §4` |
 | 范式 / multi-agent | 默认 Agent(ReAct 式);扩展走 wizard **生成期多选** + 产物侧**薄范式注册表**(人 2026-06-05 定向,Slice 5):范式集 **Agent/Plan/Ask**(对齐 Cursor 三件套;初版 react/plan/ask/reflection 当日修订,见子文档 §4②′)多选进产物**共存**、**运行期每轮选一种**(类 Cursor agent/ask/plan;CLI `--mode`+Web 下拉;运行期 `enabled`+`default` 进 `config.yaml`、首项种默认;**Plan/Ask 只读**=排高风险工具,Plan 只产只读计划、Build 推迟)。**反思不作独立范式**:agent 在线自纠 + Reflexion(验证器门控)作用户扩展范例。**范式可扩展(核心卖点)= 与 tools 同款薄注册表 + `@register_paradigm` 装饰器,运行期用户可自加范式**;内置范式各自自包含、互不 import;**注册表始终存在**(默认产物不再与 Slice 1–4 逐字一致,改"行为一致");**扩展/解耦优先于薄**。注册表/切换 = **已注册模式集的写死按名分发(own-code),非"运行期范式抽象层"**。**一种 supervisor multi-agent(agent 即 tool,固定拓扑,生成为自有代码,opt-in)排 v1+**;**禁**通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层 |
-| 预算 | per-run 4 维(步数/时间/token/费用)在核心;**周期配额(天/周/月)= spec 勾选的可选持久化模块**,默认不生成,排 v1+ |
+| 预算 | **per-run 预算 = 薄条件注册表**(2026-06-07 重做,同 tools/context):`config.yaml budget.conditions`(已注册条件名→阈值)+ `combine`(or/and,`or`=任一命中即停,护栏安全默认);内置 `max_steps`/`max_seconds`/`max_tokens`/`max_cost`,每条件可带 `window_seconds` 变**速率**(tumbling 窗,留空=累计);用户可 `@register_budget_condition` 自加(产物 `harness/budget.py`),经 `GET /registries` + CLI `info` 内省、Web Budget 页据此渲染。条件值标量简写=`{threshold: N}`。**scope=per-run(每轮重置)**;**持久周期配额(天/周/月 + 跨 run 累计)= spec 勾选的可选持久化模块**,默认不生成,**排 v1+**(届时复用同模型,只换 `BudgetTracker` 计量后端为持久账本)|
 
 ## 4. 目录骨架
 

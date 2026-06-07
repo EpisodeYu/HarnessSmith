@@ -39,7 +39,7 @@
 - **工具注册表**:装饰器注册,新增 tool = 加函数 + 注册,不改循环;含 1–2 个内置安全示例工具。
 - **CLI(Typer)**:`run` 一问一答。
 - **JSONL trace + token/成本计数**。
-- **基础预算停止**:步数(轮次)/时间/**token**/成本超限即停(4 维,任意组合,命中第一个即停)。预算与按 token 计的单价均为**运行期可配**(`config.yaml`),"按费用"需配对应 LLM 的输入/输出单价。
+- **基础预算停止**(2026-06-07 重做为可组合 + 时间窗 + 注册表):预算是**薄条件注册表**(同 tools/context),`config.yaml budget.conditions` 把已注册条件名映射到阈值、`combine`(or/and)定何时停(`or`=任一命中即停,护栏安全默认)。内置 `max_steps`/`max_seconds`/`max_tokens`/`max_cost`;每条件可带 `window_seconds` 变为**速率**(tumbling 窗,留空=累计)。用户可 `@register_budget_condition` 自加。预算与按 token 计单价均**运行期可配**(`config.yaml`),"按费用"需配对应 LLM 的输入/输出单价。**scope=per-run(每轮重置)**;持久天/周/月配额仍 v1+。
 - **mock LLM 测试** + README + AGENTS.md(扩展指南)+ LICENSE(MIT) + .env.example。
 - **可运行性保障(详见 §7)**:uv 契约(随仓库带 `uv.lock` + `.python-version`,uv 自动下载匹配 Python + 隔离 venv)+ **默认生成 `Dockerfile`/`.devcontainer`**(前期即纳入)+ `requirements.txt` pip 兜底 + 生成器对新仓库**冒烟自检**。
 - **1 个 preset**(coding-assistant)+ 空白示例 spec。
@@ -56,7 +56,7 @@
 - Web `/config` 运行期热重载面板、密钥只写不回显面板、**联网 MCP registry / `/config` 改 MCP server 热重连 / `forge add` 增量接 server**、完整 HITL Web 交互时序、**工具调用 HITL 确认**(allow/reject/always-allow;**今天已可经 `before_tool` hook `raise`-veto 自实现**,v1+ 做成内置;护栏非保证、非交互/Web 默认拒绝;据此把 shell 默认开 = 改 §6 口径需人签,人 2026-06-05 登记)、**MCP 状态自检/健康标注**(probe server 连通 + 工具计数 + 不可达标红,CLI `mcp status` + `/config` 健康视图,复用 `McpManager.errors`/`discovered`,人 2026-06-05 登记)、RAG 最小 ingest 闭环 + sqlite-vec、keyring 密钥后端、context offload(大输出落盘)。(注:**MCP 远程 HTTP/SSE 传输已于 2026-06-03 提前进 L2**,见 L2;此处仅余 registry / 热重连 / 增量接入。)
 - **多范式 + 范式可扩展 + 一种 multi-agent**(候选,人已定向):wizard **生成期多选** + 产物侧**薄范式注册表**。**单 loop 范式集 Agent(默认)/ Plan / Ask**(人 2026-06-05 定向并落地,Slice 5;对齐 Cursor 三件套——初版 ReAct/Plan/Ask/Reflection 当日修订:`react`→`agent`、删独立 `reflection`,因 Cursor/Claude 无 reflection 开关、reflection 靠真实成功信号条件触发或被推理模型内化,Reflexion 改作用户扩展范例,详见 `02-development/06-slice-5-paradigms.md §4②′`)——生成期**多选**进产物**共存**,**产物运行期每轮选一种**(类 Cursor agent/ask/plan;CLI `--mode` + Web 下拉;运行期 `enabled`+`default` 进 `config.yaml`、首项种默认);**Plan/Ask 只读**(只 offer 只读/低风险工具、禁 write/shell;Plan 对齐 Cursor 只产只读计划不动手,Plan→执行的 Build 切换推迟 v1+)。**范式可扩展(核心卖点)**:产物 `harness/paradigms/` 持**与 tools 同款的薄注册表 + `@register_paradigm` 装饰器**,**运行期用户可自加范式**(写函数+注册+配 `enabled`);**内置范式各自自包含、互不 import**(改 agent 不影响 ask);**注册表始终存在**(默认产物不再与 Slice 1–4 逐字一致,门禁改"行为一致");此处**扩展性/解耦优先于薄**(人已定向)。运行期"每轮选范式" + "范式注册表"**实现为已注册模式集的写死按名分发(自有代码),不是被禁的"运行期范式抽象层"/动态图/DSL/编排引擎**。**一种 supervisor multi-agent**——以"agent 即 tool"(子 agent = 再跑一个 `run()`)固定拓扑生成为**自有代码**,opt-in,**排 v1+**;用户自写 multi-agent 范式属其 own-code。**禁**:通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层(见 §6)。**2026-06-05 拆片**:范式=Slice 5、工具基线+SKILL=Slice 6、wizard=Slice 7。详见 `02-development/06-slice-5-paradigms.md`。
 - **工具基线(MCP 预设)+ 标准 SKILL**(Slice 6,人 2026-06-05 定向):产物无内置实用工具 → 基线能力**全由 MCP 预设提供、不自写 built-in**(`fetch` 默认开 / `git` 读开写关 / Desktop Commander 预填一键开,写/shell 默认关;离线靠生成期预热 + Docker 烤镜像;海量扩展走 marketplace 文档 + Composio 式 remote MCP,**不做联网 registry**)。并支持 **Agent Skills 开放标准**(`SKILL.md` 渐进披露:L1 发现+注入 → L2 文件工具/`read_skill` 读正文 → L3 脚本经工具跑),`spec.skills.enabled` 门控、不引框架、技能脚本=高风险默认关。详见 `02-development/07-slice-6-tools-and-skills.md`。
-- **周期预算**(候选):per-run 4 维(步数/时间/token/费用)已在 L1;天/周/月配额做成 spec 勾选的可选**持久化**模块(本地 JSON,多进程/Web 再换 sqlite+锁),默认不生成。
+- **周期预算 / 持久化用量**(候选,v1+):per-run 预算(可组合条件 + tumbling 时间窗 + `@register_budget_condition` 注册表,2026-06-07 落地)已在 L1。**仍排 v1+ 的是"持久化"那一层**:天/周/月配额(及跨 run/会话累计)需要**跨进程持久用量账本**(本地 JSON,多进程/Web 再换 sqlite+锁),做成 spec 勾选的可选模块,默认不生成、保持薄。届时复用同一条件/注册表模型,只把 `BudgetTracker` 的计量后端从"per-run 内存"换成"持久账本"。
 - 原 v2 项:沙箱、tracing UI、跨会话记忆、评测 harness、联网 MCP registry、`forge add/regenerate`。
 
 > 说明:RAG / MCP 双传输 / Web 配置这些是竞品已有的"通用能力",做得再好也证明不了差异化;先用 L1 证明"无框架 + own-your-code"跑得通,再纵向叠。
@@ -123,7 +123,7 @@ flowchart LR
 ```
 
 生成器目录(仓库根 `/home/s1yu/HarnessForge`,独立 git repo,MIT;支持 `uvx harnessforge new` 免安装一次性运行):
-- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/**`display_name`**(Slice 7,人类可读显示名,渲染进产物 web 标题/header + README 标题,空则回落 `project_slug`;wizard 由它派生 slug;纯标签不进 `config.yaml`)/**`language`**(Slice 7,产物 web 默认 UI 语言 `en`/`zh`,种子化 web 默认、运行期浏览器可切;wizard 语言选择贯穿至此;Agent 回答语言靠模型按输入自动判断 / 产物 Prompts 改)/llms/roles/prompts(`system`/`persona`/**`rules_files`**(Slice 6B,全局 rule 文件种子,渲染进运行期 `config.yaml`))/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/observability/budget;context(Slice 7 起 wizard 采集并**种子化** `config.yaml` 的 context 块,沿用 rules_files 式 seed)/rag/secrets backend 字段预留但 MVP 不全实现)。
+- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/**`display_name`**(Slice 7,人类可读显示名,渲染进产物 web 标题/header + README 标题,空则回落 `project_slug`;wizard 由它派生 slug;纯标签不进 `config.yaml`)/**`language`**(Slice 7,产物 web 默认 UI 语言 `en`/`zh`,种子化 web 默认、运行期浏览器可切;wizard 语言选择贯穿至此;Agent 回答语言靠模型按输入自动判断 / 产物 Prompts 改)/llms/roles/prompts(`system`/`persona`/**`rules_files`**(Slice 6B,全局 rule 文件种子,渲染进运行期 `config.yaml`))/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/observability/budget(2026-06-07 重做为 `combine` + `conditions` 薄注册表 + 可选 tumbling 时间窗,种子化 `config.yaml`;per-run scope,持久周期 v1+);context(Slice 7 起 wizard 采集并**种子化** `config.yaml` 的 context 块,沿用 rules_files 式 seed)/rag/secrets backend 字段预留但 MVP 不全实现)。
 - `harnessforge/generator.py` — 渲染模板 → 写出仓库 + 拷入 `harness.spec.yaml` + `git init` + `uv lock` + 重跑警告不覆盖 + 生成后冒烟自检(`uv sync`+`pytest`+mock 跑一步)。
 - `harnessforge/cli.py` — Typer 入口(`new`、`--spec`、`--preset`、交互模式、`doctor` 预检、`--no-verify` 关闭冒烟自检)。
 - `harnessforge/catalog/mcp_servers.yaml` — 精选静态 MCP catalog(L2)。
@@ -195,7 +195,7 @@ flowchart LR
 - 生成项目 CLI 一问一答可跑通(mock 后端)。
 - 扩展点:新注册一个 demo tool + 挂一个 hook 的测试,验证无需改核心代码即生效。
 - 可观测:一次 run 产出结构正确的 JSONL trace + token/成本计数断言。
-- 护栏:预算停止(步数/时间/成本超限即停)单测。
+- 护栏:预算停止单测(可组合条件 or/and、内置 steps/seconds/tokens/cost、tumbling 时间窗速率、`@register_budget_condition` 自定义)。
 - 密钥不入 git:`config.yaml`/`harness.spec.yaml` 不含明文密钥的断言。
 - 生成器自身:spec 校验、模板渲染单测、`uvx harnessforge new` 冒烟;`ReadLints` 无新增告警。
 - coding-assistant preset 能成功生成并通过其 pytest。

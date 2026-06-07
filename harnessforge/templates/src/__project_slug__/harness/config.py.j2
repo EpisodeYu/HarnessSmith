@@ -110,20 +110,47 @@ class ObservabilityConfig(BaseModel):
     trace_dir: str = "traces"
 
 
-class BudgetConfig(BaseModel):
-    """Per-run guardrails. Any combination may be set; ``None`` means no limit.
+class BudgetConditionSpec(BaseModel):
+    """One budget limit: a threshold, optionally over a tumbling time window.
 
-    The loop stops as soon as the *first* limit is reached. ``max_cost_usd``
-    only works if the active LLM profile has non-zero per-1K-token prices —
-    otherwise cost stays 0 and the cost limit never triggers.
+    With ``window_seconds`` it is a RATE (the metric accumulated within the
+    current window must reach ``threshold``); without it the threshold is
+    cumulative over the run. A bare scalar in config.yaml (``max_steps: 8``) is
+    coerced to ``{threshold: 8}``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    max_steps: int | None = Field(default=None, gt=0)
-    max_seconds: float | None = Field(default=None, gt=0)
-    max_tokens: int | None = Field(default=None, gt=0)
-    max_cost_usd: float | None = Field(default=None, gt=0)
+    threshold: float = Field(gt=0)
+    window_seconds: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_scalar(cls, data: Any) -> Any:
+        if isinstance(data, (int, float)) and not isinstance(data, bool):
+            return {"threshold": data}
+        return data
+
+
+class BudgetConfig(BaseModel):
+    """Per-run guardrails as named conditions combined by ``combine`` (or/and).
+
+    The loop stops when the combination fires: ``or`` (default, safe) stops at
+    the first limit reached; ``and`` stops only when ALL configured conditions
+    fire. Built-in conditions live in ``harness/budget.py``: ``max_steps`` /
+    ``max_seconds`` / ``max_tokens`` / ``max_cost`` (the last only works if the
+    active LLM profile has non-zero per-1M-token prices). Each condition may
+    carry ``window_seconds`` to become a rate over a tumbling window; without it
+    the threshold is cumulative over the run. Add your own with
+    ``@register_budget_condition`` and reference it by name here. Scope is per-run
+    (resets each turn) — persistent periodic quotas are a v1+ add-on. Empty
+    ``conditions`` = no budget (the loop runs unbounded).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    combine: Literal["or", "and"] = "or"
+    conditions: dict[str, BudgetConditionSpec] = Field(default_factory=dict)
 
 
 class ParadigmsConfig(BaseModel):

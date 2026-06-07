@@ -44,4 +44,7 @@ observability:
   trace_dir: traces
 
 budget:
-  max_steps: 8
+  # Per-run guardrails as named conditions combined by `combine` (or/and). A bare
+  # number is a cumulative threshold; add `window_seconds` to make it a rate.
+  conditions:
+    max_steps: 8

@@ -135,7 +135,8 @@ def test_baked_defaults_fill_behavioral_fields(client):
     assert "model: gpt-4o-mini" in y           # default LLM profile
     assert "api_key_env: OPENAI_API_KEY" in y  # env NAME only
     assert "You are a helpful assistant." in y  # default system prompt
-    assert "max_steps: 8" in y                  # default budget guardrail
+    # default budget guardrail (new shape: combine + named conditions)
+    assert "combine: or" in y and "max_steps:" in y and "threshold: 8" in y
 
 
 def test_explicit_behavioral_fields_win_over_defaults(client):

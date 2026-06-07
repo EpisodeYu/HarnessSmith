@@ -166,22 +166,48 @@ built-in paradigms importing each other.)
 
 ## Budgets & tracing
 
-`config.yaml`'s `budget` stops a runaway loop. Set any combination of four
-runtime limits — the loop stops at the first one reached:
+`config.yaml`'s `budget` stops a runaway loop. It's a thin name→condition
+registry (same shape as tools / paradigms / context — a written-out dispatch, not
+an engine): `conditions` maps a registered condition name to its threshold, and
+`combine` decides when to stop (`or` = any limit hit, the safe default; `and` =
+all must fire):
 
 ```yaml
 budget:
-  max_steps: 8         # max tool-using rounds
-  max_seconds: 30      # wall-clock seconds
-  max_tokens: 100000   # total prompt + completion tokens across the run
-  max_cost_usd: 1.00   # USD spend
+  combine: or
+  conditions:
+    max_steps: 8                                         # max tool-using rounds
+    max_seconds: 30                                      # wall-clock seconds
+    max_tokens: {threshold: 50000, window_seconds: 60}   # RATE: 50k tokens / 60s
+    max_cost: 1.00                                       # spend, profile's currency
 ```
 
-`max_cost_usd` only works if the active LLM profile has non-zero
-`input_cost_per_million` / `output_cost_per_million` — otherwise cost stays `0`
-and the limit never triggers. Pricing is a runtime knob (it lives in
-`config.yaml`, not the spec) so you can change provider rates without
-regenerating.
+Built-in conditions live in `harness/budget.py`: `max_steps`, `max_seconds`,
+`max_tokens` (prompt + completion), and `max_cost`. A bare number is a
+*cumulative* threshold over the run; add `window_seconds` to make it a **rate**
+over a tumbling window (reset every `window_seconds`). `max_cost` only works if
+the active LLM profile has non-zero `input_cost_per_million` /
+`output_cost_per_million` — otherwise cost stays `0` and the limit never triggers.
+Budgets and pricing are runtime knobs (they live in `config.yaml`, not the spec),
+so you can change them without regenerating. Scope is per-run (reset each turn);
+persistent day/week/month quotas are a v1+ add-on.
+
+Add your own condition the same way you add a tool — write a function, decorate
+it, reference it by name in `conditions`. It reads the live `BudgetTracker`
+(`step` / `elapsed()` / `total_tokens` / `cost_usd`, plus `amount()` for
+windowing):
+
+```python
+# in harness/budget.py (or your own module, imported at startup)
+from .budget import register_budget_condition
+
+@register_budget_condition("max_tokens_per_second")
+def _max_tps(tracker, threshold, window):
+    return tracker.total_tokens / (tracker.elapsed() or 1e-9) >= threshold
+```
+
+It then appears in the web Config → Budget panel automatically (via
+`GET /registries`).
 
 Every run writes a JSONL trace under the configured `trace_dir` with per-step
 token counts and cost. Inspect a run with `cat traces/run-*.jsonl`.

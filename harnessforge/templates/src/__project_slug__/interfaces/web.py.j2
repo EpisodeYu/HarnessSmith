@@ -29,6 +29,7 @@ from ..harness.config import (
     resolve_env,
     set_env_value,
 )
+from ..harness.budget import BUDGET_CONDITIONS
 from ..harness.context import CONDITIONS, STRATEGIES
 from ..harness.hooks import Hooks
 from ..harness.llm import ClientRouter, LLMResponse, OpenAIClient, ToolCall
@@ -142,14 +143,16 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
     def registries() -> dict:
         """What's registered in code — the extension universe behind the config
         dropdowns. A custom ``@register_paradigm`` / ``@register_strategy`` /
-        ``@register_condition`` shows up here once its module is imported, so the
-        panel can offer it (and flag a config name that isn't registered).
-        ``/config`` holds what's currently *selected*; this holds what *exists*.
+        ``@register_condition`` / ``@register_budget_condition`` shows up here once
+        its module is imported, so the panel can offer it (and flag a config name
+        that isn't registered). ``/config`` holds what's currently *selected*; this
+        holds what *exists*.
         """
         return {
             "paradigms": list(PARADIGMS),
             "strategies": list(STRATEGIES),
             "conditions": list(CONDITIONS),
+            "budget_conditions": list(BUDGET_CONDITIONS),
         }
 
     @app.get("/config")

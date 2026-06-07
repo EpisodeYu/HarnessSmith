@@ -14,8 +14,8 @@ llms:
     # temperature: 0.7          # unset = provider default (~1.0 for chat models)
     # max_tokens: 1024
     # reasoning_effort: medium  # reasoning models only: none/minimal/low/medium/high/xhigh
-    # Optional cost accounting. Required if you use budget.max_cost_usd — otherwise
-    # cost stays 0 and the cost limit never triggers. Price per 1,000,000 tokens,
+    # Optional cost accounting. Required if you use the budget max_cost condition —
+    # otherwise cost stays 0 and the cost limit never triggers. Price per 1,000,000 tokens,
     # in your own currency (fill in your local price).
     # input_cost_per_million: 0.0
     # output_cost_per_million: 0.0
@@ -71,14 +71,21 @@ observability:
   trace: {{ observability.trace | tojson }}
   trace_dir: {{ observability.trace_dir }}
 
-# Per-run guardrails — set any combination; the loop stops at the first one hit.
-# Available limits: max_steps (rounds), max_seconds, max_tokens, max_cost_usd.
+# Per-run guardrails (reset each turn). Each entry in `conditions` is a limit;
+# `combine` decides when to stop: or = any limit hit (safe default), and = all
+# must hit. Built-ins (harness/budget.py): max_steps (rounds), max_seconds,
+# max_tokens (prompt+completion), max_cost (needs per-1M prices on the profile).
+# A bare number is a cumulative threshold; use {threshold, window_seconds} to make
+# it a RATE over a tumbling window. Add your own with @register_budget_condition.
+# Empty conditions = no budget. Persistent day/week/month quotas are a v1+ add-on.
 budget:
-{% if spec.budget.max_steps is not none %}  max_steps: {{ spec.budget.max_steps }}
-{% endif %}{% if spec.budget.max_seconds is not none %}  max_seconds: {{ spec.budget.max_seconds }}
-{% endif %}{% if spec.budget.max_cost_usd is not none %}  max_cost_usd: {{ spec.budget.max_cost_usd }}
-{% endif %}  # max_tokens: 100000      # total prompt+completion tokens across the run
-  # max_cost_usd: 1.00       # needs per-1K-token prices on the llm profile above
+  combine: {{ spec.budget.combine }}   # or = stop at first limit; and = stop only when all fire
+{% if spec.budget.conditions %}  conditions:
+{% for name, cond in spec.budget.conditions.items() %}{% set thr = (cond.threshold | int) if cond.threshold == (cond.threshold | int) else cond.threshold %}{% if cond.window_seconds is not none %}{% set wnd = (cond.window_seconds | int) if cond.window_seconds == (cond.window_seconds | int) else cond.window_seconds %}    {{ name }}: {threshold: {{ thr }}, window_seconds: {{ wnd }}}
+{% else %}    {{ name }}: {{ thr }}
+{% endif %}{% endfor %}{% else %}  conditions: {}
+{% endif %}    # max_tokens: {threshold: 50000, window_seconds: 60}   # rate: 50k tokens / 60s
+    # max_cost: 1.00       # cumulative; needs per-1M-token prices on the profile above
 {% if spec.mcp.enabled %}
 # MCP tool servers (runtime knob — add/remove without regenerating). Each server
 # uses stdio (set `command`) OR remote Streamable HTTP (set `url`). Secrets are

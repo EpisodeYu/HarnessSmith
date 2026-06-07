@@ -20,9 +20,9 @@ it imports no other paradigm.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 
+from ..budget import BudgetTracker
 from ..config import Config
 from ..context import fit as fit_context
 from ..hooks import Hooks
@@ -34,7 +34,6 @@ from ..trace import Trace
 from . import (
     RunResult,
     assistant_message,
-    limit_message,
     register_paradigm,
     run_tool,
 )
@@ -73,7 +72,7 @@ def run(
         else None
     )
 
-    budget = config.budget
+    tracker = BudgetTracker(config.budget)
     active = registry.active_names(config.enabled_tool_names())
     tool_schemas = registry.schemas(active)
 
@@ -82,20 +81,18 @@ def run(
         {"role": "user", "content": user_input},
     ]
     trace.event("run_start", mode=MODE, role=role, model=profile.model, tools=active)
-    started = time.monotonic()
 
     step = 0
     stop_reason = "final"
     answer = ""
     while True:
-        if budget.max_steps is not None and step >= budget.max_steps:
-            stop_reason, answer = "max_steps", limit_message("step", budget.max_steps)
-            break
-        if (
-            budget.max_seconds is not None
-            and time.monotonic() - started >= budget.max_seconds
-        ):
-            stop_reason, answer = "max_seconds", limit_message("time", budget.max_seconds)
+        # One budget check per step (so combine: and/or stays coherent). steps and
+        # elapsed are current; tokens/cost reflect responses so far, so a
+        # token/cost stop lands at the start of the next step (off by one).
+        tracker.update(step=step, total_tokens=trace.total_tokens, cost_usd=trace.cost_usd)
+        stop = tracker.check()
+        if stop is not None:
+            stop_reason, answer = stop
             break
 
         messages = fit_context(messages, context_cfg, summarizer=summarizer)
@@ -121,13 +118,6 @@ def run(
             step_cost_usd=cost,
         )
         hooks.after_step(step, response)
-
-        if budget.max_tokens is not None and trace.total_tokens >= budget.max_tokens:
-            stop_reason, answer = "max_tokens", limit_message("token", budget.max_tokens)
-            break
-        if budget.max_cost_usd is not None and trace.cost_usd >= budget.max_cost_usd:
-            stop_reason, answer = "max_cost", limit_message("cost", budget.max_cost_usd)
-            break
 
         if not response.tool_calls:
             answer, stop_reason = response.content or "", "final"

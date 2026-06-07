@@ -143,11 +143,12 @@ def info(
 ) -> None:
     """List the registered extension points vs what config.yaml selects.
 
-    Paradigms / context strategies / context conditions registered in code,
-    alongside what's currently selected. A name your config selects but that
-    isn't registered is flagged — usually a typo, or a module you forgot to
-    import so its ``@register_*`` never ran.
+    Paradigms / context strategies / context conditions / budget conditions
+    registered in code, alongside what's currently selected. A name your config
+    selects but that isn't registered is flagged — usually a typo, or a module you
+    forgot to import so its ``@register_*`` never ran.
     """
+    from ..harness.budget import BUDGET_CONDITIONS
     from ..harness.context import CONDITIONS, STRATEGIES
     from ..harness.paradigms import PARADIGMS
 
@@ -169,6 +170,8 @@ def info(
     _section("context strategies (registered):", list(STRATEGIES), {config.context.strategy})
     _section("context conditions (registered):", list(CONDITIONS), set(config.context.triggers))
     typer.echo(f"  combine: {config.context.combine}  triggers: {config.context.triggers}")
+    _section("budget conditions (registered):", list(BUDGET_CONDITIONS), set(config.budget.conditions))
+    typer.echo(f"  combine: {config.budget.combine}")
 
 
 {% if interfaces.web %}
