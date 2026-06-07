@@ -68,7 +68,7 @@
 
 ### 2.5 /config 面板的 MCP 范围(本片只做"安全且无状态"的那部分)
 - **可运行期当场改**:MCP tool 的 allowlist(`tools[].enabled`)——纯过滤,复用 Slice 3 既有路径,改完后续 `/chat` 立即生效。
-- **暂走重启**:server 列表的增删改——改 server 需重建 `McpManager` + 重连子进程/远程会话,是**有状态重连**;本片 server 列表经 `config.yaml` + 重启生效,**热重连排 v1+**(`00-overview §2` Slice 8+)。`/config` 对 server 可只读展示,不在本片做"改 server 即热重连"。
+- **暂走重启**:server 列表的增删改——改 server 需重建 `McpManager` + 重连子进程/远程会话,是**有状态重连**;本片 server 列表经 `config.yaml` + 重启生效,**热重连排 v1+**(`00-overview §2` Slice 11+)。`/config` 对 server 可只读展示,不在本片做"改 server 即热重连"。
 
 ### 2.6 catalog(本片不做,挪 Slice 5)
 - catalog 是 wizard/CLI 的预填便捷数据源,不进产物、不是安全闸。Slice 4 用直接写 `config.yaml` 的 fixture 跑通管线;catalog 的收录、来源标注、热门预设清单随 Slice 5 wizard 一起做。
@@ -103,6 +103,6 @@
 - **核心克制**:MCP 工具注册进**既有** `registry`、走**既有** `loop`/`trace`,**不改 `loop.py`、不改 `tools.Registry` 核心**;所有 MCP 特定逻辑(双传输 + 同步桥 + 注册 + 生命周期)收在 `mcp.py`。若被迫改 loop/registry 核心,先停问人(`CLAUDE.md §6.8/§6.10`)。
 - **不绑框架**:`mcp` 是协议 SDK,**不是 agent 编排框架**,不违反定位红线(`01 §1`);但仅在 `mcp.enabled` 时进产物。
 - **密钥红线**(`CLAUDE.md §6.5`):stdio 的 `env` 与远程的 `auth_env`/header **只存 env 变量名**,真值经 `.env`/进程环境用既有 `resolve_env` 解析后注入子进程 / 请求头;**绝不把真值写进 spec/catalog/config.yaml/trace/日志**。高风险工具默认关,仅 allowlist 显式开(沿用 Slice 1)。MCP 工具的参数/结果进 trace 时与现有 `tool_call`/`tool_result` 同路径,注意不把含密钥的实参回显(由用户对自带 server 负责)。
-- **传输**:stdio + 远程 HTTP/SSE 都做(人 2026-06-03 定向);**联网 MCP registry、`/config` 改 server 热重连、`forge add` 增量接 server** 均为 v1+,不在本片(`00-overview §2` Slice 8+ / `01 §3` L3)。
+- **传输**:stdio + 远程 HTTP/SSE 都做(人 2026-06-03 定向);**联网 MCP registry、`/config` 改 server 热重连、`forge add` 增量接 server** 均为 v1+,不在本片(`00-overview §2` Slice 11+ / `01 §3` L3)。
 - **配方 vs 活旋钮**(决策④,`01 §4`):MCP 能力有无 = 结构性(spec,重新生成);server/tool/传输 = 行为性(运行期 `config.yaml` / `/config`)。MCP 配置面属**产物自持**,HarnessForge 不做中心化配置/托管。
 - **catalog 漂移**(Slice 5 再细化):server 经 `npx`/`uvx` 拉取时注意 pin 版本(`01 §10` 依赖漂移与平台兼容)。

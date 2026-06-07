@@ -53,11 +53,14 @@
 - **生成期 Web wizard**:单页表单产出 spec(L1 先用 CLI + preset 顶替,这里再补 GUI)。
 
 ### L3 — 推迟到 v1+(明确不在 MVP)
+
+> **v1 排期更新(人 2026-06-07 定向)**:MVP(Slice 0–7)收口后,对标 2026 事实标准 harness(Claude Code/Codex/Cursor/Cline 等)发现三个"已成标配、本项目尚缺、且薄+不触红线+强契合 own-your-code"的缺口,升格为 **v1 必做切片**:**Slice 8 会话持久化(resume/`--continue`)/ Slice 9 Checkpoints(危险操作前 git 快照 + 回滚)/ Slice 10 工具调用 HITL 交互确认**。同时把 **跨会话全局记忆** 从原 v2 上移 **v1**(记入 Slice 11+,排期/拆片实现前细化)。对标分析见 [`03-feature-landscape-and-proposals.md`](./03-feature-landscape-and-proposals.md);只有"own-your-code 生成器"能打的头号差异化 **`forge add` / 增量再生成 + 模板升级** 详设见 [`04-forge-add-incremental-regeneration.md`](./04-forge-add-incremental-regeneration.md)。门禁与口径以 [`02-development/00-overview.md §2`](./02-development/00-overview.md) 为准。
+
 - Web `/config` 运行期热重载面板、密钥只写不回显面板、**联网 MCP registry / `/config` 改 MCP server 热重连 / `forge add` 增量接 server**、完整 HITL Web 交互时序、**工具调用 HITL 确认**(allow/reject/always-allow;**今天已可经 `before_tool` hook `raise`-veto 自实现**,v1+ 做成内置;护栏非保证、非交互/Web 默认拒绝;据此把 shell 默认开 = 改 §6 口径需人签,人 2026-06-05 登记)、**MCP 状态自检/健康标注**(probe server 连通 + 工具计数 + 不可达标红,CLI `mcp status` + `/config` 健康视图,复用 `McpManager.errors`/`discovered`,人 2026-06-05 登记)、RAG 最小 ingest 闭环 + sqlite-vec、keyring 密钥后端、context offload(大输出落盘)。(注:**MCP 远程 HTTP/SSE 传输已于 2026-06-03 提前进 L2**,见 L2;此处仅余 registry / 热重连 / 增量接入。)
 - **多范式 + 范式可扩展 + 一种 multi-agent**(候选,人已定向):wizard **生成期多选** + 产物侧**薄范式注册表**。**单 loop 范式集 Agent(默认)/ Plan / Ask**(人 2026-06-05 定向并落地,Slice 5;对齐 Cursor 三件套——初版 ReAct/Plan/Ask/Reflection 当日修订:`react`→`agent`、删独立 `reflection`,因 Cursor/Claude 无 reflection 开关、reflection 靠真实成功信号条件触发或被推理模型内化,Reflexion 改作用户扩展范例,详见 `02-development/06-slice-5-paradigms.md §4②′`)——生成期**多选**进产物**共存**,**产物运行期每轮选一种**(类 Cursor agent/ask/plan;CLI `--mode` + Web 下拉;运行期 `enabled`+`default` 进 `config.yaml`、首项种默认);**Plan/Ask 只读**(只 offer 只读/低风险工具、禁 write/shell;Plan 对齐 Cursor 只产只读计划不动手,Plan→执行的 Build 切换推迟 v1+)。**范式可扩展(核心卖点)**:产物 `harness/paradigms/` 持**与 tools 同款的薄注册表 + `@register_paradigm` 装饰器**,**运行期用户可自加范式**(写函数+注册+配 `enabled`);**内置范式各自自包含、互不 import**(改 agent 不影响 ask);**注册表始终存在**(默认产物不再与 Slice 1–4 逐字一致,门禁改"行为一致");此处**扩展性/解耦优先于薄**(人已定向)。运行期"每轮选范式" + "范式注册表"**实现为已注册模式集的写死按名分发(自有代码),不是被禁的"运行期范式抽象层"/动态图/DSL/编排引擎**。**一种 supervisor multi-agent**——以"agent 即 tool"(子 agent = 再跑一个 `run()`)固定拓扑生成为**自有代码**,opt-in,**排 v1+**;用户自写 multi-agent 范式属其 own-code。**禁**:通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层(见 §6)。**2026-06-05 拆片**:范式=Slice 5、工具基线+SKILL=Slice 6、wizard=Slice 7。详见 `02-development/06-slice-5-paradigms.md`。
 - **工具基线(MCP 预设)+ 标准 SKILL**(Slice 6,人 2026-06-05 定向):产物无内置实用工具 → 基线能力**全由 MCP 预设提供、不自写 built-in**(`fetch` 默认开 / `git` 读开写关 / Desktop Commander 预填一键开,写/shell 默认关;离线靠生成期预热 + Docker 烤镜像;海量扩展走 marketplace 文档 + Composio 式 remote MCP,**不做联网 registry**)。并支持 **Agent Skills 开放标准**(`SKILL.md` 渐进披露:L1 发现+注入 → L2 文件工具/`read_skill` 读正文 → L3 脚本经工具跑),`spec.skills.enabled` 门控、不引框架、技能脚本=高风险默认关。详见 `02-development/07-slice-6-tools-and-skills.md`。
 - **周期预算 / 持久化用量**(候选,v1+):per-run 预算(可组合条件 + tumbling 时间窗 + `@register_budget_condition` 注册表,2026-06-07 落地)已在 L1。**仍排 v1+ 的是"持久化"那一层**:天/周/月配额(及跨 run/会话累计)需要**跨进程持久用量账本**(本地 JSON,多进程/Web 再换 sqlite+锁),做成 spec 勾选的可选模块,默认不生成、保持薄。届时复用同一条件/注册表模型,只把 `BudgetTracker` 的计量后端从"per-run 内存"换成"持久账本"。
-- 原 v2 项:沙箱、tracing UI、跨会话记忆、评测 harness、联网 MCP registry、`forge add/regenerate`。
+- 原 v2 项:沙箱、tracing UI、评测 harness、联网 MCP registry、`forge add/regenerate`。(注:**跨会话记忆已于 2026-06-07 上移 v1**,见本节顶部排期更新;`forge add/regenerate` 仍 v1+,但已写出详设 [`04-forge-add-incremental-regeneration.md`](./04-forge-add-incremental-regeneration.md)。)
 
 > 说明:RAG / MCP 双传输 / Web 配置这些是竞品已有的"通用能力",做得再好也证明不了差异化;先用 L1 证明"无框架 + own-your-code"跑得通,再纵向叠。
 
@@ -94,7 +97,7 @@
   - **B 强制(不可信 / 对手)**:harness 自身做不到,须靠**外部沙箱 / 容器**(已有 Docker 一等公民)、**自托管**或**后端凭证作用域**。**守"不做生产级权限系统"红线**(§6)——生成器最多生成"可被沙箱化的产物 + 按工具发作用域凭证",不在产物里造权限系统。
 - **部署拓扑决定运行期配置安不安全(人 2026-06-05 补)** —— "运行期配置可改"是否安全,取决于产物怎么交付:
   - **① 分发仓库**:把生成的仓库发给多人各自跑——每人都是代码所有者(模型 B),只有天花板没有地板。管理员**不**为每人单独配权限,只把**统一天花板**烤死进产物、人人同份;per-person 差异(各自 key / 数据目录)是该可改、改了也安全的运行期值。拦不住"收件人改源码",那属模型 B,交容器 / 托管 / 凭证作用域。
-  - **② 管理员托管 + 接口发布(更常见;运行期配置在此完全成立)**:管理员跑一个实例、配好运行期配置,终端用户只透过 `/chat` 等接口访问,**够不着代码与 `config.yaml`**。此时**边界 = 网络接口**,用户在 API 另一侧 → 管理员能对终端用户**强制地板**,运行期配置可改也安全(只有管理员够得着)。**前提:管理面(尤其 `/config`)必须与公开面隔离**(鉴权 / 绑 localhost / 生成期开关),否则终端用户能 POST `/config` 改掉配置;且为**单租户**(全局 config/预算,无 per-user 隔离),公网鉴权 / TLS / 限流属 harness 外运维。落地见 `00-overview §2` Slice 8+ backlog。
+  - **② 管理员托管 + 接口发布(更常见;运行期配置在此完全成立)**:管理员跑一个实例、配好运行期配置,终端用户只透过 `/chat` 等接口访问,**够不着代码与 `config.yaml`**。此时**边界 = 网络接口**,用户在 API 另一侧 → 管理员能对终端用户**强制地板**,运行期配置可改也安全(只有管理员够得着)。**前提:管理面(尤其 `/config`)必须与公开面隔离**(鉴权 / 绑 localhost / 生成期开关),否则终端用户能 POST `/config` 改掉配置;且为**单租户**(全局 config/预算,无 per-user 隔离),公网鉴权 / TLS / 限流属 harness 外运维。落地见 `00-overview §2` Slice 11+ backlog。
 
 ## 5. 架构
 
@@ -167,7 +170,7 @@ flowchart LR
 
 自主细节(实现时可调):模板引擎 Jinja2;spec 用 Pydantic v2 + YAML;运行期配置 pydantic-settings;Web 无构建单页(Tailwind CDN);context 默认 `truncate`(summarize 为 L2 可选)。
 
-**明确不做(保护定位)**:不做生产级权限系统、云托管、**通用多 agent 编排框架 / 工作流编排 DSL / 动态图引擎 / 运行期范式抽象层**、在线 MCP registry、沙箱、跨会话长期记忆、**HarnessForge 侧的中心化配置管理/托管**(产物自持配置,守"生成后不再依赖 HarnessForge")。
+**明确不做(保护定位)**:不做生产级权限系统、云托管、**通用多 agent 编排框架 / 工作流编排 DSL / 动态图引擎 / 运行期范式抽象层**、在线 MCP registry、沙箱、**HarnessForge 侧的中心化配置管理/托管**(产物自持配置,守"生成后不再依赖 HarnessForge")。(注:**跨会话长期记忆不在本列——它非红线,已于 2026-06-07 排入 v1**,见 §3 L3 顶部排期更新;它须做成薄+spec 开关+不落密钥,不得演变为云托管记忆服务。)
 
 > **multi-agent 措辞细化(人已签,2026-06)**:红线是"**通用编排框架**",不是"≥2 个 agent"。**允许一个具体的、固定拓扑、生成为自有代码的 multi-agent 模式**(supervisor / "agent 即 tool",子 agent = 再跑一个 `run()`),**opt-in、排 v1+、不进默认产物**;它只是薄 loop 的组合,无运行期抽象层。详见 §3 L3 与 `02-development/00-overview.md §3` 决策表。
 

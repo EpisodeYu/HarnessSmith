@@ -21,7 +21,7 @@
 - **语言选择贯穿(UI 语言)**:wizard 顶部的单一语言选择**贯穿**到 ① wizard 自身 UI、② 产物 web 默认 UI 语言(经 `spec.language` 种子化,运行期浏览器仍可切并记忆)。**Agent 回答语言不在向导设**:现代模型基本按**用户输入语言**自动回答;想固定默认语言在产物配置页 Prompts 里改 `prompts.system` 即可。
 - **显示名 vs 包名**:新增 spec 字段 `display_name`(人类可读,用于产物 UI 标题/header + README 标题,空则回落 `project_slug`);wizard 输入显示名并由它**派生** `project_slug`(snake_case 包名/文件夹,可手改)。
 - **spec 仍是全字段**(配方):`HarnessSpec` 字段集不变(含 Slice 5 `paradigms`、Slice 4/6 `mcp.enabled`+catalog、Slice 6 `skills.enabled`、llms/roles/prompts/tools/interfaces/observability/budget/context);差异只在**向导 UI 暴露哪些**——结构暴露、行为性烤默认。手写 spec / `--mcp-server` / 产物配置页仍可改全部行为性字段。
-- **LLM 维持 provider-agnostic**:本片 LLM 层不变(Chat Completions + `base_url`)。**原生 OpenAI+Anthropic 双规范可切 = v1+ 可选模块**(人 2026-06-06,见 `00-overview §2 Slice 8+`);接 Claude 当下走 Anthropic 兼容端点 / LiteLLM。
+- **LLM 维持 provider-agnostic**:本片 LLM 层不变(Chat Completions + `base_url`)。**原生 OpenAI+Anthropic 双规范可切 = v1+ 可选模块**(人 2026-06-06,见 `00-overview §2 Slice 11+`);接 Claude 当下走 Anthropic 兼容端点 / LiteLLM。
 - **依赖隔离**:fastapi/uvicorn 进 `harnessforge[wizard]` extra;核心 `harnessforge` 依赖(typer/jinja2/pydantic/pyyaml)不变 → `uvx harnessforge new` 不拉 fastapi。
 
 ## 1. 交付物
@@ -139,4 +139,4 @@
 - **配方 vs 活旋钮**(决策④,`01 §4`):wizard 产 `spec`(配方);产物分页 `/config` 改运行期行为性配置;结构性(接口/模块/范式拓扑=代码)只能重新生成。
 - **薄**:默认产物(`web:false`)零改动、零新增依赖;产物 Web 的分页/i18n 是单页前端内的事,`web.py` 后端不变、仍薄。
 - **覆盖随 spec 演进**:若 spec 再增字段,wizard 同步补。
-- **v1+ 衔接**:原生 Anthropic 双规范(prompt caching / adaptive thinking + effort / Opus 4.7/4.8 禁采样 / structured outputs)登记 `00-overview §2 Slice 8+`;`/config` 与公开面隔离(Slice 3 已登记)仍是发布前提。
+- **v1+ 衔接**:原生 Anthropic 双规范(prompt caching / adaptive thinking + effort / Opus 4.7/4.8 禁采样 / structured outputs)登记 `00-overview §2 Slice 11+`;`/config` 与公开面隔离(Slice 3 已登记)仍是发布前提。

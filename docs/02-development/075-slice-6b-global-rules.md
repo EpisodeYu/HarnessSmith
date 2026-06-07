@@ -2,7 +2,7 @@
 
 > 目标:让产物支持**全局 rule 文件注入**——把开放标准的 `AGENTS.md` / `CLAUDE.md` / `.cursor/rules` 模式落到产物里:`config.yaml` 的 `prompts.rules_files` 列出若干 markdown 文件,其正文被注入**每一轮**系统提示。与 Slice 6 的标准 SKILL 同源(都是"文件 → 提示注入"),但 **rule 是常驻**(每轮都在),SKILL 是**按需**(相关才加载)。
 >
-> **本片缘起(人 2026-06-05 定向)**:对位 Claude Code / Cursor 的两类能力时确认——产物已有**代码级生命周期 hook**(Slice 1 `hooks.py`),但**缺"常驻 rule 文件"这一档**。人选"做薄版、近期排一个小 slice"(配置级 shell hook 仅记 v1+ backlog,见 `00-overview §2` Slice 8+)。
+> **本片缘起(人 2026-06-05 定向)**:对位 Claude Code / Cursor 的两类能力时确认——产物已有**代码级生命周期 hook**(Slice 1 `hooks.py`),但**缺"常驻 rule 文件"这一档**。人选"做薄版、近期排一个小 slice"(配置级 shell hook 仅记 v1+ backlog,见 `00-overview §2` Slice 11+)。
 >
 > **编号说明**:紧接 Slice 6、在 wizard(Slice 7)之前的薄增量;为不扰动 wizard / v1+(Slice 8+)既有编号,记为 **Slice 6B**(文件 `075-` 排在 `07-`(Slice 6)与 `08-`(Slice 7)之间)。
 >
@@ -53,5 +53,5 @@
 ## 5. 本 slice 注意 / 留给后续
 
 - **wizard(Slice 7)需覆盖 `prompts.rules_files`**:已在 `08-slice-7-wizard.md` §2.1 高级组登记。
-- **配置级 shell hook(Claude Code/Cursor 风格,事件→shell 命令、可 veto)= v1+ backlog**(`00-overview §2` Slice 8+):代码级 `Hooks` 已覆盖同等能力(own-code 写子类即可),且与 v1+ HITL 确认 hook 重叠、引入"配置跑任意 shell"新安全面,故缓做。
+- **配置级 shell hook(Claude Code/Cursor 风格,事件→shell 命令、可 veto)= v1+ backlog**(`00-overview §2` Slice 11+):代码级 `Hooks` 已覆盖同等能力(own-code 写子类即可),且与 v1+ HITL 确认 hook 重叠、引入"配置跑任意 shell"新安全面,故缓做。
 - **不做**:rule 的 glob / 描述触发 auto-attach(Cursor 进阶特性)——MVP 只做"always-apply 文件列表"薄版;按需触发交给 SKILL(Slice 6)。
