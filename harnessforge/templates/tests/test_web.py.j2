@@ -21,6 +21,9 @@ def _config():
             "prompts": {"system": "You are a test agent."},
             "tools": [{"name": "get_current_time", "enabled": True}],
             "observability": {"trace": False},
+            # Off here so the streaming-chat tests don't litter the cwd; the
+            # session tests below opt in with their own tmp dir (_session_client).
+            "sessions": {"enabled": False},
             "budget": {"conditions": {"max_steps": 4}},
         }
     )
@@ -28,6 +31,28 @@ def _config():
 
 def _client():
     return TestClient(create_app(_config(), mock=True))
+
+
+def _session_client(tmp_path, *, enabled=True):
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "get_current_time", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": enabled, "dir": str(tmp_path / "sessions")},
+    })
+    return TestClient(create_app(config, mock=True))
+
+
+def _sse_session_id(body: str) -> str | None:
+    """Pull the id out of the SSE ``event: session`` frame (or None if absent)."""
+    import json
+
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == "event: session":
+            return json.loads(lines[i + 1].split("data: ", 1)[1])["id"]
+    return None
 
 
 def test_index_is_served():
@@ -121,6 +146,51 @@ def test_chat_stream_false_emits_no_tokens():
     body = _client().get("/chat", params={"message": "hi", "stream": "false"}).text
     assert "event: token" not in body
     assert "event: final" in body  # still returns the answer, just not streamed
+
+
+def test_chat_persists_session_and_lists_it(tmp_path):
+    """A chat turn emits its session id, saves the body, and /sessions lists it;
+    /sessions/<id> replays the messages so the UI can resume the conversation."""
+    client = _session_client(tmp_path)
+    body = client.get("/chat", params={"message": "hello", "stream": "false"}).text
+    sid = _sse_session_id(body)
+    assert sid
+
+    listing = client.get("/sessions").json()["sessions"]
+    assert any(s["id"] == sid for s in listing)
+
+    detail = client.get(f"/sessions/{sid}").json()
+    assert detail["id"] == sid
+    assert any(
+        m["role"] == "user" and m["content"] == "hello" for m in detail["messages"]
+    )
+
+
+def test_chat_resumes_prior_session(tmp_path):
+    """?session=<id> resumes: the second turn's saved body includes the first."""
+    client = _session_client(tmp_path)
+    sid = _sse_session_id(
+        client.get("/chat", params={"message": "first", "stream": "false"}).text
+    )
+    assert sid
+    client.get(
+        "/chat", params={"message": "second", "stream": "false", "session": sid}
+    )
+    users = [
+        m["content"]
+        for m in client.get(f"/sessions/{sid}").json()["messages"]
+        if m["role"] == "user"
+    ]
+    assert "first" in users and "second" in users
+
+
+def test_chat_disabled_sessions_emit_nothing(tmp_path):
+    """sessions.enabled=false: no session event, empty listing, no files."""
+    client = _session_client(tmp_path, enabled=False)
+    body = client.get("/chat", params={"message": "hi", "stream": "false"}).text
+    assert "event: session" not in body
+    assert client.get("/sessions").json() == {"sessions": []}
+    assert not (tmp_path / "sessions").exists()
 
 
 def test_registries_lists_registered_extensions():

@@ -43,6 +43,44 @@ def _profile_preflight(profile: LLMProfileConfig) -> str | None:
         )
     return None
 
+{% if spec.mcp.enabled %}
+def _start_mcp(config):
+    """Launch MCP servers that have at least one enabled tool; return the manager.
+
+    Only servers with an allowlisted (enabled) tool are launched, so a
+    predefined-but-off server (e.g. Desktop Commander) stays dormant. Returns
+    ``None`` when nothing needs launching; the caller must ``.close()`` the
+    manager when done (``serve`` lets it live for the process lifetime).
+    """
+    from ..harness.mcp import McpManager, register_mcp_tools
+
+    active = {n.split("__", 1)[0] for n in config.enabled_tool_names() if "__" in n}
+    servers = [s for s in config.mcp.servers if s.name in active]
+    if not servers:
+        return None
+    manager = McpManager(config.mcp.model_copy(update={"servers": servers}))
+    manager.start()
+    register_mcp_tools(config, manager)
+    return manager
+{% endif %}{% if spec.skills.enabled %}
+def _expand_skill(config, prompt: str) -> str:
+    """``/skill-name rest...`` -> the skill's full instructions + rest.
+
+    Lets you manually load a skill (including ones marked
+    ``disable-model-invocation`` that aren't auto-injected). A non-``/`` prompt or
+    an unknown skill is returned unchanged (with a warning for the latter).
+    """
+    if not prompt.startswith("/"):
+        return prompt
+    from ..harness.skills import load_skill_body
+
+    skill_name, _, rest = prompt[1:].partition(" ")
+    body = load_skill_body(config, skill_name)
+    if body.startswith("ERROR"):
+        typer.secho(body, fg=typer.colors.YELLOW, err=True)
+        return prompt
+    return f"{body}\n\n{rest}".strip()
+{% endif %}
 
 @app.command()
 def run(
@@ -64,9 +102,16 @@ def run(
     stream: bool = typer.Option(
         False, "--stream/--no-stream", help="Stream the answer token-by-token."
     ),
+    continue_session: bool = typer.Option(
+        False, "--continue", help="Resume the most recent saved session."
+    ),
+    resume: str = typer.Option(
+        None, "--resume", help="Resume a specific session by id."
+    ),
 ) -> None:
     """Run one turn of the agent loop."""
     from ..harness.config import ConfigError
+    from ..harness import session as session_store
 
     config = load_config(config_path)
     # Fail fast with an actionable hint instead of a provider traceback when the
@@ -82,33 +127,18 @@ def run(
             raise typer.Exit(code=2)
     if prompt is None:
         prompt = typer.prompt("You")
-{% if spec.skills.enabled %}    # `/skill-name rest...` manually loads a skill's full instructions — including
-    # skills marked `disable-model-invocation` that aren't auto-injected.
-    if prompt.startswith("/"):
-        from ..harness.skills import load_skill_body
-
-        skill_name, _, rest = prompt[1:].partition(" ")
-        body = load_skill_body(config, skill_name)
-        if body.startswith("ERROR"):
-            typer.secho(body, fg=typer.colors.YELLOW, err=True)
-        else:
-            prompt = f"{body}\n\n{rest}".strip()
-{% endif %}{% if spec.mcp.enabled %}    from ..harness.mcp import McpManager, register_mcp_tools
-
-    # Only launch servers with at least one allowlisted (enabled) tool, so a
-    # predefined-but-off server (e.g. Desktop Commander) stays dormant until you
-    # enable one of its tools in config.yaml.
-    _active = {n.split("__", 1)[0] for n in config.enabled_tool_names() if "__" in n}
-    _servers = [s for s in config.mcp.servers if s.name in _active]
-    mcp_manager = (
-        McpManager(config.mcp.model_copy(update={"servers": _servers}))
-        if _servers
-        else None
+{% if spec.skills.enabled %}    prompt = _expand_skill(config, prompt)
+{% endif %}{% if spec.mcp.enabled %}    mcp_manager = _start_mcp(config)
+{% endif %}    # Resolve the session to resume (or mint a new one) and load its history.
+    sessions_cfg = config.sessions
+    session_id, history = (
+        session_store.resolve(
+            continue_=continue_session, resume_id=resume, sessions_dir=sessions_cfg.dir
+        )
+        if sessions_cfg.enabled
+        else (None, None)
     )
-    if mcp_manager is not None:
-        mcp_manager.start()
-        register_mcp_tools(config, mcp_manager)
-{% endif %}    router = ClientRouter(config, mock=mock)
+    router = ClientRouter(config, mock=mock)
 
     printed = False
 
@@ -125,6 +155,7 @@ def run(
             config=config,
             role=role,
             on_delta=_on_delta if stream else None,
+            history=history,
         )
     except ValueError as exc:  # bad --mode / invalid config value
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
@@ -138,14 +169,130 @@ def run(
         typer.echo("")  # finish the streamed line
     else:
         typer.echo(result.answer)  # non-stream, or a budget-stop message
-    typer.secho(
+    if sessions_cfg.enabled and session_id is not None:
+        session_store.save(session_id, result.messages, sessions_cfg.dir, mode=result.mode)
+    summary = (
         f"[{result.mode}] [{result.stop_reason}] steps={result.steps} "
-        f"tokens={result.trace.total_tokens} cost=${result.trace.cost_usd:.4f}",
-        fg=typer.colors.BRIGHT_BLACK,
+        f"tokens={result.trace.total_tokens} cost=${result.trace.cost_usd:.4f}"
     )
+    if session_id is not None:
+        summary += f" session={session_id}  (resume: run --resume {session_id})"
+    typer.secho(summary, fg=typer.colors.BRIGHT_BLACK)
 {% if spec.mcp.enabled %}    if mcp_manager is not None:
         mcp_manager.close()
 {% endif %}
+@app.command()
+def chat(
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to config.yaml."
+    ),
+    role: str = typer.Option("generation", "--role", help="LLM role to use."),
+    mode: str = typer.Option(
+        None, "--mode", help="Loop paradigm to use (default: config.paradigms.default)."
+    ),
+    mock: bool = typer.Option(
+        False, "--mock", help="Use the offline mock LLM (no API key / network)."
+    ),
+    stream: bool = typer.Option(
+        True, "--stream/--no-stream", help="Stream answers token-by-token."
+    ),
+    continue_session: bool = typer.Option(
+        False, "--continue", help="Resume the most recent saved session."
+    ),
+    resume: str = typer.Option(
+        None, "--resume", help="Resume a specific session by id."
+    ),
+) -> None:
+    """Multi-turn interactive chat (REPL): keep talking, the agent remembers.
+
+    Type a message and press Enter; the agent answers and the conversation is
+    carried (and saved) across turns. Ctrl-D or ``/exit`` quits. Resume later
+    with ``chat --continue`` / ``run --resume <id>``.
+    """
+    from ..harness.config import ConfigError
+    from ..harness import session as session_store
+
+    config = load_config(config_path)
+    if not mock:
+        try:
+            error = _profile_preflight(config.profile_for(role))
+        except ConfigError as exc:
+            error = f"{exc} — add a profile under llms: in {config_path}"
+        if error:
+            typer.secho(error, fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2)
+
+    sessions_cfg = config.sessions
+    if sessions_cfg.enabled:
+        session_id, history = session_store.resolve(
+            continue_=continue_session, resume_id=resume, sessions_dir=sessions_cfg.dir
+        )
+    else:
+        session_id, history = session_store.new_id(), []
+    history = list(history)
+{% if spec.mcp.enabled %}    mcp_manager = _start_mcp(config)
+{% endif %}    router = ClientRouter(config, mock=mock)
+    state = {"printed": False}
+
+    def _on_delta(text: str) -> None:
+        state["printed"] = True
+        typer.echo(text, nl=False)
+
+    typer.secho(
+        f"Chat session {session_id} — Ctrl-D or /exit to quit.", fg=typer.colors.GREEN
+    )
+    if history:
+        typer.secho(
+            f"  resumed {len(history)} prior message(s).", fg=typer.colors.BRIGHT_BLACK
+        )
+    try:
+        while True:
+            try:
+                prompt = typer.prompt("You")
+            except (EOFError, typer.Abort):
+                typer.echo("")
+                break
+            if prompt.strip() in {"/exit", "/quit"}:
+                break
+            if not prompt.strip():
+                continue
+{% if spec.skills.enabled %}            prompt = _expand_skill(config, prompt)
+{% endif %}            state["printed"] = False
+            try:
+                result = run_loop(
+                    prompt,
+                    mode=mode,
+                    client_for=router.client_for,
+                    config=config,
+                    role=role,
+                    on_delta=_on_delta if stream else None,
+                    history=history,
+                )
+            except Exception as exc:  # one bad turn shouldn't end the whole session
+                if state["printed"]:
+                    typer.echo("")
+                typer.secho(f"run failed: {exc}", fg=typer.colors.RED, err=True)
+                continue
+            if state["printed"]:
+                typer.echo("")
+            else:
+                typer.echo(result.answer)
+            typer.secho(
+                f"[{result.mode}] [{result.stop_reason}] steps={result.steps} "
+                f"tokens={result.trace.total_tokens} cost=${result.trace.cost_usd:.4f}",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
+            history = result.messages
+            if sessions_cfg.enabled:
+                session_store.save(
+                    session_id, history, sessions_cfg.dir, mode=result.mode
+                )
+    finally:
+{% if spec.mcp.enabled %}        if mcp_manager is not None:
+            mcp_manager.close()
+{% else %}        pass
+{% endif %}
+
 @app.command(name="set-key")
 def set_key(
     name: str = typer.Argument(
@@ -298,14 +445,8 @@ def serve(
 
     bind_port = port if port else _find_free_port(8000, host)
     config = load_config(config_path)
-{% if spec.mcp.enabled %}    from ..harness.mcp import McpManager, register_mcp_tools
-
-    _active = {n.split("__", 1)[0] for n in config.enabled_tool_names() if "__" in n}
-    _servers = [s for s in config.mcp.servers if s.name in _active]
-    if _servers:
-        mcp_manager = McpManager(config.mcp.model_copy(update={"servers": _servers}))
-        mcp_manager.start()
-        register_mcp_tools(config, mcp_manager)
+{% if spec.mcp.enabled %}    # Launched servers live for the process lifetime (uvicorn runs until Ctrl-C).
+    _start_mcp(config)
 {% endif %}    typer.secho(
         f"Serving on http://{host}:{bind_port}  (open this; Ctrl-C to stop)",
         fg=typer.colors.GREEN,

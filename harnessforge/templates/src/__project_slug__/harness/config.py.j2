@@ -109,6 +109,22 @@ class ObservabilityConfig(BaseModel):
     trace_dir: str = "traces"
 
 
+class SessionsConfig(BaseModel):
+    """Where to persist resumable conversations (``run --continue`` / ``chat`` /
+    web ``?session=``). Runtime-only (no spec field).
+
+    When ``enabled`` (default), each run saves the conversation body to
+    ``<dir>/<id>.json`` so a later ``--continue`` / ``--resume`` / web session
+    picks it up. Only message text is stored — never secrets (keys stay in
+    ``.env``). ``false`` = no persistence; runs stay single-shot.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    dir: str = ".harness/sessions"
+
+
 class BudgetConditionSpec(BaseModel):
     """One budget limit: a threshold, optionally over a tumbling time window.
 
@@ -258,6 +274,7 @@ class Config(BaseModel):
     context: ContextConfig = Field(default_factory=ContextConfig)
     paradigms: ParadigmsConfig = Field(default_factory=ParadigmsConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
+    sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
 {% if spec.mcp.enabled %}    mcp: McpConfig = Field(default_factory=McpConfig)
 {% endif %}{% if spec.skills.enabled %}    skills: SkillsConfig = Field(default_factory=SkillsConfig)
@@ -274,7 +291,7 @@ class Config(BaseModel):
             empties: dict[str, Any] = {
                 "llms": [], "roles": {}, "tools": [],
                 "prompts": {}, "context": {}, "paradigms": {},
-                "observability": {}, "budget": {},
+                "observability": {}, "sessions": {}, "budget": {},
             }
             for key, default in empties.items():
                 if key in data and data[key] is None:

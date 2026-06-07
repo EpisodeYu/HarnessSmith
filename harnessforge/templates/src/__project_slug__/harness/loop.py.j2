@@ -39,12 +39,14 @@ def run(
     hooks: Hooks | None = None,
     trace: Trace | None = None,
     on_delta: Callable[[str], None] | None = None,
+    history: list[dict] | None = None,
 ) -> RunResult:
     """Run one turn using paradigm ``mode`` (defaults to ``config.paradigms.default``).
 
     Raises ``ValueError`` if ``mode`` is not in ``config.paradigms.enabled`` or is
     not a registered paradigm. Every other argument is forwarded unchanged to the
     selected paradigm, so the call site is identical to the old single loop.
+    ``history`` is prior conversation messages (no system prompt) to resume from.
     """
     paradigms = config.paradigms
     name = mode or paradigms.default
@@ -63,4 +65,5 @@ def run(
         hooks=hooks,
         trace=trace,
         on_delta=on_delta,
+        history=history,
     )

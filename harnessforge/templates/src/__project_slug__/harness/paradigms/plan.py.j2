@@ -54,8 +54,12 @@ def run(
     hooks: Hooks | None = None,
     trace: Trace | None = None,
     on_delta: Callable[[str], None] | None = None,
+    history: list[dict] | None = None,
 ) -> RunResult:
-    """Run one read-only planning turn (low-risk tools only)."""
+    """Run one read-only planning turn (low-risk tools only).
+
+    ``history`` is prior conversation messages (no system prompt) to resume from;
+    the returned ``RunResult.messages`` is the full body after this turn."""
     hooks = hooks or Hooks()
     if client is None:
         if client_for is None:
@@ -81,6 +85,7 @@ def run(
     system = build_system_prompt(config) + "\n\n" + _PLAN_INSTRUCTION
     messages: list[dict] = [
         {"role": "system", "content": system},
+        *(history or []),
         {"role": "user", "content": user_input},
     ]
     trace.event("run_start", mode=MODE, role=role, model=profile.model, tools=active)
@@ -143,4 +148,15 @@ def run(
         cost_usd=trace.cost_usd,
     )
     trace.close()
-    return RunResult(answer=answer, steps=step, stop_reason=stop_reason, trace=trace, mode=MODE)
+    # Record the final answer in the body so a resumed session sees this reply.
+    # Budget-stop notices are synthetic, so they stay out of the saved history.
+    if stop_reason == "final" and answer:
+        messages.append({"role": "assistant", "content": answer})
+    return RunResult(
+        answer=answer,
+        steps=step,
+        stop_reason=stop_reason,
+        trace=trace,
+        mode=MODE,
+        messages=messages[1:],
+    )

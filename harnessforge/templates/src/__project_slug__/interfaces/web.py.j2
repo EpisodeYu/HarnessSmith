@@ -35,6 +35,7 @@ from ..harness.hooks import Hooks
 from ..harness.llm import ClientRouter, LLMResponse, OpenAIClient, ToolCall
 from ..harness.loop import run as run_loop
 from ..harness.paradigms import PARADIGMS
+from ..harness import session as session_store
 
 _INDEX_HTML = (Path(__file__).parent / "web_index.html").read_text(encoding="utf-8")
 
@@ -86,13 +87,22 @@ def _safe_repo_path(path: str) -> Path | None:
 
 
 def _chat_events(
-    message: str, config: Config, *, mock: bool, stream: bool = True, mode: str | None = None
+    message: str,
+    config: Config,
+    *,
+    mock: bool,
+    stream: bool = True,
+    mode: str | None = None,
+    session_id: str | None = None,
+    history: list[dict] | None = None,
 ):
     """Drive one ``run()`` in a worker thread and yield its events as SSE.
 
     With ``stream=True`` assistant text is forwarded token-by-token as
     ``event: token``; otherwise only step/tool/final events are emitted. ``mode``
     selects the loop paradigm (defaults to ``config.paradigms.default``).
+    ``history`` resumes a prior conversation; the updated body is saved under
+    ``session_id`` when sessions are enabled.
     """
     q: queue.Queue = queue.Queue()
     hooks = _StreamHooks(q)
@@ -108,7 +118,12 @@ def _chat_events(
                 config=config,
                 hooks=hooks,
                 on_delta=on_delta,
+                history=history,
             )
+            if session_id is not None and config.sessions.enabled:
+                session_store.save(
+                    session_id, result.messages, config.sessions.dir, mode=result.mode
+                )
             q.put(("final", {
                 "answer": result.answer,
                 "mode": result.mode,
@@ -122,6 +137,9 @@ def _chat_events(
         finally:
             q.put(None)
 
+    # Tell the client which session this turn belongs to (so it can resume).
+    if session_id is not None:
+        yield _sse("session", {"id": session_id})
     threading.Thread(target=worker, daemon=True).start()
     while True:
         item = q.get()
@@ -141,13 +159,43 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
         return _INDEX_HTML
 
     @app.get("/chat")
-    def chat(message: str, stream: bool = True, mode: str | None = None) -> StreamingResponse:
+    def chat(
+        message: str,
+        stream: bool = True,
+        mode: str | None = None,
+        session: str | None = None,
+    ) -> StreamingResponse:
+        cfg = app.state.config
+        # Resume the given session, or mint a new id; disabled sessions => one-shot.
+        if cfg.sessions.enabled:
+            session_id = session or session_store.new_id()
+            history = session_store.load(session_id, cfg.sessions.dir) if session else []
+        else:
+            session_id, history = None, None
         return StreamingResponse(
             _chat_events(
-                message, app.state.config, mock=app.state.mock, stream=stream, mode=mode
+                message, cfg, mock=app.state.mock, stream=stream, mode=mode,
+                session_id=session_id, history=history,
             ),
             media_type="text/event-stream",
         )
+
+    @app.get("/sessions")
+    def sessions() -> dict:
+        """List saved sessions (most recent first) for the chat session picker."""
+        cfg = app.state.config
+        if not cfg.sessions.enabled:
+            return {"sessions": []}
+        return {"sessions": session_store.summaries(cfg.sessions.dir)}
+
+    @app.get("/sessions/{session_id}")
+    def session_detail(session_id: str) -> dict:
+        """Return one session's message body so the UI can replay it on resume."""
+        cfg = app.state.config
+        return {
+            "id": session_id,
+            "messages": session_store.load(session_id, cfg.sessions.dir),
+        }
 
     @app.get("/paradigms")
     def paradigms() -> dict:

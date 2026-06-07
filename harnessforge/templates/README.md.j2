@@ -69,6 +69,21 @@ runtime knob). Each paradigm is a small, self-contained file under
 `src/{{ project_slug }}/harness/paradigms/` — read it, edit it, or add your own
 (see [`AGENTS.md`](./AGENTS.md)). It's a plain name→function registry, not a
 framework.
+
+## Sessions (resume a conversation)
+
+Every `run` saves the conversation to `.harness/sessions/<id>.json`, so you can
+pick it back up later:
+
+```bash
+{{ project_slug }} run "start a task"          # prints session=<id>
+{{ project_slug }} run --continue "and then?"  # resume the most recent session
+{{ project_slug }} run --resume <id> "more…"   # resume a specific session
+{{ project_slug }} chat                         # multi-turn REPL (Ctrl-D / /exit to quit)
+```
+
+Only message text is stored — **never secrets** (keys stay in `.env`). Turn it
+off with `sessions.enabled: false` in `config.yaml`{% if interfaces.web %}; the web chat resumes via its session picker{% endif %}.
 {% if interfaces.web %}
 ## Web chat + config panel
 
@@ -125,12 +140,13 @@ src/{{ project_slug }}/
     tools.py                # tool registry + built-in safe tools
     hooks.py                # lifecycle hooks (extend without touching the loop)
     trace.py                # JSONL trace + token/cost accounting
+    session.py              # save/resume a conversation (.harness/sessions/<id>.json)
     prompts.py              # system-prompt assembly
     mock.py                 # offline MockLLM for tests / --mock
 {% if spec.mcp.enabled %}    mcp.py                  # optional MCP tool bridge (stdio + remote)
 {% endif %}{% if spec.skills.enabled %}    skills.py               # standard Agent Skills (SKILL.md discovery + read_skill)
 {% endif %}  interfaces/
-    cli.py                  # `run` — one question, one answer
+    cli.py                  # `run` (one turn, resumable) + `chat` (multi-turn REPL)
 {% if interfaces.web %}    web.py                  # `serve` — FastAPI SSE chat + live /config panel
 {% endif %}tests/                      # mock-driven tests (no API key needed)
 ```

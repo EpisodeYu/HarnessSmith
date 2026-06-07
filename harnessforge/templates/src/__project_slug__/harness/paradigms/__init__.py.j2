@@ -16,7 +16,7 @@ each other — they import only this contract and the stable infra modules
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
 from ..hooks import Hooks
@@ -35,6 +35,11 @@ class RunResult:
     stop_reason: str
     trace: Trace
     mode: str = "agent"  # which paradigm produced this result
+    # The conversation body after this turn (every message EXCEPT the system
+    # prompt). A session store persists this so a later run can resume by
+    # passing it back as ``history`` — the system prompt is always rebuilt from
+    # config, so prompt/rules edits take effect on resume.
+    messages: list[dict] = field(default_factory=list)
 
 
 class Paradigm(Protocol):

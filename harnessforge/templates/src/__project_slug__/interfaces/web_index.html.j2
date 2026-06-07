@@ -26,6 +26,10 @@
         <span data-i18n="no_llm">Please configure an LLM first.</span>
         <button id="no-llm-link" type="button" class="ml-1 underline" data-i18n="no_llm_link">Go to Config → LLM</button>
       </div>
+      <div class="flex items-center gap-2 text-sm">
+        <button id="chat-new" type="button" class="rounded-lg border px-3 py-1" data-i18n="chat_new">New chat</button>
+        <select id="chat-sessions" class="flex-1 rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_sessions_title" title="Saved sessions (resume)"></select>
+      </div>
       <div id="log" class="h-96 overflow-y-auto rounded-lg border bg-white p-4 text-sm space-y-2"></div>
       <form id="chat-form" class="flex items-center gap-2">
         <input id="msg" class="flex-1 rounded-lg border px-3 py-2" data-i18n-ph="chat_placeholder" placeholder="Ask something…" autocomplete="off" />
@@ -140,6 +144,8 @@
       en: {
         nav_chat: "Chat", nav_config: "Config", chat_placeholder: "Ask something…",
         chat_send: "Send", chat_stream: "stream", chat_mode_title: "Loop paradigm",
+        chat_new: "New chat", chat_sessions_title: "Saved sessions (resume)",
+        chat_session_new_opt: "— new session —",
         no_llm: "No LLM is configured yet — you can't chat until you add one.",
         no_llm_link: "Go to Config → LLM",
         cfg_intro: "Runtime behavioral config (no secrets). Edits apply in-process.",
@@ -191,6 +197,8 @@
       zh: {
         nav_chat: "对话", nav_config: "配置", chat_placeholder: "问点什么…",
         chat_send: "发送", chat_stream: "流式", chat_mode_title: "循环范式",
+        chat_new: "新会话", chat_sessions_title: "已保存会话(续聊)",
+        chat_session_new_opt: "— 新会话 —",
         no_llm: "尚未配置任何 LLM —— 请先添加一个才能对话。",
         no_llm_link: "前往 配置 → LLM",
         cfg_intro: "运行期行为性配置(无密钥)。修改进程内即时生效。",
@@ -279,6 +287,52 @@
     }
     loadParadigms();
 
+    // ---- chat sessions (resume across turns / reloads) ------------------
+    let currentSession = null;
+
+    async function loadSessions() {
+      try {
+        const data = await (await fetch("/sessions")).json();
+        const sel = $("chat-sessions");
+        sel.innerHTML = "";
+        const blank = document.createElement("option");
+        blank.value = ""; blank.textContent = t("chat_session_new_opt");
+        sel.appendChild(blank);
+        for (const s of data.sessions || []) {
+          const opt = document.createElement("option");
+          opt.value = s.id;
+          const when = s.updated ? new Date(s.updated * 1000).toLocaleString() : "";
+          opt.textContent = (s.preview || s.id) + (when ? " · " + when : "");
+          sel.appendChild(opt);
+        }
+        sel.value = currentSession || "";
+      } catch (err) { /* sessions disabled or none yet */ }
+    }
+
+    function renderHistory(messages) {
+      log.innerHTML = "";
+      for (const m of messages || []) {
+        if (m.role === "user") line("you: " + (m.content || ""), "font-semibold");
+        else if (m.role === "assistant") { if (m.content) line(m.content, "text-slate-900 whitespace-pre-wrap"); }
+        else if (m.role === "tool") line("← " + (m.content || ""), "text-emerald-700");
+      }
+    }
+
+    async function openSession(id) {
+      if (!id) { currentSession = null; log.innerHTML = ""; return; }
+      try {
+        const data = await (await fetch("/sessions/" + encodeURIComponent(id))).json();
+        currentSession = id;
+        renderHistory(data.messages);
+      } catch (err) { line("error loading session", "text-red-600"); }
+    }
+
+    $("chat-new").addEventListener("click", () => {
+      currentSession = null; log.innerHTML = ""; $("chat-sessions").value = "";
+    });
+    $("chat-sessions").addEventListener("change", () => openSession($("chat-sessions").value));
+    loadSessions();
+
     $("chat-form").addEventListener("submit", (e) => {
       e.preventDefault();
       if (!hasLLM()) { show("config"); showCfg("llm"); return; }
@@ -292,8 +346,12 @@
       let answer = null;
       let url = "/chat?message=" + encodeURIComponent(message) + "&stream=" + stream;
       if (mode) url += "&mode=" + encodeURIComponent(mode);
+      if (currentSession) url += "&session=" + encodeURIComponent(currentSession);
       const es = new EventSource(url);
 
+      es.addEventListener("session", (ev) => {
+        currentSession = JSON.parse(ev.data).id;  // remember it so the next turn resumes
+      });
       es.addEventListener("token", (ev) => {
         if (answer === null) answer = line("", "text-slate-900 whitespace-pre-wrap");
         answer.textContent += JSON.parse(ev.data).text;
@@ -316,6 +374,7 @@
         if (answer === null) line(d.answer, "text-slate-900 whitespace-pre-wrap");
         line("[" + d.mode + "] [" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=" + d.cost_usd, "text-xs text-slate-400");
         es.close();
+        loadSessions();  // refresh the picker (new session appears / preview updates)
       });
     });
 

@@ -1,0 +1,188 @@
+"""Generated harness tests for session persistence: save/load, resume seeding
+the next turn, the no-secrets guarantee, and the CLI ``run --resume`` / ``chat``
+paths. Run with ``uv run pytest``."""
+
+from __future__ import annotations
+
+import json
+
+from {{ project_slug }}.harness import session as session_store
+from {{ project_slug }}.harness.config import Config
+from {{ project_slug }}.harness.loop import run
+from {{ project_slug }}.harness.mock import MockLLM
+
+
+def _config(tmp_path, **overrides):
+    data = {
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "prompts": {"system": "You are a test agent."},
+        "tools": [{"name": "get_current_time", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": True, "dir": str(tmp_path / "sessions")},
+        "budget": {},
+    }
+    data.update(overrides)
+    return Config.model_validate(data)
+
+
+def test_run_result_carries_message_body(tmp_path):
+    """RunResult.messages is the conversation body (no system; final answer kept)."""
+    config = _config(tmp_path)
+    result = run("hello there", client=MockLLM(script=["hi back"]), config=config)
+
+    assert all(m["role"] != "system" for m in result.messages)
+    assert result.messages[0] == {"role": "user", "content": "hello there"}
+    assert {"role": "assistant", "content": "hi back"} in result.messages
+
+
+def test_save_load_latest_roundtrip(tmp_path):
+    sdir = str(tmp_path / "s")
+    sid = session_store.new_id()
+    msgs = [{"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1"}]
+    session_store.save(sid, msgs, sdir, mode="agent")
+
+    assert session_store.load(sid, sdir) == msgs
+    assert session_store.latest(sdir) == sid
+    assert session_store.load("missing", sdir) == []  # unknown id -> empty
+
+
+def test_resume_seeds_history_into_next_turn(tmp_path):
+    """A resumed turn sees the prior conversation, and the body grows cumulatively."""
+    config = _config(tmp_path)
+    sdir = config.sessions.dir
+
+    r1 = run("first question", client=MockLLM(script=["first answer"]), config=config)
+    sid = session_store.new_id()
+    session_store.save(sid, r1.messages, sdir)
+
+    sid2, history = session_store.resolve(
+        continue_=False, resume_id=sid, sessions_dir=sdir
+    )
+    assert sid2 == sid
+    assert {"role": "assistant", "content": "first answer"} in history
+
+    seen: dict = {}
+
+    class Spy(MockLLM):
+        def complete(self, messages, tools=None):
+            seen["messages"] = messages
+            return super().complete(messages, tools)
+
+    r2 = run(
+        "second question",
+        client=Spy(script=["second answer"]),
+        config=config,
+        history=history,
+    )
+    # the model saw system + prior turn + new user, in order
+    contents = [m.get("content") for m in seen["messages"]]
+    assert seen["messages"][0]["role"] == "system"
+    assert "first question" in contents and "first answer" in contents
+    assert "second question" in contents
+    # the returned body is cumulative (both turns present)
+    body = [m.get("content") for m in r2.messages]
+    assert "first question" in body and "second question" in body
+
+
+def test_session_file_has_no_secret(tmp_path, monkeypatch):
+    """Keys live in .env and never enter messages, so the file carries no secret."""
+    secret = "sk-supersecret-DO-NOT-LEAK"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    config = _config(tmp_path)
+    sdir = config.sessions.dir
+
+    result = run("hello", client=MockLLM(script=["hi"]), config=config)
+    sid = session_store.new_id()
+    session_store.save(sid, result.messages, sdir)
+
+    text = (tmp_path / "sessions" / f"{sid}.json").read_text(encoding="utf-8")
+    assert secret not in text
+
+
+def test_continue_picks_most_recent(tmp_path):
+    import time
+
+    sdir = str(tmp_path / "s")
+    session_store.save("aaa", [{"role": "user", "content": "old"}], sdir)
+    time.sleep(0.01)
+    session_store.save("bbb", [{"role": "user", "content": "new"}], sdir)
+
+    sid, history = session_store.resolve(
+        continue_=True, resume_id=None, sessions_dir=sdir
+    )
+    assert sid == "bbb"
+    assert history == [{"role": "user", "content": "new"}]
+
+
+def test_resolve_fresh_when_nothing_to_continue(tmp_path):
+    sid, history = session_store.resolve(
+        continue_=True, resume_id=None, sessions_dir=str(tmp_path / "empty")
+    )
+    assert sid and history == []
+
+
+def _write_config(tmp_path, **overrides):
+    import yaml
+
+    cfg = _config(tmp_path, **overrides).model_dump(mode="json")
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    return cfg_file
+
+
+def test_cli_run_persists_then_resumes(tmp_path):
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    sdir = tmp_path / "sessions"
+    cfg_file = _write_config(tmp_path)
+
+    r1 = CliRunner().invoke(app, ["run", "--mock", "--config", str(cfg_file), "hello"])
+    assert r1.exit_code == 0, r1.output
+    files = list(sdir.glob("*.json"))
+    assert len(files) == 1  # the run saved exactly one session
+    sid = files[0].stem
+    first = json.loads(files[0].read_text(encoding="utf-8"))["messages"]
+
+    r2 = CliRunner().invoke(
+        app, ["run", "--mock", "--resume", sid, "--config", str(cfg_file), "again"]
+    )
+    assert r2.exit_code == 0, r2.output
+    assert list(sdir.glob("*.json")) == [files[0]]  # same session, not a new one
+    grown = json.loads(files[0].read_text(encoding="utf-8"))["messages"]
+    assert len(grown) > len(first)  # the resumed turn appended to the body
+
+
+def test_cli_run_disabled_sessions_writes_nothing(tmp_path):
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    sdir = tmp_path / "sessions"
+    cfg_file = _write_config(tmp_path, sessions={"enabled": False, "dir": str(sdir)})
+
+    result = CliRunner().invoke(app, ["run", "--mock", "--config", str(cfg_file), "hi"])
+    assert result.exit_code == 0, result.output
+    assert not sdir.exists()  # no persistence when disabled
+
+
+def test_cli_chat_repl_multi_turn(tmp_path):
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    sdir = tmp_path / "sessions"
+    cfg_file = _write_config(tmp_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["chat", "--mock", "--config", str(cfg_file)],
+        input="hello\nagain\n/exit\n",
+    )
+    assert result.exit_code == 0, result.output
+    files = list(sdir.glob("*.json"))
+    assert len(files) == 1  # one continuous session across both turns
+    msgs = json.loads(files[0].read_text(encoding="utf-8"))["messages"]
+    assert sum(1 for m in msgs if m["role"] == "user") == 2

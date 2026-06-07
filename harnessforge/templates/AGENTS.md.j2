@@ -150,6 +150,13 @@ engine" / dynamic graph / DSL. To make a read-only paradigm,
 filter tools with `registry.active_names(config.enabled_tool_names(),
 allow_high_risk=False)` (that's exactly how `plan`/`ask` stay safe).
 
+To make your paradigm resumable (`run --continue` / `--resume`, `chat`, the web
+session), accept `history` (prior messages, no system prompt) and seed your loop
+with `[system, *history, user]`, then return the conversation body as
+`RunResult.messages` — copy how `agent.py` does it. Ignore both and the paradigm
+still works, it just won't resume. Saving/loading lives in `harness/session.py`
+(plain JSON under `.harness/sessions/`, message text only — never secrets).
+
 ### Self-correction & reflection (do it with a real signal)
 
 The `agent` loop already self-corrects *online*: a failing tool comes back as an

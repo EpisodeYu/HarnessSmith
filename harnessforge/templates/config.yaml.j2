@@ -72,6 +72,14 @@ observability:
   trace: {{ observability.trace | tojson }}
   trace_dir: {{ observability.trace_dir }}
 
+# Conversation persistence (resume). When enabled (default), each run saves the
+# message body to <dir>/<id>.json so `run --continue` / `run --resume <id>` /
+# `chat` / the web session can pick it up. Stores message text only — NEVER
+# secrets (keys stay in .env). enabled: false = no persistence (single-shot runs).
+sessions:
+  enabled: true
+  dir: .harness/sessions
+
 # Per-run guardrails (reset each turn). Each entry in `conditions` is a limit;
 # `combine` decides when to stop: or = any limit hit (safe default), and = all
 # must hit. Built-ins (harness/budget.py): max_steps (rounds), max_seconds,

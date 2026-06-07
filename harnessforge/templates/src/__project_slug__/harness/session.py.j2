@@ -1,0 +1,130 @@
+"""Session persistence: save / resume a conversation across runs.
+
+A *session* is one ongoing conversation, possibly spanning many ``run`` calls
+(or a whole ``chat`` REPL / web session). Each session is one JSON file under
+``<dir>/<id>.json`` holding the message **body** — every message except the
+system prompt. The system prompt is rebuilt from ``config`` on each turn, so
+prompt / rules / sampling edits take effect when you resume (the saved body is
+just the user/assistant/tool turns).
+
+No secrets are ever written: API keys live only in ``.env`` and never enter the
+message stream, so the session file carries conversation text only. This is
+plain ``json`` + ``pathlib`` — zero extra dependencies. Read it, edit it, delete
+a file to forget a conversation.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+import uuid
+from pathlib import Path
+
+
+def new_id() -> str:
+    """A short, unique session id (same shape as a trace run id)."""
+    return uuid.uuid4().hex[:12]
+
+
+def _path(session_id: str, sessions_dir: str) -> Path:
+    return Path(sessions_dir) / f"{session_id}.json"
+
+
+def _read(session_id: str, sessions_dir: str) -> dict:
+    path = _path(session_id, sessions_dir)
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def load(session_id: str, sessions_dir: str) -> list[dict]:
+    """Return the stored message body for ``session_id`` (``[]`` if unknown)."""
+    return _read(session_id, sessions_dir).get("messages", [])
+
+
+def save(
+    session_id: str,
+    messages: list[dict],
+    sessions_dir: str,
+    *,
+    mode: str = "agent",
+) -> None:
+    """Persist the conversation body for ``session_id`` (creating the dir).
+
+    Stores only the message body (no system prompt) and never a secret — keys
+    stay in ``.env`` and never reach ``messages``. ``created`` is preserved
+    across updates; ``updated`` is refreshed each save.
+    """
+    directory = Path(sessions_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    existing = _read(session_id, sessions_dir)
+    record = {
+        "id": session_id,
+        "created": existing.get("created", time.time()),
+        "updated": time.time(),
+        "mode": mode,
+        "messages": messages,
+    }
+    _path(session_id, sessions_dir).write_text(
+        json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def latest(sessions_dir: str) -> str | None:
+    """The id of the most recently updated session, or ``None`` if there are none."""
+    directory = Path(sessions_dir)
+    if not directory.is_dir():
+        return None
+    files = sorted(
+        directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
+    return files[0].stem if files else None
+
+
+def resolve(
+    *, continue_: bool, resume_id: str | None, sessions_dir: str
+) -> tuple[str, list[dict]]:
+    """Pick the session id + prior history for this run.
+
+    ``--resume <id>`` targets a specific session; ``--continue`` picks the most
+    recent one; otherwise a brand-new session id is minted with empty history.
+    A resume/continue against a missing session just starts it fresh.
+    """
+    if resume_id:
+        return resume_id, load(resume_id, sessions_dir)
+    if continue_:
+        prev = latest(sessions_dir)
+        if prev is not None:
+            return prev, load(prev, sessions_dir)
+    return new_id(), []
+
+
+def summaries(sessions_dir: str) -> list[dict]:
+    """List sessions (most recent first) for a picker: id, updated, mode, preview."""
+    directory = Path(sessions_dir)
+    if not directory.is_dir():
+        return []
+    out: list[dict] = []
+    for path in sorted(
+        directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+    ):
+        data = _read(path.stem, sessions_dir)
+        if not data:
+            continue
+        preview = ""
+        for message in data.get("messages", []):
+            if message.get("role") == "user":
+                preview = (message.get("content") or "")[:80]
+                break
+        out.append(
+            {
+                "id": data.get("id", path.stem),
+                "updated": data.get("updated", path.stat().st_mtime),
+                "mode": data.get("mode", ""),
+                "preview": preview,
+            }
+        )
+    return out
