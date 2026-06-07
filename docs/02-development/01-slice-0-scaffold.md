@@ -8,7 +8,7 @@
 
 ## 1. 交付物
 
-- `harnessforge/spec.py` — `HarnessSpec` Pydantic v2 模型,**字段集(v0.1 定稿)**:`version` / `project_slug` / `llms`(profile 列表占位)/ `roles` / `prompts`(system/persona,Slice 1 消费)/ `tools`(占位)/ `interfaces` / `observability` / `budget`(max_steps/max_seconds/max_cost_usd,Slice 1 落地预算停止)。context / rag / secrets backend 字段**预留但本片不展开**。全模型 `extra="forbid"`。
+- `harnessforge/spec.py` — `HarnessSpec` Pydantic v2 模型,**字段集(v0.1 定稿)**:`version` / `project_slug` / `llms`(profile 列表占位)/ `roles` / `prompts`(system/persona,Slice 1 消费;**`persona` 已于 2026-06-07 移除**——只是 system 后的冗余拼接,见 `04-slice-3-product-web.md §4`)/ `tools`(占位)/ `interfaces` / `observability` / `budget`(max_steps/max_seconds/max_cost_usd,Slice 1 落地预算停止)。context / rag / secrets backend 字段**预留但本片不展开**。全模型 `extra="forbid"`。
 - `harnessforge/generator.py` — 加载 spec(YAML)→ Jinja2 渲染 `templates/` → 写出独立仓库 → 写入 `harness.spec.yaml`(spec 快照)→ `git init`;**重跑检测到目标非空则报错不覆盖**(`TargetExistsError`)。
 - `harnessforge/cli.py` — Typer 入口,先实现 `new <dir> --spec <spec.yaml>`(含 `--git/--no-git`)。非法 spec → exit 2;重跑非空目录 → 警告 exit 1。
 - `harnessforge/templates/` — 最小模板(`.j2`):`pyproject.toml` + `README.md` + `.env.example` + `LICENSE` + `.gitignore` + 空 `src/<pkg>/__init__.py`。

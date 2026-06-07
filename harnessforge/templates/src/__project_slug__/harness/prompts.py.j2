@@ -1,4 +1,4 @@
-"""Assemble the system prompt from config (system + optional persona + rules{% if spec.skills.enabled %} + skills{% endif %}{% if spec.mcp.enabled %} + environment{% endif %})."""
+"""Assemble the system prompt from config (system + rules{% if spec.skills.enabled %} + skills{% endif %}{% if spec.mcp.enabled %} + environment{% endif %})."""
 
 from __future__ import annotations
 
@@ -66,8 +66,6 @@ def _environment_note(config: Config) -> str:
 {% endif %}def build_system_prompt(config: Config) -> str:
     prompts = config.prompts
     parts = [prompts.system or _DEFAULT_SYSTEM]
-    if prompts.persona:
-        parts.append(prompts.persona)
     rules = _load_rules(config)
     if rules:
         parts.append(rules)

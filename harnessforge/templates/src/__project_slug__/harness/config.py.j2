@@ -61,7 +61,6 @@ class PromptsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     system: str | None = None
-    persona: str | None = None
     # Always-apply project rules (the open AGENTS.md / CLAUDE.md / .cursor rules
     # pattern). Paths to markdown files whose text is injected into every system
     # prompt; a missing file is skipped. Runtime knob — edit without regenerating.

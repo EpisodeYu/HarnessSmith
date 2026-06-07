@@ -21,7 +21,7 @@
 
 - `harnessforge/spec.py` — `Prompts` 新增 `rules_files: list[str] = []`(生成期种子;`extra="forbid"` 下声明字段)。
 - 产物 `harness/config.py`(模板)— `PromptsConfig` 新增 `rules_files`(运行期旋钮)。
-- 产物 `harness/prompts.py`(模板)— 新增 `_load_rules(config)`:按 `prompts.rules_files` 顺序读 markdown、拼成 "Project rules (always follow):" 段,插在 system+persona 之后、skills/environment 之前;**始终生成**(空列表 = 零效果)。
+- 产物 `harness/prompts.py`(模板)— 新增 `_load_rules(config)`:按 `prompts.rules_files` 顺序读 markdown、拼成 "Project rules (always follow):" 段,插在 system 之后、skills/environment 之前;**始终生成**(空列表 = 零效果)。(注:原"system+persona 之后",`persona` 已于 2026-06-07 移除。)
 - 产物 `config.yaml`(模板)— 渲染 `prompts.rules_files`(seed 自 spec)+ 注释说明。
 - `harnessforge/templates/RULES.md.j2` — starter 规则文件,**仅当 `"RULES.md" in spec.prompts.rules_files` 时生成**(`generator.py` `CONDITIONAL_TEMPLATES`),否则产物零 rule 文件痕迹。
 - `coding-assistant` preset — seed `prompts.rules_files: [RULES.md]`(旗舰 preset 开箱演示)。
@@ -48,7 +48,7 @@
 
 - [x] **① 做薄版全局 rule、排为小 slice——人 2026-06-05 定向**(对位 Claude Code/Cursor rule;配置级 shell hook 仅记 v1+ backlog)。
 - [x] **② spec 面加 `prompts.rules_files` 初值种子——人 2026-06-05 选定**(让 preset/wizard 可播种;触发 `CLAUDE.md §6` 改 `HarnessSpec`,人已签)。
-- **软确认(非阻塞,`CLAUDE.md §5.3`)**:字段名 spec/config 同取 `rules_files`(1:1 映射);starter 文件名 `RULES.md` 且仅 seed 时生成;注入位置在 persona 之后、skills 之前;段首固定 "Project rules (always follow):"。
+- **软确认(非阻塞,`CLAUDE.md §5.3`)**:字段名 spec/config 同取 `rules_files`(1:1 映射);starter 文件名 `RULES.md` 且仅 seed 时生成;注入位置在 system 之后、skills 之前(原 persona 之后,`persona` 已于 2026-06-07 移除);段首固定 "Project rules (always follow):"。
 
 ## 5. 本 slice 注意 / 留给后续
 

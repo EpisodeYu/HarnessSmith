@@ -29,7 +29,7 @@ def test_defaults_fill_in_minimal_spec():
     assert spec.project_slug == "agent_harness"
     assert spec.interfaces.cli is True
     assert spec.observability.trace_dir == "traces"
-    assert spec.prompts.system is None and spec.prompts.persona is None
+    assert spec.prompts.system is None
     assert spec.budget.conditions == {} and spec.budget.combine == "or"
     assert spec.mcp.enabled is False  # MCP capability is opt-in (Slice 4)
     assert spec.paradigms == ["agent"]  # only the agent loop by default (Slice 5)
