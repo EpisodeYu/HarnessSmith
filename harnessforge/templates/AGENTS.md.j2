@@ -77,6 +77,11 @@ prompts:
     - .cursor/rules.md    # or reuse rules you already keep for other tools
 ```
 
+A **`CLAUDE.md` at the project root is auto-recognized** — dropped in, it's
+injected even without listing it (the open convention). This file (`AGENTS.md`)
+is the exception: it's the harness's "how to extend me" guide, **not** a runtime
+rule, so it is never auto-injected (list it explicitly if you ever want it to be).
+
 This is a **runtime knob** — add/edit rule files and the list without
 regenerating. Keep rules short and imperative; every line is sent on every turn,
 so each costs tokens. (Unlike a Skill, which is loaded on demand only when

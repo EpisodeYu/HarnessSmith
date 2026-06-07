@@ -9,19 +9,33 @@ from .config import Config
 {% endif %}
 _DEFAULT_SYSTEM = "You are a helpful assistant. Use the available tools when they help."
 
+# Conventional always-apply rule files auto-discovered at the project root (the
+# open CLAUDE.md pattern) even when not listed in prompts.rules_files — drop a
+# CLAUDE.md in and it's picked up. NOTE: AGENTS.md is intentionally NOT here. In a
+# generated harness AGENTS.md is the "how to extend me" developer guide, not a
+# runtime rule; list it explicitly in rules_files if you really want it injected.
+_CONVENTION_RULE_FILES = ("CLAUDE.md",)
+
 
 def _load_rules(config: Config) -> str:
     """Read the always-apply project rule files and join them into one section.
 
-    This is the open AGENTS.md / CLAUDE.md / .cursor-rules pattern: every file
-    listed in ``config.prompts.rules_files`` is read and injected into the system
-    prompt verbatim. A path that doesn't exist (or is empty) is skipped, so a
-    rule file you haven't written yet is a no-op rather than an error. Add or
-    edit files and list them in ``config.yaml`` — no regeneration needed.
+    This is the open AGENTS.md / CLAUDE.md / .cursor-rules pattern: every file in
+    ``config.prompts.rules_files`` (explicit) plus any conventional root file in
+    ``_CONVENTION_RULE_FILES`` (e.g. a CLAUDE.md you dropped in) is read and
+    injected into the system prompt verbatim — deduplicated, in that order. A path
+    that doesn't exist (or is empty) is skipped, so a rule file you haven't written
+    yet is a no-op rather than an error. Add or edit files and list them in
+    ``config.yaml`` — no regeneration needed.
     """
+    seen: set[str] = set()
     sections: list[str] = []
-    for path in config.prompts.rules_files:
+    for path in [*config.prompts.rules_files, *_CONVENTION_RULE_FILES]:
         candidate = Path(path)
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
         if candidate.is_file():
             text = candidate.read_text(encoding="utf-8").strip()
             if text:

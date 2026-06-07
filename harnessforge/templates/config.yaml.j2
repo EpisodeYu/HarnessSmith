@@ -30,7 +30,9 @@ prompts:
 {% if spec.prompts.system %}  system: {{ spec.prompts.system | tojson }}
 {% endif %}  # Always-apply project rules: markdown files injected into EVERY system
   # prompt (the open AGENTS.md / CLAUDE.md / .cursor rules pattern). Drop a file,
-  # list it here — no regeneration needed. A missing file is skipped.
+  # list it here — no regeneration needed. A missing file is skipped. A CLAUDE.md
+  # at the project root is auto-recognized even if unlisted (AGENTS.md is not — it's
+  # the harness dev guide, not a runtime rule).
   rules_files: {{ spec.prompts.rules_files | tojson }}
 
 tools:

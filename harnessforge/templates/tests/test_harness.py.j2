@@ -440,11 +440,32 @@ def test_rules_files_inject_into_system_prompt(tmp_path):
     assert "Always cite your sources." in prompt  # the rule file's text is injected
 
 
-def test_no_rules_files_means_no_rules_section(tmp_path):
+def test_no_rules_files_means_no_rules_section(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # isolate from any conventional file in the test cwd
     config = _config(tmp_path, prompts={"system": "Base prompt."})
     prompt = build_system_prompt(config)
     assert prompt.startswith("Base prompt.")
     assert "Project rules" not in prompt  # zero footprint when none are configured
+
+
+def test_root_claude_md_is_auto_recognized(tmp_path, monkeypatch):
+    """A CLAUDE.md at the project root is injected automatically (the open
+    convention), even when it isn't listed in prompts.rules_files."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "CLAUDE.md").write_text("Follow the house style.", encoding="utf-8")
+    config = _config(tmp_path, prompts={"system": "Base."})
+    prompt = build_system_prompt(config)
+    assert "Follow the house style." in prompt
+
+
+def test_root_agents_md_is_not_auto_injected(tmp_path, monkeypatch):
+    """AGENTS.md is the harness's developer guide, NOT a runtime rule — it must not
+    be auto-injected (only CLAUDE.md / explicitly listed files are)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "AGENTS.md").write_text("DEV GUIDE — do not inject this at runtime.", encoding="utf-8")
+    config = _config(tmp_path, prompts={"system": "Base."})
+    prompt = build_system_prompt(config)
+    assert "do not inject" not in prompt
 
 
 def test_context_truncate_is_noop_without_triggers():
