@@ -89,7 +89,7 @@
 - [x] **③ Plan/Ask 只读 = 只读/低风险工具、禁 write/shell——人 2026-06-05**;Plan 对齐 Cursor(只产只读计划不动手)。
 - [x] **④ 切换入口 = CLI `--mode` + Web 下拉——人 2026-06-05**。
 - [x] **⑤ 默认范式 = `paradigms` 首项(种入 `config.yaml`)——人 2026-06-05**。
-- [x] **⑥ Plan→执行 Build 切换按钮 = 推迟——人 2026-06-05**(backlog → `00-overview §2` Slice 11+)。
+- [x] **⑥ Plan→执行 Build 切换按钮 = 推迟——人 2026-06-05**(backlog → `00-overview §2` Slice 13+)。
 - [x] **⑦ 范式可扩展 = 薄注册表 + 装饰器(同 tools)——人 2026-06-05**:运行期用户可自加范式,写函数 + `@register_paradigm` + 配 `enabled`。
 - [x] **⑧ 解耦 = 每范式自包含、互不 import,放宽薄——人 2026-06-05**:改 agent 不影响 ask。
 - [x] **⑨ 注册表始终存在(默认 agent 也有)——人 2026-06-05**:默认产物不再与 Slice 1–4 逐字一致,门禁改"行为一致 + 无新增依赖"。
