@@ -87,6 +87,7 @@
       <div data-cfg="tools" class="hidden space-y-2">
         <p class="text-xs text-slate-500" data-i18n="tools_hint">Allowlist — only enabled tools are offered to the model.</p>
         <div id="cfg-tools" class="space-y-1"></div>
+        <p class="text-xs text-gray-500" data-i18n="tools_extend_hint">Add your own with @registry.tool in harness/tools.py, then list its name under tools: in config.yaml to see it here — the checkbox then toggles it live (no restart). The panel can't show a tool that isn't in config.yaml. See AGENTS.md.</p>
       </div>
 
       <div data-cfg="prompts" class="hidden space-y-3">
@@ -167,6 +168,7 @@
         bud_extend_hint: "Add your own: @register_budget_condition in harness/budget.py — it appears here once imported (see AGENTS.md).",
         tools_hint: "Allowlist — only enabled tools are offered to the model.",
         tools_group_custom: "Your tools", tools_group_builtin: "Built-in tools", tools_group_mcp: "MCP",
+        tools_extend_hint: "Add your own with @registry.tool in harness/tools.py, then list its name under tools: in config.yaml to see it here — the checkbox then toggles it live (no restart). The panel can't show a tool that isn't in config.yaml. See AGENTS.md.",
         prompts_system: "system", prompts_persona: "persona", prompts_rules: "rules_files (one path per line)",
         paradigms_enabled: "Enabled paradigms", paradigms_default: "default",
         par_extend_hint: "Add your own: @register_paradigm in harness/paradigms/ — it appears here once imported (see AGENTS.md).",
@@ -213,6 +215,7 @@
         bud_extend_hint: "可自定义:在 harness/budget.py 用 @register_budget_condition 注册,import 后即在此出现(见 AGENTS.md)。",
         tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
         tools_group_custom: "你的工具", tools_group_builtin: "内置工具", tools_group_mcp: "MCP",
+        tools_extend_hint: "自定义:在 harness/tools.py 用 @registry.tool 注册,再把名字加进 config.yaml 的 tools: 才会出现在这里 —— 之后勾选框即可实时开关(免重启)。面板无法显示不在 config.yaml 里的工具。见 AGENTS.md。",
         prompts_system: "系统提示", prompts_persona: "人设", prompts_rules: "rule 文件(每行一个路径)",
         paradigms_enabled: "启用的范式", paradigms_default: "默认范式",
         par_extend_hint: "可自定义:在 harness/paradigms/ 用 @register_paradigm 注册,import 后即在此出现(见 AGENTS.md)。",

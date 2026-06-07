@@ -54,6 +54,7 @@ def test_index_groups_tools_by_source():
     assert "BUILTIN_TOOLS" in body and "get_current_time" in body
     assert "tools_group_custom" in body  # user-registered tools sort to the top
     assert "<details" in body and 'indexOf("__")' in body  # MCP folded by server
+    assert "tools_extend_hint" in body  # footnote: register + allowlist in config.yaml
 
 
 def test_chat_streams_tool_call_and_final_over_sse():
