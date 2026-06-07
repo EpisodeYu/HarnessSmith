@@ -55,3 +55,4 @@
 - **wizard(Slice 7)需覆盖 `prompts.rules_files`**:已在 `08-slice-7-wizard.md` §2.1 高级组登记。
 - **配置级 shell hook(Claude Code/Cursor 风格,事件→shell 命令、可 veto)= v1+ backlog**(`00-overview §2` Slice 11+):代码级 `Hooks` 已覆盖同等能力(own-code 写子类即可),且与 v1+ HITL 确认 hook 重叠、引入"配置跑任意 shell"新安全面,故缓做。
 - **不做**:rule 的 glob / 描述触发 auto-attach(Cursor 进阶特性)——MVP 只做"always-apply 文件列表"薄版;按需触发交给 SKILL(Slice 6)。
+- **后续(2026-06-07,Slice 3 §4)**:产物 Web 的 Prompts 标签把 `rules_files` 从"路径清单 textarea"改为**每文件可编辑正文**(`GET`/`POST /rules` 读写文件,限仓库内相对路径),保留多文件、契合 own-your-code;机制(`_load_rules` + `rules_files`)不变,纯产物 Web 体验升级,详见 `04-slice-3-product-web.md §4`。

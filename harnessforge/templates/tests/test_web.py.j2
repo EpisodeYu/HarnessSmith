@@ -220,6 +220,42 @@ def test_env_endpoint_rejects_bad_name():
     assert resp.status_code == 400
 
 
+def test_rules_endpoint_writes_and_reads_within_repo(tmp_path, monkeypatch):
+    """POST /rules writes a rule file's content to disk; GET /rules reads back each
+    configured rules_files entry so the Prompts tab can edit the files in place."""
+    monkeypatch.chdir(tmp_path)
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "prompts": {"system": "s", "rules_files": ["RULES.md"]},
+        "observability": {"trace": False},
+    })
+    client = TestClient(create_app(config, mock=True))
+    assert client.post("/rules", json={"path": "RULES.md", "content": "Be concise."}).status_code == 200
+    assert (tmp_path / "RULES.md").read_text(encoding="utf-8") == "Be concise."
+    assert client.get("/rules").json()["rules"] == [
+        {"path": "RULES.md", "content": "Be concise.", "exists": True}
+    ]
+
+
+def test_rules_endpoint_rejects_paths_outside_repo(tmp_path, monkeypatch):
+    """A rule path must be relative and stay inside the project — absolute paths and
+    `..` escapes are rejected, so the panel can't read or overwrite arbitrary files."""
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(create_app(_config(), mock=True))
+    assert client.post("/rules", json={"path": "../escape.md", "content": "x"}).status_code == 400
+    assert client.post("/rules", json={"path": "/etc/evil", "content": "x"}).status_code == 400
+    assert not (tmp_path.parent / "escape.md").exists()
+
+
+def test_index_has_editable_rule_files():
+    """The Prompts tab edits rule-file content in place (not a path list): each
+    file gets a content box, and Save writes it via /rules."""
+    body = _client().get("/").text
+    assert 'id="cfg-rules"' in body and "function buildRules" in body
+    assert "/rules" in body
+
+
 def test_test_llm_preflight_reports_missing_key_without_network():
     """A profile whose api_key_env is unset (and no base_url) fails fast — no call."""
     resp = _client().post(

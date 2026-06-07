@@ -99,8 +99,14 @@
       <div data-cfg="prompts" class="hidden space-y-3">
         <label class="block text-sm"><span data-i18n="prompts_system">system</span>
           <textarea id="cfg-p-system" rows="3" class="mt-1 block w-full rounded-lg border px-3 py-2"></textarea></label>
-        <label class="block text-sm"><span data-i18n="prompts_rules">rules_files (one path per line)</span>
-          <textarea id="cfg-p-rules" rows="2" class="mt-1 block w-full rounded-lg border px-3 py-2 font-mono"></textarea></label>
+        <div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium" data-i18n="prompts_rules">Rule files (always-on)</span>
+            <button id="cfg-rule-add" type="button" class="rounded-lg border px-2 py-1 text-xs" data-i18n="rule_add">+ Add rule file</button>
+          </div>
+          <p class="mt-1 text-xs text-gray-500" data-i18n="rules_hint">Plain markdown files you own (the AGENTS.md / CLAUDE.md pattern), injected verbatim into every system prompt. Edit the content here; Save writes the files + the active list.</p>
+          <div id="cfg-rules" class="mt-2 space-y-2"></div>
+        </div>
       </div>
 
       <div data-cfg="paradigms" class="hidden space-y-3">
@@ -174,7 +180,9 @@
         tools_group_custom: "Your tools", tools_group_builtin: "Built-in tools", tools_group_mcp: "MCP",
         tools_scan: "Scan MCP", tools_scanning: "scanning servers…", tools_scanned: "discovered",
         tools_extend_hint: "Your own tools: register with @registry.tool in harness/tools.py, then list the name under tools: in config.yaml to see it here. MCP tools are discovered from your servers (Scan) — tick one to add it to the allowlist. The checkbox toggles a tool live (no restart). See AGENTS.md.",
-        prompts_system: "system", prompts_rules: "rules_files (one path per line)",
+        prompts_system: "system", prompts_rules: "Rule files (always-on)",
+        rule_add: "+ Add rule file", rule_path_ph: "path, e.g. RULES.md",
+        rules_hint: "Plain markdown files you own (the AGENTS.md / CLAUDE.md pattern), injected verbatim into every system prompt. Edit the content here; Save writes the files + the active list.",
         paradigms_enabled: "Enabled paradigms", paradigms_default: "default",
         par_extend_hint: "Add your own: @register_paradigm in harness/paradigms/ — it appears here once imported (see AGENTS.md).",
         obs_trace: "write JSONL trace", obs_tracedir: "trace_dir",
@@ -222,7 +230,9 @@
         tools_group_custom: "你的工具", tools_group_builtin: "内置工具", tools_group_mcp: "MCP",
         tools_scan: "扫描 MCP", tools_scanning: "正在连接服务器…", tools_scanned: "已发现",
         tools_extend_hint: "你自己的工具:在 harness/tools.py 用 @registry.tool 注册,再把名字加进 config.yaml 的 tools: 才会出现在这里。MCP 工具会从你配置的服务器自动发现(扫描)—— 勾上即加入 allowlist。勾选框可实时开关某个工具(免重启)。见 AGENTS.md。",
-        prompts_system: "系统提示", prompts_rules: "rule 文件(每行一个路径)",
+        prompts_system: "系统提示", prompts_rules: "规则文件(常驻)",
+        rule_add: "+ 添加规则文件", rule_path_ph: "路径,如 RULES.md",
+        rules_hint: "你拥有的纯 markdown 文件(AGENTS.md / CLAUDE.md 模式),每轮原文注入系统提示。在此编辑正文;保存会写入文件 + 生效列表。",
         paradigms_enabled: "启用的范式", paradigms_default: "默认范式",
         par_extend_hint: "可自定义:在 harness/paradigms/ 用 @register_paradigm 注册,import 后即在此出现(见 AGENTS.md)。",
         obs_trace: "写 JSONL trace", obs_tracedir: "trace 目录",
@@ -315,6 +325,9 @@
     // Save (POST /config); this flag drives the "unsaved" marker, the leave/reload
     // guards, and stops a tab switch back to Config from reloading over the edits.
     let dirty = false;
+    // Last-loaded content of each rule file (path -> text, from GET /rules), so the
+    // Prompts tab can edit the files in place. Save writes them back via POST /rules.
+    let ruleContents = {};
     // What's registered in code (GET /registries): the universe the Context +
     // Paradigms dropdowns are built from. A configured name missing here is flagged.
     let reg = { paradigms: [], strategies: [], conditions: [], budget_conditions: [] };
@@ -669,6 +682,29 @@
     }
 {% endif %}
 
+    // One rule-file row: editable path + its markdown content + remove. Content is
+    // loaded from GET /rules and written back by Save (POST /rules), so you edit the
+    // actual files (AGENTS.md / CLAUDE.md style), multiple allowed.
+    function ruleRow(path, content) {
+      const div = document.createElement("div");
+      div.className = "rule rounded-lg border p-2 space-y-1";
+      div.innerHTML =
+        "<div class='flex items-center gap-2'>" +
+          "<input class='r-path flex-1 rounded border px-2 py-1 font-mono text-xs' placeholder='" + t("rule_path_ph") + "' value='" + esc(path) + "'/>" +
+          "<button type='button' class='r-remove text-xs text-red-600'>" + t("profile_remove") + "</button>" +
+        "</div>" +
+        "<textarea class='r-content w-full rounded border px-2 py-1 font-mono text-xs' rows='4'></textarea>";
+      div.querySelector(".r-content").value = content || "";
+      return div;
+    }
+    function buildRules() {
+      const box = $("cfg-rules");
+      box.innerHTML = "";
+      (((cfg.prompts || {}).rules_files) || []).forEach((path) => {
+        box.appendChild(ruleRow(path, ruleContents[path] || ""));
+      });
+    }
+
     function renderConfig() {
       const pc = $("cfg-profiles");
       pc.innerHTML = "";
@@ -680,7 +716,7 @@
       // prompts
       const pr = cfg.prompts || {};
       $("cfg-p-system").value = pr.system || "";
-      $("cfg-p-rules").value = (pr.rules_files || []).join("\n");
+      buildRules();
       buildParadigms();
       // observability
       const obs = cfg.observability || {};
@@ -731,8 +767,8 @@
       patch.tools = toolsOut;
       const prompts = {};
       if ($("cfg-p-system").value.trim()) prompts.system = $("cfg-p-system").value.trim();
-      const rules = $("cfg-p-rules").value.split("\n").map((s) => s.trim()).filter(Boolean);
-      prompts.rules_files = rules;
+      prompts.rules_files = Array.from(document.querySelectorAll("#cfg-rules .r-path"))
+        .map((i) => i.value.trim()).filter(Boolean);
       patch.prompts = prompts;
       patch.paradigms = {
         enabled: Array.from(document.querySelectorAll(".cfg-par-cb"))
@@ -756,6 +792,10 @@
     async function loadConfig() {
       cfg = await (await fetch("/config")).json();
       try { reg = await (await fetch("/registries")).json(); } catch (e) { /* keep last */ }
+      try {  // current rule-file contents, so the Prompts tab can edit them in place
+        ruleContents = {};
+        (await (await fetch("/rules")).json()).rules.forEach((r) => { ruleContents[r.path] = r.content; });
+      } catch (e) { /* keep last */ }
       renderConfig();
       gateChat();
       setDirty(false);
@@ -821,16 +861,43 @@
     $("cfg-reload").addEventListener("click", () => {
       if (!dirty || confirm(t("cfg_reload_confirm"))) loadConfig();
     });
+    $("cfg-rule-add").addEventListener("click", () => { $("cfg-rules").appendChild(ruleRow("", "")); setDirty(true); });
+    $("cfg-rules").addEventListener("click", (e) => {
+      const rm = e.target.closest(".r-remove");
+      if (rm) { rm.closest(".rule").remove(); setDirty(true); }  // drops it from the list, not from disk
+    });
+
+    // Write every rule file's content to disk (POST /rules), then return any error.
+    // Folding this into Save (not a per-file button) keeps the unsaved guard honest:
+    // one Save persists both the files and the active list.
+    async function saveRuleFiles() {
+      let err = "";
+      for (const row of document.querySelectorAll("#cfg-rules .rule")) {
+        const path = row.querySelector(".r-path").value.trim();
+        if (!path) continue;
+        const content = row.querySelector(".r-content").value;
+        const resp = await fetch("/rules", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path, content }),
+        });
+        if (resp.ok) ruleContents[path] = content;
+        else err = (await resp.json()).error || t("cfg_invalid");
+      }
+      return err;
+    }
 {% if spec.mcp.enabled %}    $("cfg-mcp-scan").addEventListener("click", discoverMcp);
 {% endif %}
     $("cfg-save").addEventListener("click", async () => {
+      const ruleErr = await saveRuleFiles();  // write the rule files before saving the list
       const resp = await fetch("/config", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(collectConfig()),
       });
       const data = await resp.json();
-      if (resp.ok) { cfg = data; renderConfig(); gateChat(); loadParadigms(); setDirty(false); $("cfg-status").textContent = t("cfg_saved"); }
-      else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
+      if (resp.ok) {
+        cfg = data; renderConfig(); gateChat(); loadParadigms(); setDirty(false);
+        $("cfg-status").textContent = ruleErr ? (t("cfg_saved") + " — " + ruleErr) : t("cfg_saved");
+      } else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });
 
     function show(which) {

@@ -70,6 +70,21 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _safe_repo_path(path: str) -> Path | None:
+    """Resolve ``path`` under the project dir, or ``None`` if it's empty, absolute,
+    or escapes the project root. Confines rule-file reads/writes to this repo so the
+    panel can never read/overwrite arbitrary files on the host."""
+    if not path or Path(path).is_absolute():
+        return None
+    root = Path.cwd().resolve()
+    candidate = (root / path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
 def _chat_events(
     message: str, config: Config, *, mock: bool, stream: bool = True, mode: str | None = None
 ):
@@ -274,6 +289,37 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         return app.state.config.model_dump(mode="json", include=set(_EDITABLE_FIELDS))
+
+    @app.get("/rules")
+    def get_rules() -> dict:
+        """Return the content of each configured always-apply rule file
+        (``prompts.rules_files``) so the panel can edit it in place. A not-yet-written
+        (or out-of-repo) file comes back empty. These are plain markdown files you own
+        — the same AGENTS.md / CLAUDE.md / .cursor-rules pattern."""
+        rules = []
+        for path in app.state.config.prompts.rules_files:
+            resolved = _safe_repo_path(path)
+            exists = resolved is not None and resolved.is_file()
+            content = resolved.read_text(encoding="utf-8") if exists else ""
+            rules.append({"path": path, "content": content, "exists": exists})
+        return {"rules": rules}
+
+    @app.post("/rules")
+    async def set_rule(request: Request):
+        """Write one rule file's content to disk (markdown you own). The path must be
+        relative and stay inside the project directory — absolute paths or ``..``
+        escapes are rejected. Add the path to ``prompts.rules_files`` (POST /config)
+        for it to be injected."""
+        body = await request.json()
+        resolved = _safe_repo_path(str(body.get("path", "")).strip())
+        if resolved is None:
+            return JSONResponse(
+                {"error": "path must be relative and inside the project directory"},
+                status_code=400,
+            )
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(str(body.get("content", "")), encoding="utf-8")
+        return {"ok": True}
 
     return app
 
