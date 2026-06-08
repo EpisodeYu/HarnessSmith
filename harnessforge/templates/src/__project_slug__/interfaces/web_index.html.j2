@@ -136,7 +136,7 @@
           <label class="block text-sm"><span data-i18n="mem_capacity">capacity (inject_max_chars)</span>
             <input id="cfg-mem-capacity" type="number" min="1" class="mt-1 block w-full rounded-lg border px-3 py-2" /></label>
         </div>
-        <label class="flex items-center gap-2 text-sm"><input id="cfg-mem-auto" type="checkbox" /> <span data-i18n="mem_auto">auto-consolidate at session end when oversized (uses the compaction model)</span></label>
+        <label class="flex items-center gap-2 text-sm"><input id="cfg-mem-auto" type="checkbox" /> <span data-i18n="mem_auto">auto-consolidate at session end when oversized (uses the memory-role model)</span></label>
         <label class="block text-sm"><span data-i18n="mem_policy">memory policy (what/when to remember)</span>
           <textarea id="cfg-mem-policy" rows="2" class="mt-1 block w-full rounded-lg border px-3 py-2" data-i18n-ph="mem_policy_ph" placeholder="e.g. Remember durable user preferences, decisions, and project facts; don't store transient chit-chat."></textarea></label>
         <div class="border-t pt-3">
@@ -199,7 +199,8 @@
         roles_label: "Roles", roles_hint: "Bind each role to a profile above.",
         role_generation: "generation (main loop)", role_compaction: "compaction (summarize)",
         role_title: "title (session naming)",
-        role_use_first: "(first profile)",
+{% if spec.memory.enabled %}        role_memory: "memory (long-term memory manager)",
+{% endif %}        role_use_first: "(first profile)",
         profile_name: "name", profile_model: "model",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "env var name",
@@ -234,7 +235,7 @@
 {% if spec.memory.enabled %}        mem_hint: "A small note the agent keeps across sessions, injected into every system prompt. The agent curates it with the memory tools; you can edit it here too.",
         mem_readonly: "read-only (the agent can read memory but not write it)",
         mem_backend: "backend", mem_capacity: "capacity (inject_max_chars)",
-        mem_auto: "auto-consolidate at session end when oversized (uses the compaction model)",
+        mem_auto: "auto-consolidate at session end when oversized (uses the memory-role model)",
         mem_policy: "memory policy (what/when to remember)",
         mem_policy_ph: "e.g. Remember durable user preferences, decisions, and project facts; don't store transient chit-chat.",
         mem_note: "Current memory note", mem_oversized: "The note is larger than the injection cap — older notes aren't recalled. Consolidate to condense it.",
@@ -267,7 +268,8 @@
         roles_label: "角色", roles_hint: "把每个角色绑定到上面的某个配置。",
         role_generation: "generation(主循环)", role_compaction: "compaction(压缩)",
         role_title: "title(会话命名)",
-        role_use_first: "(用第一个配置)",
+{% if spec.memory.enabled %}        role_memory: "memory(长期记忆管理)",
+{% endif %}        role_use_first: "(用第一个配置)",
         profile_name: "名称", profile_model: "model",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "环境变量名",
@@ -302,7 +304,7 @@
 {% if spec.memory.enabled %}        mem_hint: "一份 agent 跨会话维护的简短笔记,每轮注入系统提示。agent 用记忆工具自行维护,你也可在此编辑。",
         mem_readonly: "只读(agent 只能读记忆,不能写)",
         mem_backend: "后端", mem_capacity: "容量(注入上限 inject_max_chars)",
-        mem_auto: "会话结束时若超出容量自动整理(用 compaction 模型)",
+        mem_auto: "会话结束时若超出容量自动整理(用 memory 角色模型)",
         mem_policy: "记忆策略(记什么 / 何时写)",
         mem_policy_ph: "例如:记住稳定的用户偏好、决策、项目事实;不要记临时闲聊。",
         mem_note: "当前记忆笔记", mem_oversized: "笔记已超过注入上限——较早的笔记不会再被召回。整理可精简它。",
@@ -703,7 +705,7 @@
       rc.querySelectorAll(".role-target").forEach((el) => { prev[el.dataset.role] = el.value; });
       rc.innerHTML = "";
       const roles = cfg.roles || {};
-      const names = ["generation", "compaction", "title"];
+      const names = ["generation", "compaction", "title"{% if spec.memory.enabled %}, "memory"{% endif %}];
       Object.keys(roles).forEach((r) => { if (!names.includes(r)) names.push(r); });
       names.forEach((role) => {
         const selected = (role in prev) ? prev[role] : (roles[role] || "");
@@ -1225,7 +1227,7 @@
 {% if spec.memory.enabled %}
     // Memory note actions — immediate (not part of the main config Save), each
     // refreshes the note + size after. Save note = POST /memory (overwrite),
-    // Consolidate = POST /memory/consolidate (compaction-role rewrite), Clear =
+    // Consolidate = POST /memory/consolidate (memory-role rewrite), Clear =
     // DELETE /memory.
     async function refreshMemory() { await loadMemory(); buildMemory(); }
     $("cfg-mem-save").addEventListener("click", async () => {

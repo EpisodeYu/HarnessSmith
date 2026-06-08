@@ -281,8 +281,9 @@ class McpConfig(BaseModel):
     ``policy`` is an optional instruction (what/when to remember) injected with the
     memory section to shape HOW the agent curates memory — without editing the main
     system prompt. ``auto_consolidate`` (off by default) condenses an oversized note
-    at a session boundary (CLI ``chat`` exit) via the ``compaction`` role — never in
-    the reply hot path, so a quick reply or a weak generation model isn't affected.
+    at a session boundary (CLI ``chat`` exit) via the ``memory`` role (the memory
+    manager — see ``roles`` below, falls back to the first profile) — never in the
+    reply hot path, so a quick reply or a weak generation model isn't affected.
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -22,11 +22,13 @@ llms:
 {% endfor %}
 # Map roles to profile names above. `generation` is the main loop; `compaction`
 # (optional) is used by context summarize; `title` (optional) names sessions in
-# the web sidebar. Both fall back to generation if unset.
+# the web sidebar{% if spec.memory.enabled %}; `memory` (optional) is the memory manager that consolidates
+# long-term memory{% endif %}. All optional roles fall back to the first profile if unset.
 roles:
 {% for role, target in roles.items() %}  {{ role }}: {{ target }}
 {% endfor %}{% if "compaction" not in roles %}  # compaction: {{ (llms[0].name if llms else "default") }}
 {% endif %}{% if "title" not in roles %}  # title: {{ (llms[0].name if llms else "default") }}        # web session-title model (a small/cheap model is ideal)
+{% endif %}{% if spec.memory.enabled and "memory" not in roles %}  # memory: {{ (llms[0].name if llms else "default") }}       # long-term memory manager (used by `memory consolidate`)
 {% endif %}
 prompts:
 {% if spec.prompts.system %}  system: {{ spec.prompts.system | tojson }}
@@ -157,5 +159,5 @@ memory:
   inject_max_chars: 4000   # cap injected note size (keeps the prompt thin)
   read_only: false         # true = only the read tool (the agent can't write memory)
   policy: null             # optional: what/when to remember — injected to shape how the agent curates memory
-  auto_consolidate: false  # true = condense an oversized note at chat-session end (uses the compaction role, never the reply path)
+  auto_consolidate: false  # true = condense an oversized note at chat-session end (uses the memory role, never the reply path)
 {% endif %}

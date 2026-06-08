@@ -286,8 +286,9 @@ def compact_rescue(config: Config, dropped: list[dict]) -> None:
 # The file backend's note grows unbounded (``memory_append`` only adds); only the
 # most-recent ``inject_max_chars`` are ever injected, so cost/context stay bounded
 # but older notes silently stop being recalled once the note is "oversized".
-# Consolidation rewrites the note smaller with the COMPACTION-role model (a capable
-# summarizer, not the live generation model). Following how memory frameworks
+# Consolidation rewrites the note smaller with the ``memory``-role model (the
+# dedicated "memory manager" — falls back to the first profile, so set it to a
+# capable model if you want a stronger one). Following how memory frameworks
 # (Mem0 / Letta / LangMem) handle it, this runs in the BACKGROUND — at a session
 # boundary or on demand — NOT in the reply hot path, so a quick reply or a weak
 # generation model is never affected.
@@ -315,10 +316,10 @@ def is_oversized(config: Config) -> bool:
 
 
 def consolidate(config: Config, *, client=None, mock: bool = False) -> bool:
-    """Condense the note via the ``compaction``-role model. Returns ``True`` if it
-    ran (a backend with a readable+writable, non-empty note). ``client`` may be
-    passed (tests); otherwise one is built lazily for the ``compaction`` role
-    (falling back to the first profile, same as context summarization)."""
+    """Condense the note via the ``memory``-role model (the memory manager). Returns
+    ``True`` if it ran (a backend with a readable+writable, non-empty note).
+    ``client`` may be passed (tests); otherwise one is built lazily for the
+    ``memory`` role (which falls back to the first profile when unset)."""
     backend = get_backend(config)
     if backend is None or not hasattr(backend, "read") or not hasattr(backend, "write"):
         return False
@@ -328,7 +329,7 @@ def consolidate(config: Config, *, client=None, mock: bool = False) -> bool:
     if client is None:
         from .llm import ClientRouter
 
-        client = ClientRouter(config, mock=mock).client_for("compaction")
+        client = ClientRouter(config, mock=mock).client_for("memory")
     rewritten = (
         client.complete(
             [

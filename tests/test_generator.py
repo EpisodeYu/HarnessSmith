@@ -712,6 +712,8 @@ def test_memory_web_panel_present_when_enabled(tmp_path, spec):
     assert "cfg-mem-consolidate" in idx and "cfg-mem-policy" in idx
     # Q1: memory_* are listed among BUILTIN_TOOLS so they group under "Built-in"
     assert '"memory_read", "memory_append", "memory_write"' in idx
+    # the dedicated memory-manager role shows up in the Roles dropdown
+    assert "role_memory" in idx and '"memory"' in idx
     assert "/memory/consolidate" in web_py and '"memory",' in web_py
 
 
@@ -726,5 +728,5 @@ def test_memory_web_footprint_absent_when_disabled(tmp_path, spec):
     web_py = (base / "web.py").read_text(encoding="utf-8")
 
     assert 'data-cfg="memory"' not in idx and "subtab_memory" not in idx
-    assert "memory_read" not in idx
+    assert "memory_read" not in idx and "role_memory" not in idx
     assert "/memory" not in web_py and "memory" not in web_py.lower()

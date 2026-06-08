@@ -218,6 +218,21 @@ def test_consolidate_rewrites_note(tmp_path):
     assert backend.read() == "fact one\nfact two"
 
 
+def test_consolidate_uses_memory_role(tmp_path):
+    """Consolidation routes through the dedicated ``memory`` role: unset falls back
+    to the first profile, and it can be bound to its own profile."""
+    config = _config(tmp_path)  # roles = {generation: default}
+    assert config.profile_for("memory").name == "default"  # falls back to first
+
+    config = Config.model_validate({
+        "llms": [{"name": "main", "model": "m1"}, {"name": "tiny", "model": "m2"}],
+        "roles": {"generation": "main", "memory": "tiny"},
+        "observability": {"trace": False},
+        "memory": {"backend": "file", "path": str(tmp_path / "memory.md")},
+    })
+    assert config.profile_for("memory").name == "tiny"  # bound to its own model
+
+
 def test_maybe_auto_consolidate_respects_flag_and_size(tmp_path):
     # auto off: never runs, even when oversized
     config = _config(tmp_path, inject_max_chars=10, auto_consolidate=False)

@@ -493,7 +493,7 @@ memory:
   inject_max_chars: 4000   # cap on injected note size (also the "oversized" mark)
   read_only: false         # true = only the read tool (the agent can't write memory)
   policy: null             # optional instruction (what/when to remember), injected with memory
-  auto_consolidate: false  # condense an oversized note at chat-session end (compaction role)
+  auto_consolidate: false  # condense an oversized note at chat-session end (memory role)
 ```
 
 `policy` shapes HOW the agent curates memory (e.g. "remember durable preferences
@@ -504,11 +504,12 @@ it's injected alongside the memory section every turn.
 
 The note grows as the agent appends; once it passes `inject_max_chars` it is
 **oversized** — older notes stop being recalled (only the most-recent slice is
-injected). *Consolidation* rewrites it smaller with the **`compaction`-role** model
-(keep durable facts, merge duplicates, drop stale). Following how memory frameworks
-(Mem0 / Letta / LangMem) do it, this runs in the **background** — at a session
-boundary or on demand — **never in the reply hot path**, so a quick reply or a weak
-generation model is never disturbed:
+injected). *Consolidation* rewrites it smaller with the **`memory`-role** model (the
+"memory manager" — bind it under `roles:` to a capable model, or leave it unset to
+reuse the first profile; keep durable facts, merge duplicates, drop stale).
+Following how memory frameworks (Mem0 / Letta / LangMem) do it, this runs in the
+**background** — at a session boundary or on demand — **never in the reply hot
+path**, so a quick reply or a weak generation model is never disturbed:
 
 - **Manual**: `{{ project_slug }} memory consolidate`{% if interfaces.web %}, or the web Memory panel's "Consolidate" button (`POST /memory/consolidate`){% endif %}.
 - **Automatic**: set `auto_consolidate: true` — the CLI `chat` consolidates an
