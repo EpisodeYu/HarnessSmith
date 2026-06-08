@@ -1,0 +1,144 @@
+"""Runtime extension loading + config self-checks — the user-extension entry point.
+
+The single place the CLI / web call right after ``load_config`` to:
+
+- **import your extension modules** so their ``@register_*`` decorators run
+  (``config.extensions`` — the documented spot for tools / paradigms / budget &
+  context conditions / memory backends that live OUTSIDE the built-in files);
+- **mount a Hooks subclass** named in ``config.hooks`` (logging / guardrails /
+  redaction / human-in-the-loop) without editing ``cli.py`` / ``web.py``;
+- **diagnose config names** that don't resolve: hard errors for references that
+  MUST resolve (a role's profile, a paradigm, the context strategy) and soft
+  warnings for the open registries where an unknown name might just be a
+  not-yet-imported custom extension (budget / context conditions, memory backend).
+
+Thin and dependency-free — plain ``importlib`` over the same registries
+``{{ project_slug }} info`` already prints.
+"""
+
+from __future__ import annotations
+
+import importlib
+
+from .config import Config, ConfigError
+from .hooks import Hooks
+
+
+def import_extensions(config: Config) -> list[str]:
+    """Import every module in ``config.extensions`` so its registrations run.
+
+    Returns the imported module names. A bad module name surfaces as a clean
+    ``ConfigError`` (not a traceback) so a typo in ``extensions:`` is actionable.
+    """
+    imported: list[str] = []
+    for module in config.extensions:
+        try:
+            importlib.import_module(module)
+        except Exception as exc:  # ImportError, or an error raised AT import time
+            raise ConfigError(
+                f"failed to import extension module {module!r} "
+                f"(config.extensions): {exc}"
+            ) from exc
+        imported.append(module)
+    return imported
+
+
+def load_hooks(config: Config) -> Hooks:
+    """Instantiate the ``Hooks`` subclass named in ``config.hooks`` (``"pkg.mod:Class"``).
+
+    Returns a plain no-op ``Hooks()`` when unset. The class is imported and
+    constructed with no arguments; anything else is a clean ``ConfigError``.
+    """
+    spec = (config.hooks or "").strip()
+    if not spec:
+        return Hooks()
+    module_name, sep, class_name = spec.partition(":")
+    if not sep or not class_name.strip():
+        raise ConfigError(
+            f"invalid hooks {spec!r}: use the form 'package.module:ClassName'"
+        )
+    try:
+        module = importlib.import_module(module_name)
+        instance = getattr(module, class_name)()
+    except Exception as exc:
+        raise ConfigError(f"failed to load hooks {spec!r}: {exc}") from exc
+    if not isinstance(instance, Hooks):
+        raise ConfigError(f"hooks {spec!r} is not a Hooks subclass")
+    return instance
+
+
+def check_config(config: Config) -> tuple[list[str], list[str]]:
+    """Return ``(errors, warnings)`` for config names that don't resolve.
+
+    Call AFTER :func:`import_extensions` so custom registrations are visible.
+    *errors* are references that MUST resolve (fail-fast); *warnings* are the open
+    registries where an unknown name might be a custom extension you forgot to
+    import (fail-open at runtime — the budget/context condition is simply skipped,
+    memory injects nothing).
+    """
+    from .budget import BUDGET_CONDITIONS
+    from .context import CONDITIONS, STRATEGIES
+    from .paradigms import PARADIGMS
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    profile_names = {p.name for p in config.llms}
+    for role, target in config.roles.items():
+        if target not in profile_names:
+            errors.append(
+                f"roles.{role} points at unknown profile {target!r}; "
+                f"known profiles: {sorted(profile_names)}"
+            )
+
+    for name in sorted(set(config.paradigms.enabled) | {config.paradigms.default}):
+        if name not in PARADIGMS:
+            errors.append(
+                f"paradigm {name!r} is not registered; registered: {sorted(PARADIGMS)} "
+                "(import its module via extensions?)"
+            )
+
+    if config.context.strategy not in STRATEGIES:
+        errors.append(
+            f"context.strategy {config.context.strategy!r} is not registered; "
+            f"registered: {sorted(STRATEGIES)}"
+        )
+
+    for name in config.context.triggers:
+        if name not in CONDITIONS:
+            warnings.append(
+                f"context trigger {name!r} is not registered — it will be skipped "
+                "(typo, or import its module via extensions?)"
+            )
+
+    for name in config.budget.conditions:
+        if name not in BUDGET_CONDITIONS:
+            warnings.append(
+                f"budget condition {name!r} is not registered — it will be skipped "
+                "(typo, or import its module via extensions?)"
+            )
+
+    # A cost budget that can never fire because the active profile has no
+    # per-token prices (cost stays 0) — easy to misconfigure, so flag it.
+    if "max_cost" in config.budget.conditions:
+        try:
+            profile = config.profile_for("generation")
+            priced = bool(profile.input_cost_per_million or profile.output_cost_per_million)
+        except Exception:
+            priced = True  # can't resolve a profile -> don't nag here
+        if not priced:
+            warnings.append(
+                "budget.max_cost is set but the generation profile has no "
+                "input_cost_per_million / output_cost_per_million, so cost stays 0 "
+                "and max_cost never triggers"
+            )
+{% if spec.memory.enabled %}
+    from .memory import BACKENDS as _MEMORY_BACKENDS
+
+    if config.memory.backend not in _MEMORY_BACKENDS:
+        warnings.append(
+            f"memory.backend {config.memory.backend!r} is not registered — memory "
+            "will inject nothing (typo, or import its module via extensions?)"
+        )
+{% endif %}
+    return errors, warnings

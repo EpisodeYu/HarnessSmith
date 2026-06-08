@@ -154,7 +154,7 @@
 
 ### D-3 · 更多 preset + spec 分享
 
-- 目前只有 `coding-assistant`（实用）+ `rag-research`（骨架）+ 极薄 example。补 `deep-research` / `customer-support` / `data-analyst` 等 preset，是把"5 分钟到价值"做实的最低成本投资；spec 可分享（贴一段 YAML 即复刻）也强化 own-your-code。中等价值、低风险。
+- 目前**只有 `coding-assistant`**（实用）；`rag-research`（骨架）+ 极薄 example 仍是 backlog（尚未落地）。补 `rag-research` / `deep-research` / `customer-support` / `data-analyst` 等 preset，是把"5 分钟到价值"做实的最低成本投资；spec 可分享（贴一段 YAML 即复刻）也强化 own-your-code。中等价值、低风险。
 
 ---
 

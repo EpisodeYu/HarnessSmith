@@ -49,7 +49,7 @@
 - **第 2 个 preset**(rag-research 骨架,RAG 实现可桩)。
 - **极简 Web chat**:FastAPI + SSE 流式聊天页(不含 `/config` 面板)。
 - **多 LLM profile + 角色路由**:命名 profile + `generation`/`compaction`/`embedding` 角色,`client_for(role)` 解析。
-- **上下文管理**(实现说明,2026-06-06 增强为条件/策略两层):**触发条件 `triggers`**(何时压,内置 `max_tokens`/`max_turns`,`combine: or/and` 组合)+ **策略 `strategy`**(怎么压,`truncate`/`summarize`/`none`,用户可 `@register_strategy` 自加)。两者都是薄注册表、按名分发(非抽象层)。运行期 `config.yaml` 权威,`spec.context` 仅种子;**默认 `summarize` + `max_tokens: 192000` 触发、不限轮数**(人 2026-06-06 定),summarize 走 compaction 角色、缺则回落 truncate。
+- **上下文管理**(实现说明,2026-06-06 增强为条件/策略两层):**触发条件 `triggers`**(何时压,内置 `max_tokens`/`max_turns`,`combine: or/and` 组合)+ **策略 `strategy`**(怎么压,`truncate`/`summarize`/`none`,用户可 `@register_strategy` 自加)。两者都是薄注册表、按名分发(非抽象层)。运行期 `config.yaml` 权威,`spec.context` 仅种子;**默认 `summarize` + `max_tokens: 192000` 触发、不限轮数**(人 2026-06-06 定),summarize 走 compaction 角色、**缺 compaction 角色则回落首个 profile(即用 generation 模型做摘要),不回落 truncate**(实现说明 2026-06-08:`profile_for` 缺角色回落首个 profile,故 summarizer 永不为 None;摘要开销已计入 trace 与预算,见 test-report-2026-06-08 RT-1/RT-2)。
 - **生成期 Web wizard**:单页表单产出 spec(L1 先用 CLI + preset 顶替,这里再补 GUI)。
 
 ### L3 — 推迟到 v1+(明确不在 MVP)
@@ -130,7 +130,7 @@ flowchart LR
 - `harnessforge/generator.py` — 渲染模板 → 写出仓库 + 拷入 `harness.spec.yaml` + `git init` + `uv lock` + 重跑警告不覆盖 + 生成后冒烟自检(`uv sync`+`pytest`+mock 跑一步)。
 - `harnessforge/cli.py` — Typer 入口(`new`、`--spec`、`--preset`、交互模式、`doctor` 预检、`--no-verify` 关闭冒烟自检)。
 - `harnessforge/catalog/mcp_servers.yaml` — 精选静态 MCP catalog(L2)。
-- `harnessforge/presets/` — coding-assistant(L1)+ rag-research 骨架(L2)+ 空白示例。
+- `harnessforge/presets/` — **现有仅 coding-assistant(L1)**;rag-research 骨架 + 极薄 example 为 backlog(见 `03 §D-3`,实现说明 2026-06-08:目录下只有 `coding-assistant`)。
 - `harnessforge/templates/` — 生成产物 Jinja2 模板。
 - `harnessforge/wizard/`(L2)— FastAPI + 单页静态表单。
 

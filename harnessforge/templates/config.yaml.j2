@@ -106,6 +106,14 @@ budget:
 {% endif %}{% endfor %}{% else %}  conditions: {}
 {% endif %}    # max_tokens: {threshold: 50000, window_seconds: 60}   # rate: 50k tokens / 60s
     # max_cost: 1.00       # cumulative; needs per-1M-token prices on the profile above
+
+# Runtime extension points (optional). `extensions` imports your own modules at
+# startup so their @register_* run (custom tools / paradigms / budget & context
+# conditions / memory backends that live outside the built-in files). `hooks`
+# mounts a Hooks subclass (logging / guardrails / redaction / HITL) by dotted
+# path — the CLI and web load it automatically. See harness/extensions.py + AGENTS.md.
+extensions: []
+# hooks: "{{ project_slug }}.harness.hooks:Hooks"   # "package.module:ClassName"
 {% if spec.mcp.enabled %}
 # MCP tool servers (runtime knob — add/remove without regenerating). Each server
 # uses stdio (set `command`) OR remote Streamable HTTP (set `url`). Secrets are

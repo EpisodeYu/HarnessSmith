@@ -34,8 +34,29 @@ tools:
 ```
 
 A tool is only exposed to the model when it is **enabled in `config.yaml`** — the
-allowlist. Mark dangerous tools (shell, file writes) with `risk="high"` and keep
-them disabled until you explicitly opt in.
+allowlist. Keep dangerous tools disabled until you explicitly opt in.
+
+**Risk classification (matters for read-only modes).** A tool's `risk` defaults to
+`"safe"`, which also exposes it to the read-only `plan` / `ask` paradigms. So if a
+tool of yours **mutates anything** (writes files, runs commands, calls a
+state-changing API), mark it `risk="high"`:
+
+```python
+@registry.tool(name="write_file", description="...", risk="high")  # agent-only
+def write_file(path: str, content: str) -> str: ...
+```
+
+Otherwise `plan` / `ask`, which a user trusts to be read-only, can call it. (MCP
+tools are the opposite — they default to `risk="high"`, and you opt specific
+read-only ones into a server's `safe_tools`.)
+
+Treat `plan` / `ask` read-only as a **model-A guardrail**, not a security sandbox:
+high-risk tools aren't offered, anything outside the offered set is refused at
+execution, and the prompt tells the model not to change things — but the guarantee
+is only as correct as your `risk` labels (a mutating tool you forgot to mark
+`high` slips through). For a hard guarantee against a misbehaving model or a
+mislabeled tool, gate execution with a hook (human-in-the-loop confirmation) or run
+in an isolated environment (container / read-only filesystem).
 {% if interfaces.web %}
 Once allowlisted it also appears in the web **Config → Tools** tab, listed under
 **Your tools** at the top (the generated built-ins follow; each MCP server's
@@ -98,17 +119,48 @@ Subclass `Hooks` to add logging, guardrails, redaction, or human-in-the-loop
 confirmation — without changing the loop:
 
 ```python
+# src/{{ project_slug }}/harness/hooks.py (or your own module)
 from {{ project_slug }}.harness.hooks import Hooks
 
 class AuditHooks(Hooks):
     def before_tool(self, call):
         print(f"about to call {call.name} with {call.arguments}")
-
-# pass an instance into run(..., hooks=AuditHooks())
 ```
 
 Hook points: `before_step`, `after_step`, `before_tool`, `after_tool`,
 `on_error`.
+
+**Mount it without editing any interface code** — point `config.yaml` at the
+class by dotted path; the CLI (`run` / `chat`) and the web UI load it automatically:
+
+```yaml
+hooks: "{{ project_slug }}.harness.hooks:AuditHooks"   # "package.module:ClassName"
+```
+
+(From your own code you can still pass an instance directly:
+`run(..., hooks=AuditHooks())`. The web composes your hook *with* its streaming
+hook, so a guardrail you mount here also runs under `serve`.)
+
+## Load standalone extension modules
+
+Every registry above (`@registry.tool` / `@register_paradigm` /
+`@register_budget_condition` / `@register_condition` / `@register_strategy`{% if spec.memory.enabled %} /
+`@register_memory`{% endif %}) only runs when its module is imported. Editing a built-in file
+(`tools.py`, `budget.py`, `context.py`{% if spec.memory.enabled %}, `memory.py`{% endif %}) is imported for free. To keep
+your extensions in a **separate module** instead, list it in `config.yaml` so it's
+imported at startup:
+
+```yaml
+extensions:
+  - {{ project_slug }}.ext.my_tools      # any importable module(s); imported before the loop runs
+```
+
+The CLI, `serve`, and `{{ project_slug }} info` import these first, so your
+registrations show up in `info`{% if interfaces.web %} / `GET /registries`{% endif %} and are selectable by name. A
+config name that still doesn't resolve is reported: hard errors for a role's
+profile / a paradigm / the context strategy (fail-fast), and a warning for a
+budget/context condition{% if spec.memory.enabled %} / memory backend{% endif %} that isn't registered (skipped at runtime —
+likely a typo or a module you forgot to list here).
 
 ## Add a paradigm
 

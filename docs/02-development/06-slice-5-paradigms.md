@@ -74,7 +74,7 @@
 - [x] **运行期切换**:CLI `--mode` 三种都跑(本机真实 LiteLLM 验证 agent/plan/ask);Web `/paradigms` + 下拉每条切(`test_web` 覆盖 SSE+mode);默认取 `config.paradigms.default`;非法/未启用 mode 由 `loop.run` 抛 `ValueError`、CLI 捕获报错退出 2(`test_unknown_or_disabled_mode_raises` + 真实 `--mode reflection` 报错验证)。
 - [x] **范式可扩展(本片核心门禁)**:`test_custom_paradigm_registers_and_runs_without_touching_builtins` —— 新写 `@register_paradigm("demo")` + 加进 `paradigms.enabled` → `--mode demo` 跑通,**不改任何内置范式文件 / 不改注册表核心**。
 - [x] **范式解耦**:`test_paradigm_files_do_not_import_each_other` 断言 agent/plan/ask 互不 import;各自自包含 loop。
-- [x] **只读边界**:`test_plan_mode_is_read_only` / `test_ask_mode_is_read_only` —— 高风险工具(`risk="high"`)未被 offer / 未执行;实现为 `registry.active_names(..., allow_high_risk=False)`。
+- [x] **只读边界**:`test_plan_mode_is_read_only` / `test_ask_mode_is_read_only` —— 高风险工具(`risk="high"`)未被 offer,**且执行期拒绝集合外调用**(模型即便 hallucinate 一个未 offer 的 high 工具也不会被执行,返回 ERROR observation 供自纠);实现为 offer 期 `registry.active_names(..., allow_high_risk=False)` + 执行期 `run_tool(..., allowed=set(active))`(2026-06-08 修 PARA-1 下沉到执行边界,见 test-report-2026-06-08)。
 - [x] **注册表始终存在 + 默认行为一致**:agent-only 产物含 `paradigms/`(`__init__`+`agent`)+ `config.yaml paradigms:` 段(`test_paradigm_registry_and_agent_are_always_generated`);golden mock 行为与 Slice 1–4 一致(非逐字)、**无新增运行期依赖**;`pyproject`/`uv.lock`/`requirements.txt` 不含 langchain/langgraph/adk(golden 断言)。
 - [x] **薄(放宽后仍守底线)**:单个范式 ≈ 原 loop 量级(agent ~150 行,plan/ask 同形);注册表/分发是薄 `dict`+装饰器 + 写死按名分发,**非动态图/DSL/编排引擎**。
 - [x] **黄金路径回归**:`coding-assistant`(范式默认 `["agent"]`)golden + docker + uvx 全绿;结构含范式注册表、行为不变。

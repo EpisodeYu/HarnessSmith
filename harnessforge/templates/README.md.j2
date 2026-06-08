@@ -69,6 +69,14 @@ runtime knob). Each paradigm is a small, self-contained file under
 `src/{{ project_slug }}/harness/paradigms/` — read it, edit it, or add your own
 (see [`AGENTS.md`](./AGENTS.md)). It's a plain name→function registry, not a
 framework.
+{% if "plan" in paradigms or "ask" in paradigms %}
+> **Read-only is a model-A guardrail, not a sandbox.** `plan` / `ask` only offer
+> tools marked `risk="safe"` (and refuse anything else at execution). Your own
+> tools default to `safe`, so **if a custom tool mutates anything, mark it
+> `risk="high"`** — otherwise these "read-only" modes can call it. For a hard
+> guarantee against a misbehaving model or a mislabeled tool, gate execution with a
+> hook (human-in-the-loop) or run isolated. See [`AGENTS.md`](./AGENTS.md).
+{% endif %}
 
 ## Sessions (resume a conversation)
 
@@ -131,6 +139,7 @@ note (`.harness/memory.md`, gitignored, **never holds secrets**):
 
 ```bash
 {{ project_slug }} memory show     # print the note
+{{ project_slug }} memory path     # print the note's file path
 {{ project_slug }} memory clear    # forget everything
 ```
 
@@ -179,7 +188,9 @@ touch git, the trace, or `harness.spec.yaml`.
 **Always-apply project rules:** list markdown files under `prompts.rules_files`
 and their text is injected into every system prompt — the open `AGENTS.md` /
 `CLAUDE.md` / `.cursor/rules` pattern.{% if "RULES.md" in spec.prompts.rules_files %} A starter `RULES.md` ships here; edit
-it freely.{% endif %} See [`AGENTS.md`](./AGENTS.md).
+it freely.{% endif %} A `CLAUDE.md` at the project root is auto-injected even if
+unlisted; `AGENTS.md` is **not** (it's this harness's dev guide, not a runtime
+rule). See [`AGENTS.md`](./AGENTS.md).
 
 ## Extending
 

@@ -220,6 +220,20 @@ def test_unknown_budget_condition_is_skipped(tmp_path):
     assert result.stop_reason == "max_steps"
 
 
+def test_unknown_budget_condition_does_not_tighten_and(tmp_path):
+    """BUD-1: under combine=and an unknown/typo'd condition is fail-open — it can
+    never silently make the AND stop earlier. max_steps would fire at step 1, but
+    the unknown name never does, so the run finishes on its own."""
+    config = _config(
+        tmp_path,
+        budget={"combine": "and", "conditions": {"max_steps": 1, "max_typo": 1}},
+    )
+    client = MockLLM(script=[ScriptedCall("get_current_time", {}), "done"])
+    result = run("x", client=client, config=config)
+    assert result.stop_reason == "final"
+    assert result.answer == "done"
+
+
 def test_budget_cumulative_without_window():
     from {{ project_slug }}.harness.budget import BudgetTracker
     from {{ project_slug }}.harness.config import BudgetConfig
@@ -393,6 +407,39 @@ def test_plan_mode_is_read_only(tmp_path):
     assert plan.mode == "plan"
     assert plan.stop_reason == "final"
     assert "danger_write" not in calls
+
+
+def test_plan_mode_refuses_unoffered_high_tool_at_execution(tmp_path):
+    """Execution-boundary guardrail (PARA-1): even when the model hallucinates a
+    high-risk tool that plan never offered, run_tool refuses it — so the read-only
+    contract holds beyond the offered schema, not just inside it."""
+    registry = Registry()
+    calls = []
+
+    @registry.tool(name="danger_write", description="High-risk writer.", risk="high")
+    def danger_write() -> str:
+        calls.append("danger_write")
+        return "wrote"
+
+    @registry.tool(name="safe_read", description="Safe reader.")
+    def safe_read() -> str:
+        return "data"
+
+    config = _config(
+        tmp_path,
+        paradigms={"enabled": ["agent", "plan"], "default": "agent"},
+        tools=[
+            {"name": "danger_write", "enabled": True},
+            {"name": "safe_read", "enabled": True},
+        ],
+    )
+    # The scripted mock calls danger_write even though plan never offers it.
+    client = MockLLM(script=[ScriptedCall("danger_write", {}), "done"])
+    result = run("plan it", client=client, config=config, registry=registry, mode="plan")
+    assert result.stop_reason == "final"
+    assert "danger_write" not in calls  # refused at the execution boundary
+    tool_msgs = [m for m in result.messages if m.get("role") == "tool"]
+    assert tool_msgs and "not available" in tool_msgs[0]["content"]
 {% endif %}{% if "ask" in spec.paradigms %}
 
 def test_ask_mode_is_read_only(tmp_path):
@@ -421,6 +468,37 @@ def test_ask_mode_is_read_only(tmp_path):
     assert result.mode == "ask"
     assert result.stop_reason == "final"
     assert "danger_write" not in calls
+
+
+def test_ask_mode_refuses_unoffered_high_tool_at_execution(tmp_path):
+    """Execution-boundary guardrail (PARA-1): a high-risk tool the model invokes
+    in ask mode without it being offered is refused, not executed."""
+    registry = Registry()
+    calls = []
+
+    @registry.tool(name="danger_write", description="High-risk writer.", risk="high")
+    def danger_write() -> str:
+        calls.append("danger_write")
+        return "wrote"
+
+    @registry.tool(name="safe_read", description="Safe reader.")
+    def safe_read() -> str:
+        return "data"
+
+    config = _config(
+        tmp_path,
+        paradigms={"enabled": ["agent", "ask"], "default": "agent"},
+        tools=[
+            {"name": "danger_write", "enabled": True},
+            {"name": "safe_read", "enabled": True},
+        ],
+    )
+    client = MockLLM(script=[ScriptedCall("danger_write", {}), "done"])
+    result = run("what is it?", client=client, config=config, registry=registry, mode="ask")
+    assert result.stop_reason == "final"
+    assert "danger_write" not in calls
+    tool_msgs = [m for m in result.messages if m.get("role") == "tool"]
+    assert tool_msgs and "not available" in tool_msgs[0]["content"]
 {% endif %}
 
 def test_rules_files_inject_into_system_prompt(tmp_path):
@@ -494,6 +572,29 @@ def test_context_summarize_injects_summary():
     assert fitted[0]["role"] == "system"
     assert any("SUMMARY TEXT" in (m.get("content") or "") for m in fitted)
     assert len(fitted) < len(messages)
+
+
+def test_summarize_usage_is_traced_and_budgeted(tmp_path):
+    """RT-2: a summarize compaction call's tokens/cost land in the trace (so they
+    count toward the token/cost budget) and emit a `compaction` event — they don't
+    silently escape the run totals."""
+    from {{ project_slug }}.harness.context import make_summarizer
+
+    config = _config(tmp_path)
+    config.llms[0].input_cost_per_million = 1000.0
+    config.llms[0].output_cost_per_million = 1000.0
+    trace = Trace(trace_dir=str(tmp_path / "t"), enabled=True)
+    router = ClientRouter(config, mock=True)
+    ctx = ContextConfig(strategy="summarize", triggers={"max_tokens": 50}, keep_last_turns=2)
+    summarizer = make_summarizer(router.client_for, config, ctx, trace)
+
+    fitted = fit(_conversation(10), ctx, summarizer=summarizer)
+
+    assert any("Done (mock)" in (m.get("content") or "") for m in fitted)  # summary injected
+    assert trace.total_tokens > 0 and trace.cost_usd > 0  # accounted, not dropped
+    events = [json.loads(line) for line in trace.path.read_text().splitlines()]
+    assert any(e["event"] == "compaction" for e in events)
+    trace.close()
 
 
 def test_context_max_turns_condition_triggers():
@@ -639,3 +740,87 @@ def test_cli_test_llm_unknown_profile_is_a_clean_error(tmp_path):
     )
     assert result.exit_code == 2
     assert "nope" in _cli_text(result)
+
+
+def test_cli_run_unknown_role_is_a_clean_error(tmp_path):
+    """LOOP-1: an unknown --role fails fast (exit 2) listing known roles instead of
+    silently falling back to the default profile (symmetric with an unknown --mode)."""
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    cfg_file = _write_config(tmp_path, _config(tmp_path).model_dump(mode="json"))
+    result = CliRunner().invoke(
+        app, ["run", "--config", str(cfg_file), "--role", "bogus", "--mock", "hi"]
+    )
+    assert result.exit_code == 2
+    text = _cli_text(result)
+    assert "bogus" in text and "role" in text.lower()
+
+
+def test_cli_run_warns_on_unknown_budget_condition(tmp_path):
+    """BUD-2: a typo'd budget condition is no longer a silent runtime no-op — run
+    warns at startup (the guardrail isn't silently dropped), but still runs."""
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    cfg = _config(tmp_path).model_dump(mode="json")
+    cfg["budget"] = {"combine": "or", "conditions": {"max_stpes": 5}}
+    cfg_file = _write_config(tmp_path, cfg)
+
+    result = CliRunner().invoke(app, ["run", "--config", str(cfg_file), "--mock", "hi"])
+    assert result.exit_code == 0, _cli_text(result)
+    assert "max_stpes" in _cli_text(result)
+
+
+def test_config_extensions_import_and_hooks_mount(tmp_path, monkeypatch):
+    """EXT-1/EXT-2: config.extensions imports a module so its @register_* run, and
+    config.hooks mounts a Hooks subclass — both without editing cli.py / web.py."""
+    import sys
+
+    from {{ project_slug }}.harness.extensions import (
+        check_config,
+        import_extensions,
+        load_hooks,
+    )
+    from {{ project_slug }}.harness.paradigms import PARADIGMS
+
+    module = tmp_path / "my_ext.py"
+    module.write_text(
+        "from {{ project_slug }}.harness.hooks import Hooks\n"
+        "from {{ project_slug }}.harness.paradigms import register_paradigm, RunResult\n"
+        "from {{ project_slug }}.harness.trace import Trace\n"
+        "\n"
+        "SEEN = []\n"
+        "\n"
+        "@register_paradigm('extmode')\n"
+        "def run(user_input, *, config, trace=None, **kwargs):\n"
+        "    return RunResult(answer='x', steps=0, stop_reason='final',\n"
+        "                     trace=trace or Trace(enabled=False), mode='extmode')\n"
+        "\n"
+        "class RecordingHooks(Hooks):\n"
+        "    def before_tool(self, call):\n"
+        "        SEEN.append(call.name)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    config = _config(
+        tmp_path,
+        extensions=["my_ext"],
+        hooks="my_ext:RecordingHooks",
+        paradigms={"enabled": ["agent", "extmode"], "default": "agent"},
+    )
+    try:
+        import_extensions(config)
+        assert "extmode" in PARADIGMS  # registered via extensions, not paradigms/__init__
+        assert check_config(config) == ([], [])  # every selected name resolves
+
+        hooks = load_hooks(config)
+        import my_ext
+
+        run("hi", client=MockLLM(), config=config, hooks=hooks)
+        assert my_ext.SEEN  # the configured hook fired through run_loop
+    finally:
+        PARADIGMS.pop("extmode", None)
+        sys.modules.pop("my_ext", None)

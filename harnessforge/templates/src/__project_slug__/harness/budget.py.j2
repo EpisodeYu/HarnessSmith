@@ -94,22 +94,20 @@ class BudgetTracker:
         """Return ``(stop_reason, message)`` if the budget fires now, else ``None``.
 
         Conditions are combined by ``cfg.combine``: ``or`` stops as soon as one
-        fires; ``and`` only when every configured (and registered) condition does.
-        Unknown condition names — a typo, or a custom one whose module wasn't
-        imported — are skipped.
+        fires; ``and`` only when EVERY configured condition does. An unknown
+        condition name — a typo, or a custom one whose module wasn't imported — is
+        counted as configured-but-never-firing (fail-open), so it can only make an
+        ``and`` budget stop LATER (never earlier) — it never silently tightens the
+        guardrail. (Run/serve also warn about such names at startup.)
         """
         fired: list[str] = []
-        evaluated = 0
         for name, cond in self.cfg.conditions.items():
             fn = BUDGET_CONDITIONS.get(name)
-            if fn is None:
-                continue
-            evaluated += 1
-            if fn(self, cond.threshold, cond.window_seconds):
+            if fn is not None and fn(self, cond.threshold, cond.window_seconds):
                 fired.append(name)
         if not fired:
             return None
-        if self.cfg.combine == "and" and len(fired) < evaluated:
+        if self.cfg.combine == "and" and len(fired) < len(self.cfg.conditions):
             return None
         reason = fired[0] if self.cfg.combine == "or" else "+".join(fired)
         return reason, _stop_message(self.cfg, fired)

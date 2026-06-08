@@ -301,6 +301,14 @@ class Config(BaseModel):
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    # Runtime extension points (no spec field). ``extensions`` lists dotted module
+    # paths imported at startup so their ``@register_*`` run (custom tools /
+    # paradigms / budget & context conditions / memory backends living outside the
+    # built-in files). ``hooks`` names a Hooks subclass ("package.module:ClassName")
+    # the CLI/web mount automatically — logging / guardrails / redaction / HITL
+    # without editing the loop. See ``harness/extensions.py``.
+    extensions: list[str] = Field(default_factory=list)
+    hooks: str | None = None
 {% if spec.mcp.enabled %}    mcp: McpConfig = Field(default_factory=McpConfig)
 {% endif %}{% if spec.skills.enabled %}    skills: SkillsConfig = Field(default_factory=SkillsConfig)
 {% endif %}{% if spec.memory.enabled %}    memory: MemoryConfig = Field(default_factory=MemoryConfig)
@@ -318,6 +326,7 @@ class Config(BaseModel):
                 "llms": [], "roles": {}, "tools": [],
                 "prompts": {}, "context": {}, "paradigms": {},
                 "observability": {}, "sessions": {}, "budget": {},
+                "extensions": [],
             }
             for key, default in empties.items():
                 if key in data and data[key] is None:

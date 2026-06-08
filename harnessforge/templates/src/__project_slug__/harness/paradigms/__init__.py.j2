@@ -91,15 +91,32 @@ def assistant_message(response: LLMResponse) -> dict:
     }
 
 
-def run_tool(registry: Registry, call: ToolCall, hooks: Hooks, trace: Trace) -> str:
-    """Execute one tool call; tool errors are captured, never crash the loop."""
+def run_tool(
+    registry: Registry,
+    call: ToolCall,
+    hooks: Hooks,
+    trace: Trace,
+    allowed: set[str] | None = None,
+) -> str:
+    """Execute one tool call; tool errors are captured, never crash the loop.
+
+    ``allowed`` is the set of tool names this paradigm offered. When given, a call
+    to a tool OUTSIDE it (e.g. a high-risk tool a read-only paradigm never offered,
+    that the model hallucinated anyway) is refused HERE, at the execution boundary
+    — not merely left out of the schema. The refusal is returned as an ERROR
+    observation so the model can self-correct, keeping the read-only contract true
+    even if the model goes off-script.
+    """
     hooks.before_tool(call)
     trace.event("tool_call", name=call.name, arguments=call.arguments)
-    try:
-        result = registry.call(call.name, call.arguments)
-    except Exception as exc:
-        hooks.on_error("tool", exc)
-        result = f"ERROR: {exc}"
+    if allowed is not None and call.name not in allowed:
+        result = f"ERROR: tool {call.name!r} is not available in this mode"
+    else:
+        try:
+            result = registry.call(call.name, call.arguments)
+        except Exception as exc:
+            hooks.on_error("tool", exc)
+            result = f"ERROR: {exc}"
     trace.event("tool_result", name=call.name, result=result)
     hooks.after_tool(call, result)
     return result

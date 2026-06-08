@@ -2,14 +2,16 @@
 
 Aligned with a Cursor-style "plan" mode: the model may use **read-only / low-risk
 tools** to gather context, but high-risk tools (file writes, shell, anything
-marked ``risk="high"``) are not even offered — so a plan run cannot mutate
-anything. It outputs a step-by-step plan; turning a plan into execution is a
-deliberate, separate action (kept out of this paradigm on purpose).
+marked ``risk="high"``) are not offered — and a high-risk tool the model
+hallucinates anyway is refused at the execution boundary (``run_tool`` checks the
+``active`` set), so a plan run stays read-only even if the model goes off-script.
+It outputs a step-by-step plan; turning a plan into execution is a deliberate,
+separate action (kept out of this paradigm on purpose).
 
-Self-contained: it owns its loop and imports no other paradigm. The only thing
-that makes it "read-only" is the tool filter below (``allow_high_risk=False``) —
-a model-A guardrail (prevents fat-finger mutations), not an adversarial sandbox;
-you own the code and can change it.
+Self-contained: it owns its loop and imports no other paradigm. "Read-only" is
+the tool filter below (``allow_high_risk=False``) enforced both at offer time and
+at execution time — a model-A guardrail (prevents fat-finger mutations), not an
+adversarial sandbox; you own the code and can change it.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from collections.abc import Callable
 
 from ..budget import BudgetTracker
 from ..config import Config
-from ..context import fit as fit_context
+from ..context import fit as fit_context, make_summarizer
 from ..hooks import Hooks
 from ..llm import LLMClient
 from ..prompts import build_system_prompt
@@ -71,14 +73,12 @@ def run(
         trace = Trace(trace_dir=obs.trace_dir if obs.trace else None, enabled=obs.trace)
 
     context_cfg = config.context
-    summarizer: LLMClient | None = (
-        client_for("compaction")
-        if client_for is not None and context_cfg.strategy == "summarize"
-        else None
-    )
+    # Summarization usage is recorded to the trace (and counts toward the budget).
+    summarizer = make_summarizer(client_for, config, context_cfg, trace)
 
     tracker = BudgetTracker(config.budget)
-    # Read-only: high-risk tools are never offered, so the model cannot mutate.
+    # Read-only: high-risk tools are never offered, and ``run_tool`` refuses any
+    # call outside this ``active`` set, so the model cannot mutate even off-script.
     active = registry.active_names(config.enabled_tool_names(), allow_high_risk=False)
     tool_schemas = registry.schemas(active)
 
@@ -133,7 +133,7 @@ def run(
 
         messages.append(assistant_message(response))
         for call in response.tool_calls:
-            result = run_tool(registry, call, hooks, trace)
+            result = run_tool(registry, call, hooks, trace, allowed=set(active))
             messages.append(
                 {"role": "tool", "tool_call_id": call.id, "content": result}
             )

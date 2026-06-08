@@ -32,7 +32,8 @@ from ..harness.config import (
 from ..harness.budget import BUDGET_CONDITIONS
 from ..harness.context import CONDITIONS, STRATEGIES
 {% if spec.memory.enabled %}from ..harness.memory import BACKENDS as _MEMORY_BACKENDS
-{% endif %}from ..harness.hooks import Hooks
+{% endif %}from ..harness.extensions import import_extensions, load_hooks
+from ..harness.hooks import Hooks
 from ..harness.llm import ClientRouter, LLMResponse, OpenAIClient, ToolCall
 from ..harness.loop import run as run_loop
 from ..harness.paradigms import PARADIGMS
@@ -50,21 +51,34 @@ _EDITABLE_FIELDS = (
 
 
 class _StreamHooks(Hooks):
-    """Push loop lifecycle events onto a queue, formatted as SSE later."""
+    """Push loop lifecycle events onto a queue, formatted as SSE later.
 
-    def __init__(self, q: queue.Queue) -> None:
+    Composes with an ``inner`` Hooks (the one named in ``config.hooks``, if any):
+    each lifecycle method runs the user's hook first, then emits the SSE event, so
+    a configured guardrail / audit hook works under the web UI too — not just the CLI.
+    """
+
+    def __init__(self, q: queue.Queue, inner: Hooks | None = None) -> None:
         self._q = q
+        self._inner = inner or Hooks()
+
+    def before_step(self, step: int, messages: list[dict]) -> None:
+        self._inner.before_step(step, messages)
 
     def after_step(self, step: int, response: LLMResponse) -> None:
+        self._inner.after_step(step, response)
         self._q.put(("step", {"step": step, "tools": [c.name for c in response.tool_calls]}))
 
     def before_tool(self, call: ToolCall) -> None:
+        self._inner.before_tool(call)
         self._q.put(("tool_call", {"name": call.name, "arguments": call.arguments}))
 
     def after_tool(self, call: ToolCall, result: str) -> None:
+        self._inner.after_tool(call, result)
         self._q.put(("tool_result", {"name": call.name, "result": result}))
 
     def on_error(self, where: str, error: Exception) -> None:
+        self._inner.on_error(where, error)
         self._q.put(("error", {"where": where, "error": str(error)}))
 
 
@@ -144,7 +158,7 @@ def _chat_events(
     answer so the sidebar names the session up front.
     """
     q: queue.Queue = queue.Queue()
-    hooks = _StreamHooks(q)
+    hooks = _StreamHooks(q, load_hooks(config))
     on_delta = (lambda text: q.put(("token", {"text": text}))) if stream else None
     router = ClientRouter(config, mock=mock)
 
@@ -205,6 +219,10 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
     app = FastAPI(title="{{ display_name }} — web")
     app.state.config = config or load_config()
     app.state.mock = mock
+    # Load config.extensions so custom @register_* (tools / paradigms / conditions /
+    # backends) are available to this web process; serve() also runs the full
+    # diagnostics + fail-fast before binding.
+    import_extensions(app.state.config)
 {% if spec.memory.enabled %}    from ..harness.memory import register_memory_tools
 
     register_memory_tools(app.state.config)

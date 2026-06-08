@@ -43,6 +43,51 @@ def _profile_preflight(profile: LLMProfileConfig) -> str | None:
         )
     return None
 
+
+def _validate_role(role: str, config) -> None:
+    """Reject an unknown ``--role`` up front (symmetric with an unknown ``--mode``).
+
+    ``generation`` is always valid (the default, falls back to the first profile);
+    any other name must be mapped under ``roles:`` in config.yaml. A typo would
+    otherwise silently fall back to the default profile.
+    """
+    if role != "generation" and role not in config.roles:
+        known = sorted({"generation", *config.roles})
+        typer.secho(
+            f"unknown role {role!r}; known roles: {known} "
+            "(use --role generation, or add it under roles: in config.yaml)",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+
+def _prepare_runtime(config):
+    """Import config.extensions, surface config diagnostics, and build hooks.
+
+    Fail-fast (exit 2) on hard config errors (a role's profile, a paradigm, or the
+    context strategy that doesn't resolve); warn (yellow) on soft ones (a budget /
+    context condition or memory backend name that isn't registered — skipped at
+    runtime). Returns the Hooks instance named in ``config.hooks`` (default no-op).
+    """
+    from ..harness.config import ConfigError
+    from ..harness.extensions import check_config, import_extensions, load_hooks
+
+    try:
+        import_extensions(config)
+        errors, warnings = check_config(config)
+        hooks = load_hooks(config)
+    except ConfigError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    for message in warnings:
+        typer.secho(f"warning: {message}", fg=typer.colors.YELLOW, err=True)
+    if errors:
+        for message in errors:
+            typer.secho(f"error: {message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    return hooks
+
 {% if spec.mcp.enabled %}
 def _start_mcp(config):
     """Launch MCP servers that have at least one enabled tool; return the manager.
@@ -120,6 +165,8 @@ def run(
     from ..harness import session as session_store
 
     config = load_config(config_path)
+    _validate_role(role, config)
+    hooks = _prepare_runtime(config)
     # Fail fast with an actionable hint instead of a provider traceback when the
     # LLM isn't usable yet (no profile, no model, or no key). The mock path needs
     # neither. `test-llm` does the same checks plus a live probe.
@@ -161,6 +208,7 @@ def run(
             client_for=router.client_for,
             config=config,
             role=role,
+            hooks=hooks,
             on_delta=_on_delta if stream else None,
             history=history,
         )
@@ -223,6 +271,8 @@ def chat(
     from ..harness import session as session_store
 
     config = load_config(config_path)
+    _validate_role(role, config)
+    hooks = _prepare_runtime(config)
     if not mock:
         try:
             error = _profile_preflight(config.profile_for(role))
@@ -276,6 +326,7 @@ def chat(
                     client_for=router.client_for,
                     config=config,
                     role=role,
+                    hooks=hooks,
                     on_delta=_on_delta if stream else None,
                     history=history,
                 )
@@ -397,10 +448,18 @@ def info(
     forgot to import so its ``@register_*`` never ran.
     """
     from ..harness.budget import BUDGET_CONDITIONS
+    from ..harness.config import ConfigError
     from ..harness.context import CONDITIONS, STRATEGIES
+    from ..harness.extensions import import_extensions
     from ..harness.paradigms import PARADIGMS
 
     config = load_config(config_path)
+    # Best-effort: import config.extensions so custom @register_* show up below.
+    # info is diagnostic, so a bad module is a warning here, never fatal.
+    try:
+        import_extensions(config)
+    except ConfigError as exc:
+        typer.secho(f"warning: {exc}", fg=typer.colors.YELLOW, err=True)
 
     def _section(label: str, registered: list[str], selected: set[str]) -> None:
         typer.secho(label, fg=typer.colors.CYAN)
@@ -504,6 +563,9 @@ def serve(
 
     bind_port = port if port else _find_free_port(8000, host)
     config = load_config(config_path)
+    # Import extensions, surface config diagnostics, and fail-fast on hard errors
+    # before binding the port. create_app re-imports (idempotent) and mounts hooks.
+    _prepare_runtime(config)
 {% if spec.mcp.enabled %}    # Launched servers live for the process lifetime (uvicorn runs until Ctrl-C).
     _start_mcp(config)
 {% endif %}{% if spec.memory.enabled %}    _setup_memory(config)

@@ -20,9 +20,15 @@ tokenizer dep.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from .config import ContextConfig
 from .llm import LLMClient
+
+if TYPE_CHECKING:
+    from .config import Config
+    from .llm import LLMResponse
+    from .trace import Trace
 
 _SUMMARY_PROMPT = (
     "Summarize the earlier conversation below concisely, preserving facts, "
@@ -137,6 +143,58 @@ def _strategy_summarize(
     summary = summarizer.complete(convo, None).content or ""
     note = {"role": "system", "content": f"Summary of earlier conversation:\n{summary}"}
     return system + [note] + kept
+
+
+class _AccountingSummarizer:
+    """Wrap the compaction client so its summary call lands in the trace + budget.
+
+    Context summarization is a real LLM call; without this its tokens/cost would
+    escape the run totals (and any token / cost budget). Each call's usage is
+    recorded to the trace under the compaction profile and a ``compaction`` event
+    is emitted, then the response is returned unchanged.
+    """
+
+    def __init__(self, client: LLMClient, trace: "Trace", profile) -> None:
+        self._client = client
+        self._trace = trace
+        self._profile = profile
+
+    def _account(self, response: "LLMResponse") -> "LLMResponse":
+        if self._trace is not None and self._profile is not None:
+            self._trace.add_usage(response.usage, self._profile)
+            self._trace.event(
+                "compaction",
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+            )
+        return response
+
+    def complete(self, messages: list[dict], tools: list[dict] | None = None) -> "LLMResponse":
+        return self._account(self._client.complete(messages, tools))
+
+    def stream(self, messages, tools=None, *, on_delta=None) -> "LLMResponse":
+        return self._account(self._client.stream(messages, tools, on_delta=on_delta))
+
+
+def make_summarizer(
+    client_for: Callable[[str], LLMClient] | None,
+    config: "Config",
+    ctx: ContextConfig,
+    trace: "Trace | None" = None,
+) -> LLMClient | None:
+    """Build the compaction client for ``summarize`` (``None`` for other strategies).
+
+    Its usage is recorded to ``trace`` under the ``compaction`` profile, so a
+    summarize call shows up in the trace and counts toward the token / cost budget.
+    With no ``compaction`` role configured it falls back to the generation profile
+    (it summarizes with that model) — same client either way.
+    """
+    if client_for is None or ctx.strategy != "summarize":
+        return None
+    client = client_for("compaction")
+    if trace is None:
+        return client
+    return _AccountingSummarizer(client, trace, config.profile_for("compaction"))
 
 
 def should_compact(messages: list[dict], ctx: ContextConfig) -> bool:

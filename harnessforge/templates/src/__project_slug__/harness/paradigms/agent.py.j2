@@ -24,7 +24,7 @@ from collections.abc import Callable
 
 from ..budget import BudgetTracker
 from ..config import Config
-from ..context import fit as fit_context
+from ..context import fit as fit_context, make_summarizer
 from ..hooks import Hooks
 from ..llm import LLMClient
 from ..prompts import build_system_prompt
@@ -70,11 +70,8 @@ def run(
         trace = Trace(trace_dir=obs.trace_dir if obs.trace else None, enabled=obs.trace)
 
     context_cfg = config.context
-    summarizer: LLMClient | None = (
-        client_for("compaction")
-        if client_for is not None and context_cfg.strategy == "summarize"
-        else None
-    )
+    # Summarization usage is recorded to the trace (and counts toward the budget).
+    summarizer = make_summarizer(client_for, config, context_cfg, trace)
 
     tracker = BudgetTracker(config.budget)
     active = registry.active_names(config.enabled_tool_names())
@@ -130,7 +127,7 @@ def run(
 
         messages.append(assistant_message(response))
         for call in response.tool_calls:
-            result = run_tool(registry, call, hooks, trace)
+            result = run_tool(registry, call, hooks, trace, allowed=set(active))
             messages.append(
                 {"role": "tool", "tool_call_id": call.id, "content": result}
             )

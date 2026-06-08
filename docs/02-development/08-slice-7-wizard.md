@@ -49,7 +49,7 @@
 
 ### 2.1 生成器 wizard:结构-only 表单 + 烤默认(决策 B)
 - **首控件 = 语言**;前端 i18n 字典覆盖全部可见文案,切换即换(零新增依赖)。
-- **UI 只暴露结构**:基本(显示名→slug、`paradigms` 多选+默认、语言)+ 能力(`interfaces.web`、`mcp.enabled`+catalog 多选、`skills.enabled`)+ 产出。**不展示** llms/prompts/tools/context/budget/observability/roles。
+- **UI 只暴露结构**:基本(显示名→slug、`paradigms` 多选+默认、语言)+ 能力(`interfaces.web`、`mcp.enabled`+catalog 多选、`skills.enabled`、`memory.enabled`(Slice 8B 新增))+ 产出。**不展示** llms/prompts/tools/context/budget/observability/roles。
 - **后端烤默认值**(`app.py _BAKED_DEFAULTS`,仅缺省时填):默认 LLM profile(`name=default`/`model=gpt-4o-mini`/`api_key_env=OPENAI_API_KEY`/`base_url_env=OPENAI_BASE_URL`)+ `roles.generation=default` + `prompts.system="You are a helpful assistant."` + 内置工具(get_current_time/calculator)开 + `budget.max_steps=8`;context/observability 走 `config.yaml` 模板默认。这样产物开箱即跑,用户在**产物配置页 / `.env`** 里改这些。显式传入(或手写 spec)优先于默认。
 - **显示名→slug**:前端 `lower / 非字母数字→_ / 去首尾_ / 数字开头补_`;用户改过 slug 后不再自动覆盖;后端按 `spec._SLUG_RE` 兜底校验。
 
@@ -88,7 +88,7 @@
 
 降低 wizard 上手成本 + 把"生成→看到产物"打通成一键。**只动生成器侧 wizard,不改 spec/模板/产物生成口径**。
 
-- **默认勾选(开箱即用的"全家桶"默认)**:`paradigms` 全选(`agent` 仍是首项=运行期默认范式);能力 `interfaces.web` / `mcp.enabled` / `skills.enabled` 默认开;catalog 预选默认 `fetch` / `ddg-search` / `git`。这些只是**表单默认值**,用户可取消。
+- **默认勾选(开箱即用的"全家桶"默认)**:`paradigms` 全选(`agent` 仍是首项=运行期默认范式);能力 `interfaces.web` / `mcp.enabled` / `skills.enabled` / `memory.enabled`(Slice 8B 新增)默认开;catalog 预选默认 `fetch` / `ddg-search` / `git`。这些只是**表单默认值**,用户可取消。
 - **catalog 在 wizard 的呈现 = 策展子集**(`app.py _WIZARD_CATALOG_ORDER` / `_WIZARD_CATALOG_DEFAULT`,经 `/meta` 的 `default_checked` 下发):显示 `fetch` / `ddg-search` / `git` / `desktop-commander`(默认勾的三项在前、DC 在最后),**隐藏 `github`(需 token + 无可启用工具)与 `time`(冷门)**。**catalog 本体不变**——`github`/`time` 仍在 `mcp_servers.yaml`,CLI `--mcp-server github/time` 照常可用;策展只作用于 wizard 表单(人 2026-06-06 选 wizard-only)。`git` vs `github`:`git`=本地仓库、免 key、读类默认开,做默认;`github`=remote MCP 平台 API、需 `GITHUB_MCP_TOKEN`,从表单隐藏。
 - **「生成产物」分两法**(原"产出"+"一键生成产物(可选)"合并):
   - **一键生成**:目标目录默认 `<HarnessForge 根>/generate/<包名>`(`/meta.generate_base` + 前端按 slug 派生,可手改;`generate/` 已入 `.gitignore`),git init 复选。点击 → `POST /generate {launch:true}` 渲染产物;**当勾了 Web** 则在后台 worker 线程跑 **`uv sync` → `uv run <slug> serve --port <自动空闲端口>`**(**真实模式**,人 2026-06-06 选),回一个 `job_id`。前端轮询 `GET /generate/status/{job_id}` 渲染**分步进度条**(`render → sync → serve`,各步 pending/running/done/error),**全部 done 后才点亮「跳转到 <显示名>」按钮**(在此之前按钮置灰不可点);打开产物 web 后在配置页 / `.env` 填 LLM key 即可对话。任一步 error → 进度条标红 + 显示原因(`.setup.log`/`.serve.log` 可查)。未勾 Web 时保持 render-only、不拉起。
@@ -127,7 +127,7 @@
   - **LLM 规范**:本片维持 provider-agnostic;**原生 OpenAI+Anthropic 双规范登记 v1+**(人 2026-06-06:"要做双规范,但不做在 slice7,后续单独做,先记在 v1")。
   - **写入式 `.env` 密钥助手 = 做 B+C(决策 D,人 2026-06-06)**:产物侧 Web LLM tab + CLI `set-key` 把 key 真值**只写本地 gitignored `.env`、write-only 不回显**(合规,见 §5 密钥红线);生成器 wizard 不收 key;keyring 留 v1+。理由:`.env` 已比 Windows 系统环境变量简单,助手只是免去"手建 .env 粘 key"。
   - **端口自动侦测 + 双语语言标签**(人 2026-06-06):`wizard`/产物 `serve` 默认自动挑空闲端口并打印地址(避开端口占用);语言切换标签恒显示 `语言/Language` 让任何语言用户都能找到切换。
-- [x] **⑤ context 条件/策略改造(人 2026-06-06 拍板,选择题确认)**:① **轮数 + token 是可组合的触发条件**(`triggers: {max_tokens, max_turns}` + `combine: or/and`,选 A:dict 形态);② **可扩展走薄注册表 + 装饰器**(`@register_strategy`/`@register_condition`,选 A,和 tools/paradigms 同套、守 §6 "非运行期抽象层"红线,**不**用 Protocol/ABC);③ **默认改为 192k token 触发压缩、不限轮数**;④ **默认策略 = `summarize`**(选 B,取代决策表原 `truncate` 默认;缺 compaction 角色时回落 truncate)。改 `context.py`/`config.py`/`config.yaml`/产物配置页 + `00-overview §3` 决策表 + `01 §3/§4`,属 §5.2 大改动跑全量回归。
+- [x] **⑤ context 条件/策略改造(人 2026-06-06 拍板,选择题确认)**:① **轮数 + token 是可组合的触发条件**(`triggers: {max_tokens, max_turns}` + `combine: or/and`,选 A:dict 形态);② **可扩展走薄注册表 + 装饰器**(`@register_strategy`/`@register_condition`,选 A,和 tools/paradigms 同套、守 §6 "非运行期抽象层"红线,**不**用 Protocol/ABC);③ **默认改为 192k token 触发压缩、不限轮数**;④ **默认策略 = `summarize`**(选 B,取代决策表原 `truncate` 默认;缺 compaction 角色时回落首个 profile,即用 generation 模型做摘要——实现说明 2026-06-08 RT-1,**非**回落 truncate)。改 `context.py`/`config.py`/`config.yaml`/产物配置页 + `00-overview §3` 决策表 + `01 §3/§4`,属 §5.2 大改动跑全量回归。
 - [x] **⑥ 扩展可发现性(人 2026-06-07 拍板,选择题确认)**:让"注册成功的自定义策略/条件/范式在产物里**可见可选**。① 产物 `GET /registries` 内省 `STRATEGIES`/`CONDITIONS`/`PARADIGMS`(纯名字、无密钥);② Context tab 策略下拉 + **每条已注册条件一个阈值输入**(选 A),Paradigms tab **已注册范式勾选列表 + default 下拉**(选 A),保存后顺手刷新 chat 模式下拉;③ **UI 不匹配告警**——config 选了未注册名字时标 ⚠(选 ①);④ **CLI `<pkg> info`** 列"已注册 vs 已启用"并标记未注册项(选 ②);⑤ Context/Paradigms tab 各加"可 `@register_*` 自定义,import 后即现"提示 + AGENTS.md 专章。改 `web.py`/`web_index.html`/`cli.py`/`AGENTS.md` + 测试。
 - [ ] **③ 字段是否齐 / 对外可读(实现后真实验收)**:起 wizard + 产物 serve 点一遍,确认覆盖与中英措辞。
 - **软确认(非阻塞,`CLAUDE.md §5.3`)**:`POST /generate` 取 render-only(卡 UI 规避,始终提供 spec 下载 / `new --spec` 接力);无构建单页(Tailwind CDN);wizard 依赖进 `[wizard]` extra;后端 `_BAKED_DEFAULTS` 取默认 LLM(`gpt-4o-mini` + `OPENAI_API_KEY`/`OPENAI_BASE_URL`)、默认 system prompt、内置工具开、`budget.max_steps=8`(仅缺省时填,显式优先);采样/单价/context 等其余行为性走产物 `config.yaml` 模板默认 + 产物配置页。

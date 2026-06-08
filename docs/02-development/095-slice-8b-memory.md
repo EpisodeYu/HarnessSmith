@@ -39,6 +39,9 @@
 - `harnessforge/spec.py` — `class Memory(enabled: bool=False)` + `HarnessSpec.memory`(同 Mcp/Skills 风格;§6.1 改 schema,人已签 = 选 spec 开关)。
 - `harnessforge/generator.py` — `CONDITIONAL_TEMPLATES` 加 `memory.py.j2` / `test_memory.py.j2`。
 
+### 生成器向导(wizard)
+- `harnessforge/wizard/static/index.html` — "能力(结构开关)"组新增 **"启用跨会话长期记忆"** 复选框(`id="memory_enabled"`,**默认勾选**,与 Web/MCP/Skills 一致——向导走"全家桶"默认,薄路径走 CLI/spec)+ 中英 i18n;`buildSpec()` 加 `spec.memory = {enabled}`。后端 `app.py` 无需改(`HarnessSpec` 已含 `memory` 字段)。
+
 ### 运行期配置
 - 产物 `harness/config.py`(模板)— `MemoryConfig(backend="file", path=".harness/memory.md", inject_max_chars=4000, read_only=False)`(门控)+ `Config.memory`(门控)。
 - 产物 `config.yaml`(模板)— `memory:` 块(门控)+ `tools:` 里 `memory_read/append/write` allowlist 条目(门控,默认 enabled;read 低风险、写 high)。
