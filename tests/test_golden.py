@@ -209,6 +209,7 @@ def test_golden_wizard_spec_generates_and_smoke_passes(tmp_path):
         "interfaces": {"cli": True, "web": True},
         "mcp": {"enabled": False},
         "skills": {"enabled": False},
+        "memory": {"enabled": True},  # checked by default in the wizard form
     }
     resp = client.post("/spec", json={"spec": spec_data})
     assert resp.status_code == 200, resp.text
