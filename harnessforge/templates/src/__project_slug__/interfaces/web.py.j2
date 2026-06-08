@@ -47,7 +47,8 @@ _INDEX_HTML = (Path(__file__).parent / "web_index.html").read_text(encoding="utf
 _EDITABLE_FIELDS = (
     "llms", "roles", "prompts", "tools", "context", "paradigms",
     "observability", "budget",
-)
+{% if spec.memory.enabled %}    "memory",
+{% endif %})
 
 
 class _StreamHooks(Hooks):
@@ -487,15 +488,23 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
 {% if spec.memory.enabled %}
     @app.get("/memory")
     def get_memory() -> dict:
-        """Return the agent's long-term memory note + whether it's read-only. The
-        note is plain markdown you own (the agent maintains it with the memory
-        tools); it never holds secrets (keys stay in .env)."""
-        from ..harness.memory import get_backend
+        """Return the agent's long-term memory note + its size and whether it's
+        read-only / oversized (the memory panel shows the size and an oversized
+        warning). The note is plain markdown you own (the agent maintains it with
+        the memory tools); it never holds secrets (keys stay in .env)."""
+        from ..harness.memory import get_backend, is_oversized
 
-        backend = get_backend(app.state.config)
+        cfg = app.state.config
+        backend = get_backend(cfg)
         reader = getattr(backend, "read", None) if backend is not None else None
         content = reader() if reader is not None else (backend.recall() if backend else "")
-        return {"content": content, "read_only": app.state.config.memory.read_only}
+        return {
+            "content": content,
+            "read_only": cfg.memory.read_only,
+            "size": len(content),
+            "inject_max_chars": cfg.memory.inject_max_chars,
+            "oversized": is_oversized(cfg),
+        }
 
     @app.post("/memory")
     async def set_memory(request: Request):
@@ -523,6 +532,21 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
         if backend is not None and hasattr(backend, "clear"):
             backend.clear()
         return {"ok": True}
+
+    @app.post("/memory/consolidate")
+    async def consolidate_memory() -> dict:
+        """Condense the note via the compaction-role model (manual trigger for the
+        memory panel's "Consolidate" button). Off the reply path — it runs in a
+        threadpool. Returns whether it ran plus the rewritten note + new size."""
+        from ..harness.memory import consolidate
+
+        cfg = app.state.config
+        ran = await run_in_threadpool(lambda: consolidate(cfg, mock=app.state.mock))
+        return {
+            "ok": True,
+            "ran": ran,
+            **get_memory(),  # content + size + oversized after the rewrite
+        }
 {% endif %}
     return app
 

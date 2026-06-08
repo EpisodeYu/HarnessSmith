@@ -12,8 +12,12 @@ from {{ project_slug }}.harness.memory import (
     BACKENDS,
     FileMemory,
     MemoryBackend,
+    consolidate,
     get_backend,
+    is_oversized,
+    maybe_auto_consolidate,
     memory_section,
+    note_size,
     register_memory,
     register_memory_tools,
 )
@@ -178,3 +182,55 @@ def test_unknown_backend_is_safe(tmp_path):
     assert get_backend(config) is None
     assert memory_section(config) == ""  # no crash, just nothing injected
     assert register_memory_tools(config, Registry()) == []
+
+
+def test_policy_injected_with_and_without_note(tmp_path):
+    """The policy is injected even with an empty note (so the agent knows how to
+    curate from turn one), and alongside the recalled note when there is one."""
+    config = _config(tmp_path, policy="Remember durable preferences only.")
+    section = memory_section(config)
+    assert "Memory policy" in section
+    assert "Remember durable preferences only." in section
+
+    get_backend(config).append("User likes Python.")
+    section = memory_section(config)
+    assert "User likes Python." in section
+    assert "Remember durable preferences only." in section
+
+
+def test_is_oversized_tracks_note_vs_cap(tmp_path):
+    config = _config(tmp_path, inject_max_chars=20)
+    assert note_size(config) == 0 and not is_oversized(config)
+    get_backend(config).write("short")
+    assert not is_oversized(config)
+    get_backend(config).write("X" * 50)
+    assert is_oversized(config) and note_size(config) == 50
+
+
+def test_consolidate_rewrites_note(tmp_path):
+    config = _config(tmp_path)
+    backend = get_backend(config)
+    assert consolidate(config, client=MockLLM(final="x")) is False  # empty -> no-op
+
+    backend.write("fact one\nfact one (dup)\nstale thing\nfact two")
+    ran = consolidate(config, client=MockLLM(final="fact one\nfact two"))
+    assert ran is True
+    assert backend.read() == "fact one\nfact two"
+
+
+def test_maybe_auto_consolidate_respects_flag_and_size(tmp_path):
+    # auto off: never runs, even when oversized
+    config = _config(tmp_path, inject_max_chars=10, auto_consolidate=False)
+    get_backend(config).write("Y" * 50)
+    assert maybe_auto_consolidate(config, mock=True) is False
+    assert note_size(config) == 50  # untouched
+
+    # auto on + oversized: runs (uses the mock compaction client offline)
+    config = _config(tmp_path, inject_max_chars=10, auto_consolidate=True)
+    assert maybe_auto_consolidate(config, mock=True) is True
+    assert note_size(config) != 50  # rewritten by the (mock) compaction model
+
+    # auto on but within cap: nothing to do
+    config = _config(tmp_path, inject_max_chars=4000, auto_consolidate=True)
+    get_backend(config).write("small")
+    assert maybe_auto_consolidate(config, mock=True) is False

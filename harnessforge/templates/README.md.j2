@@ -138,14 +138,18 @@ with `memory_read`. The built-in `file` backend is one human-readable markdown
 note (`.harness/memory.md`, gitignored, **never holds secrets**):
 
 ```bash
-{{ project_slug }} memory show     # print the note
-{{ project_slug }} memory path     # print the note's file path
-{{ project_slug }} memory clear    # forget everything
+{{ project_slug }} memory show         # print the note
+{{ project_slug }} memory path         # print the note's file path
+{{ project_slug }} memory clear        # forget everything
+{{ project_slug }} memory consolidate  # condense it (compaction model) when it grows large
 ```
 
-It's a few notes the agent curates on purpose — distinct from RAG. Tune or turn
-it off under `memory:` in `config.yaml`, or plug in your own backend (vector DB,
-mem0, …) with `@register_memory` — see [`AGENTS.md`](./AGENTS.md).
+It's a few notes the agent curates on purpose — distinct from RAG. Only
+`inject_max_chars` of the note is injected, so when it outgrows that, consolidate
+it (manually above, or set `auto_consolidate: true` to do it at chat-session end).
+Tune it under `memory:` in `config.yaml`{% if interfaces.web %} or the web **Memory** config tab (backend,
+capacity, read-only, a memory *policy*, and the note itself){% endif %}, or plug in your own
+backend (vector DB, mem0, …) with `@register_memory` — see [`AGENTS.md`](./AGENTS.md).
 {% endif %}
 ## Layout
 

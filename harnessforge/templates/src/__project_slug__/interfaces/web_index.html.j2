@@ -127,7 +127,36 @@
         <p class="text-xs text-gray-500" data-i18n="par_extend_hint">Add your own with @register_paradigm in harness/paradigms/ — it appears here once imported. See AGENTS.md.</p>
       </div>
 
-      <div data-cfg="observability" class="hidden space-y-3">
+{% if spec.memory.enabled %}      <div data-cfg="memory" class="hidden space-y-3">
+        <p class="text-xs text-gray-500" data-i18n="mem_hint">A small note the agent keeps across sessions, injected into every system prompt. The agent curates it with the memory tools; you can edit it here too.</p>
+        <label class="flex items-center gap-2 text-sm"><input id="cfg-mem-readonly" type="checkbox" /> <span data-i18n="mem_readonly">read-only (the agent can read memory but not write it)</span></label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block text-sm"><span data-i18n="mem_backend">backend</span>
+            <select id="cfg-mem-backend" class="mt-1 block w-full rounded-lg border px-3 py-2 font-mono"></select></label>
+          <label class="block text-sm"><span data-i18n="mem_capacity">capacity (inject_max_chars)</span>
+            <input id="cfg-mem-capacity" type="number" min="1" class="mt-1 block w-full rounded-lg border px-3 py-2" /></label>
+        </div>
+        <label class="flex items-center gap-2 text-sm"><input id="cfg-mem-auto" type="checkbox" /> <span data-i18n="mem_auto">auto-consolidate at session end when oversized (uses the compaction model)</span></label>
+        <label class="block text-sm"><span data-i18n="mem_policy">memory policy (what/when to remember)</span>
+          <textarea id="cfg-mem-policy" rows="2" class="mt-1 block w-full rounded-lg border px-3 py-2" data-i18n-ph="mem_policy_ph" placeholder="e.g. Remember durable user preferences, decisions, and project facts; don't store transient chit-chat."></textarea></label>
+        <div class="border-t pt-3">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium" data-i18n="mem_note">Current memory note</span>
+            <span id="cfg-mem-size" class="text-xs text-slate-500"></span>
+          </div>
+          <p id="cfg-mem-oversized" class="mt-1 hidden text-xs text-amber-600" data-i18n="mem_oversized">The note is larger than the injection cap — older notes aren't recalled. Consolidate to condense it.</p>
+          <textarea id="cfg-mem-content" rows="6" class="mt-1 block w-full rounded-lg border px-3 py-2 font-mono text-xs"></textarea>
+          <div class="mt-2 flex items-center gap-2">
+            <button id="cfg-mem-save" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="mem_save_note">Save note</button>
+            <button id="cfg-mem-consolidate" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="mem_consolidate">Consolidate</button>
+            <button id="cfg-mem-clear" type="button" class="rounded-lg border px-3 py-1 text-sm text-red-600" data-i18n="mem_clear">Clear</button>
+            <span id="cfg-mem-status" class="text-xs text-slate-500"></span>
+          </div>
+        </div>
+        <p class="text-xs text-gray-500" data-i18n="mem_extend_hint">Add your own with @register_memory in harness/memory.py — it appears in the backend list once imported. See AGENTS.md.</p>
+      </div>
+
+{% endif %}      <div data-cfg="observability" class="hidden space-y-3">
         <label class="flex items-center gap-2 text-sm"><input id="cfg-obs-trace" type="checkbox" /> <span data-i18n="obs_trace">write JSONL trace</span></label>
         <label class="block text-sm"><span data-i18n="obs_tracedir">trace_dir</span>
           <input id="cfg-obs-tracedir" class="mt-1 block w-48 rounded-lg border px-3 py-2 font-mono" /></label>
@@ -164,7 +193,7 @@
         cfg_reload_confirm: "Reload discards your unsaved changes. Continue?",
         subtab_llm: "LLM", subtab_context: "Context", subtab_budget: "Budget",
         subtab_tools: "Tools", subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
-        subtab_observability: "Observability",
+        {% if spec.memory.enabled %}subtab_memory: "Memory", {% endif %}subtab_observability: "Observability",
         profiles_label: "LLM profiles", profile_add: "+ Add profile", profile_remove: "remove",
         test_btn: "Test", test_running: "testing…",
         roles_label: "Roles", roles_hint: "Bind each role to a profile above.",
@@ -202,7 +231,19 @@
         rules_hint: "Plain markdown files you own (the AGENTS.md / CLAUDE.md pattern), injected verbatim into every system prompt. Edit the content here; Save writes the files + the active list.",
         paradigms_enabled: "Enabled paradigms", paradigms_default: "default",
         par_extend_hint: "Add your own: @register_paradigm in harness/paradigms/ — it appears here once imported (see AGENTS.md).",
-        obs_trace: "write JSONL trace", obs_tracedir: "trace_dir",
+{% if spec.memory.enabled %}        mem_hint: "A small note the agent keeps across sessions, injected into every system prompt. The agent curates it with the memory tools; you can edit it here too.",
+        mem_readonly: "read-only (the agent can read memory but not write it)",
+        mem_backend: "backend", mem_capacity: "capacity (inject_max_chars)",
+        mem_auto: "auto-consolidate at session end when oversized (uses the compaction model)",
+        mem_policy: "memory policy (what/when to remember)",
+        mem_policy_ph: "e.g. Remember durable user preferences, decisions, and project facts; don't store transient chit-chat.",
+        mem_note: "Current memory note", mem_oversized: "The note is larger than the injection cap — older notes aren't recalled. Consolidate to condense it.",
+        mem_save_note: "Save note", mem_consolidate: "Consolidate", mem_clear: "Clear",
+        mem_saved: "saved", mem_cleared: "cleared", mem_consolidating: "consolidating…",
+        mem_consolidated: "consolidated", mem_consolidate_noop: "nothing to consolidate",
+        mem_chars: "chars",
+        mem_extend_hint: "Add your own with @register_memory in harness/memory.py — it appears in the backend list once imported. See AGENTS.md.",
+{% endif %}        obs_trace: "write JSONL trace", obs_tracedir: "trace_dir",
       },
       zh: {
         nav_chat: "对话", nav_config: "配置", chat_placeholder: "问点什么…",
@@ -220,7 +261,7 @@
         cfg_reload_confirm: "重载会丢弃未保存的修改,确定继续?",
         subtab_llm: "LLM", subtab_context: "上下文", subtab_budget: "预算",
         subtab_tools: "工具", subtab_prompts: "提示词", subtab_paradigms: "范式",
-        subtab_observability: "可观测",
+        {% if spec.memory.enabled %}subtab_memory: "记忆", {% endif %}subtab_observability: "可观测",
         profiles_label: "LLM 配置", profile_add: "+ 添加配置", profile_remove: "删除",
         test_btn: "测试", test_running: "测试中…",
         roles_label: "角色", roles_hint: "把每个角色绑定到上面的某个配置。",
@@ -258,7 +299,19 @@
         rules_hint: "你拥有的纯 markdown 文件(AGENTS.md / CLAUDE.md 模式),每轮原文注入系统提示。在此编辑正文;保存会写入文件 + 生效列表。",
         paradigms_enabled: "启用的范式", paradigms_default: "默认范式",
         par_extend_hint: "可自定义:在 harness/paradigms/ 用 @register_paradigm 注册,import 后即在此出现(见 AGENTS.md)。",
-        obs_trace: "写 JSONL trace", obs_tracedir: "trace 目录",
+{% if spec.memory.enabled %}        mem_hint: "一份 agent 跨会话维护的简短笔记,每轮注入系统提示。agent 用记忆工具自行维护,你也可在此编辑。",
+        mem_readonly: "只读(agent 只能读记忆,不能写)",
+        mem_backend: "后端", mem_capacity: "容量(注入上限 inject_max_chars)",
+        mem_auto: "会话结束时若超出容量自动整理(用 compaction 模型)",
+        mem_policy: "记忆策略(记什么 / 何时写)",
+        mem_policy_ph: "例如:记住稳定的用户偏好、决策、项目事实;不要记临时闲聊。",
+        mem_note: "当前记忆笔记", mem_oversized: "笔记已超过注入上限——较早的笔记不会再被召回。整理可精简它。",
+        mem_save_note: "保存笔记", mem_consolidate: "整理", mem_clear: "清空",
+        mem_saved: "已保存", mem_cleared: "已清空", mem_consolidating: "整理中…",
+        mem_consolidated: "已整理", mem_consolidate_noop: "无需整理",
+        mem_chars: "字符",
+        mem_extend_hint: "可自定义:在 harness/memory.py 用 @register_memory 注册后端,import 后即出现在后端列表(见 AGENTS.md)。",
+{% endif %}        obs_trace: "写 JSONL trace", obs_tracedir: "trace 目录",
       },
     };
     let lang = localStorage.getItem("hf_lang") || "{{ language }}";
@@ -526,7 +579,7 @@
     });
 
     // ---- config: functional sub-tabs ------------------------------------
-    const CFG_TABS = ["llm", "context", "budget", "tools", "prompts", "paradigms", "observability"];
+    const CFG_TABS = ["llm", "context", "budget", "tools", "prompts", "paradigms",{% if spec.memory.enabled %} "memory",{% endif %} "observability"];
     let cfgTab = "llm";
     let cfg = {};
     // Tracks unsaved edits in the config view. Edits live only in the DOM until
@@ -540,7 +593,7 @@
     let ruleFiles = [];
     // What's registered in code (GET /registries): the universe the Context +
     // Paradigms dropdowns are built from. A configured name missing here is flagged.
-    let reg = { paradigms: [], strategies: [], conditions: [], budget_conditions: [] };
+    let reg = { paradigms: [], strategies: [], conditions: [], budget_conditions: []{% if spec.memory.enabled %}, memory: [] {% endif %} };
     const UNREG = " \u26a0";  // appended to a name selected in config but not registered
 
     function buildCfgTabs() {
@@ -796,7 +849,7 @@
     // from skills.py when enabled). Any other name without "__" is one YOU
     // registered — those sort to the very top. Only affects grouping, never
     // behavior; keep in sync if you rename a built-in.
-    const BUILTIN_TOOLS = new Set(["get_current_time", "calculator"{% if spec.skills.enabled %}, "read_skill"{% endif %}]);
+    const BUILTIN_TOOLS = new Set(["get_current_time", "calculator"{% if spec.skills.enabled %}, "read_skill"{% endif %}{% if spec.memory.enabled %}, "memory_read", "memory_append", "memory_write"{% endif %}]);
     // Tools discovered from MCP servers (GET /mcp/discover), cached per page load so
     // a server's tools can be offered without hand-writing the allowlist. null =
     // not scanned yet; buildTools then falls back to whatever's already in config.
@@ -925,7 +978,47 @@
       catch (e) { ruleFiles = []; }
     }
 
-    function renderConfig() {
+{% if spec.memory.enabled %}    // The note body (markdown file) from GET /memory — separate from cfg.memory
+    // (the config knobs). Editing the note has its own Save/Clear/Consolidate
+    // buttons and is NOT part of the main config Save.
+    let memInfo = { content: "", read_only: false, size: 0, oversized: false };
+    async function loadMemory() {
+      try { memInfo = await (await fetch("/memory")).json(); }
+      catch (e) { memInfo = { content: "", read_only: false, size: 0, oversized: false }; }
+    }
+    // Build the Memory tab: read-only switch + backend dropdown (from /registries)
+    // + capacity + auto-consolidate + policy, then the note body with its own
+    // action buttons. A configured backend that isn't registered is still shown,
+    // flagged, so it round-trips instead of vanishing.
+    function buildMemory() {
+      const mem = cfg.memory || {};
+      $("cfg-mem-readonly").checked = !!mem.read_only;
+      const sel = $("cfg-mem-backend"); sel.innerHTML = "";
+      const backends = (reg.memory || []).slice();
+      const current = mem.backend || "file";
+      if (!backends.includes(current)) backends.push(current);
+      backends.forEach((name) => {
+        const ok = (reg.memory || []).includes(name);
+        const o = document.createElement("option");
+        o.value = name; o.textContent = name + (ok ? "" : UNREG);
+        if (!ok) o.title = t("cfg_unregistered");
+        sel.appendChild(o);
+      });
+      sel.value = current;
+      $("cfg-mem-capacity").value = mem.inject_max_chars ?? 4000;
+      $("cfg-mem-auto").checked = !!mem.auto_consolidate;
+      $("cfg-mem-policy").value = mem.policy || "";
+      // The note body lives outside the dirty/Save flow — stop its edits bubbling
+      // to the view-config "unsaved" marker (it has its own Save note button).
+      const note = $("cfg-mem-content");
+      note.value = memInfo.content || "";
+      note.oninput = (e) => e.stopPropagation();
+      note.onchange = (e) => e.stopPropagation();
+      $("cfg-mem-size").textContent = (memInfo.size || 0) + " / " + (memInfo.inject_max_chars ?? mem.inject_max_chars ?? 4000) + " " + t("mem_chars");
+      $("cfg-mem-oversized").classList.toggle("hidden", !memInfo.oversized);
+      $("cfg-mem-status").textContent = "";
+    }
+{% endif %}    function renderConfig() {
       const pc = $("cfg-profiles");
       pc.innerHTML = "";
       (cfg.llms || []).forEach((p) => pc.appendChild(profileCard(p)));
@@ -938,7 +1031,8 @@
       $("cfg-p-system").value = pr.system || "";
       buildRules();
       buildParadigms();
-      // observability
+{% if spec.memory.enabled %}      buildMemory();
+{% endif %}      // observability
       const obs = cfg.observability || {};
       $("cfg-obs-trace").checked = !!obs.trace;
       $("cfg-obs-tracedir").value = obs.trace_dir || "traces";
@@ -999,7 +1093,16 @@
         default: $("cfg-par-default").value.trim(),
       };
       patch.observability = { trace: $("cfg-obs-trace").checked, trace_dir: $("cfg-obs-tracedir").value.trim() || "traces" };
-      return patch;
+{% if spec.memory.enabled %}      // Memory config knobs (the note body is saved separately). Spread the
+      // current memory config first so unsurfaced fields (path) round-trip.
+      patch.memory = Object.assign({}, cfg.memory || {}, {
+        backend: $("cfg-mem-backend").value,
+        read_only: $("cfg-mem-readonly").checked,
+        inject_max_chars: Number($("cfg-mem-capacity").value || 4000),
+        auto_consolidate: $("cfg-mem-auto").checked,
+        policy: $("cfg-mem-policy").value.trim() || null,
+      });
+{% endif %}      return patch;
     }
 
     // Flip the unsaved marker + highlight the Save button so a forgotten Save is
@@ -1016,7 +1119,8 @@
       cfg = await (await fetch("/config")).json();
       try { reg = await (await fetch("/registries")).json(); } catch (e) { /* keep last */ }
       await loadRules();  // rule files (explicit + auto-recognized) for the Prompts tab
-      renderConfig();
+{% if spec.memory.enabled %}      await loadMemory();  // the long-term memory note for the Memory tab
+{% endif %}      renderConfig();
       gateChat();
       setDirty(false);
       $("cfg-status").textContent = "";
@@ -1114,10 +1218,40 @@
       });
       const data = await resp.json();
       if (resp.ok) {
-        cfg = data; await loadRules(); renderConfig(); gateChat(); loadParadigms(); setDirty(false);
+        cfg = data; await loadRules();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); setDirty(false);
         $("cfg-status").textContent = ruleErr ? (t("cfg_saved") + " — " + ruleErr) : t("cfg_saved");
       } else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });
+{% if spec.memory.enabled %}
+    // Memory note actions — immediate (not part of the main config Save), each
+    // refreshes the note + size after. Save note = POST /memory (overwrite),
+    // Consolidate = POST /memory/consolidate (compaction-role rewrite), Clear =
+    // DELETE /memory.
+    async function refreshMemory() { await loadMemory(); buildMemory(); }
+    $("cfg-mem-save").addEventListener("click", async () => {
+      const status = $("cfg-mem-status");
+      const resp = await fetch("/memory", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: $("cfg-mem-content").value }),
+      });
+      if (resp.ok) { await refreshMemory(); $("cfg-mem-status").textContent = t("mem_saved"); }
+      else { status.textContent = (await resp.json()).error || t("cfg_invalid"); }
+    });
+    $("cfg-mem-clear").addEventListener("click", async () => {
+      await fetch("/memory", { method: "DELETE" });
+      await refreshMemory(); $("cfg-mem-status").textContent = t("mem_cleared");
+    });
+    $("cfg-mem-consolidate").addEventListener("click", async () => {
+      const btn = $("cfg-mem-consolidate"), status = $("cfg-mem-status");
+      btn.disabled = true; status.textContent = t("mem_consolidating");
+      try {
+        const data = await (await fetch("/memory/consolidate", { method: "POST" })).json();
+        await refreshMemory();
+        status.textContent = data.ran ? t("mem_consolidated") : t("mem_consolidate_noop");
+      } catch (e) { status.textContent = String(e); }
+      finally { btn.disabled = false; }
+    });
+{% endif %}
 
     function show(which) {
       $("view-chat").classList.toggle("hidden", which !== "chat");

@@ -695,3 +695,36 @@ def test_memory_enabled_generates_support(tmp_path, spec):
     py_compile.compile(str(pkg / "harness" / "memory.py"), doraise=True)
     snapshot = (out / "harness.spec.yaml").read_text(encoding="utf-8")
     assert "memory" in snapshot and "enabled: true" in snapshot
+
+
+def test_memory_web_panel_present_when_enabled(tmp_path, spec):
+    """memory + web on => the config page has a Memory tab, the memory tools are
+    grouped as built-in (not "your tools"), and the backend endpoints are wired."""
+    spec.memory.enabled = True
+    spec.interfaces.web = True
+    out = tmp_path / "memweb"
+    generate(spec, out, git_init=False)
+    base = out / "src" / "agent_harness" / "interfaces"
+    idx = (base / "web_index.html").read_text(encoding="utf-8")
+    web_py = (base / "web.py").read_text(encoding="utf-8")
+
+    assert 'data-cfg="memory"' in idx and "subtab_memory" in idx
+    assert "cfg-mem-consolidate" in idx and "cfg-mem-policy" in idx
+    # Q1: memory_* are listed among BUILTIN_TOOLS so they group under "Built-in"
+    assert '"memory_read", "memory_append", "memory_write"' in idx
+    assert "/memory/consolidate" in web_py and '"memory",' in web_py
+
+
+def test_memory_web_footprint_absent_when_disabled(tmp_path, spec):
+    """memory off + web on => the web UI/API carry zero memory wiring."""
+    spec.memory.enabled = False
+    spec.interfaces.web = True
+    out = tmp_path / "webnomem"
+    generate(spec, out, git_init=False)
+    base = out / "src" / "agent_harness" / "interfaces"
+    idx = (base / "web_index.html").read_text(encoding="utf-8")
+    web_py = (base / "web.py").read_text(encoding="utf-8")
+
+    assert 'data-cfg="memory"' not in idx and "subtab_memory" not in idx
+    assert "memory_read" not in idx
+    assert "/memory" not in web_py and "memory" not in web_py.lower()

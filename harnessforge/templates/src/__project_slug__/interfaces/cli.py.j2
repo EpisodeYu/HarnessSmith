@@ -352,8 +352,22 @@ def chat(
                 session_store.save(
                     session_id, history, sessions_cfg.dir, mode=result.mode
                 )
-{% if spec.memory.enabled %}        from ..harness.memory import end_session
+{% if spec.memory.enabled %}        from ..harness.memory import end_session, is_oversized, maybe_auto_consolidate
 
+        # Memory housekeeping at the SESSION BOUNDARY (not the reply hot path): if
+        # the note outgrew what gets injected, auto-consolidate (when enabled, via
+        # the compaction model) or just nudge the user to do it by hand.
+        if maybe_auto_consolidate(config, mock=mock):
+            typer.secho(
+                "  long-term memory consolidated (it had grown past inject_max_chars).",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
+        elif is_oversized(config):
+            typer.secho(
+                "  note: long-term memory exceeds inject_max_chars, so older notes "
+                "aren't recalled — run `{{ project_slug }} memory consolidate` to condense it.",
+                fg=typer.colors.YELLOW,
+            )
         end_session(config, history)
 {% endif %}    finally:
 {% if spec.mcp.enabled %}        if mcp_manager is not None:
@@ -488,19 +502,22 @@ def info(
 @app.command()
 def memory(
     action: str = typer.Argument(
-        "show", help="show | clear | path — inspect or reset long-term memory."
+        "show",
+        help="show | clear | path | consolidate — inspect, reset, or condense memory.",
     ),
     config_path: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to config.yaml."
     ),
 ) -> None:
-    """Inspect or reset the agent's long-term memory note.
+    """Inspect, reset, or condense the agent's long-term memory note.
 
-    ``show`` prints it, ``path`` prints the file location, ``clear`` erases it.
-    Memory is the agent's self-maintained cross-session note — normally it edits
-    it itself with the memory tools; this is the manual escape hatch.
+    ``show`` prints it, ``path`` prints the file location, ``clear`` erases it, and
+    ``consolidate`` rewrites it smaller via the compaction-role model (keep durable
+    facts, drop stale/duplicate). Memory is the agent's self-maintained cross-session
+    note — normally it edits it itself with the memory tools; this is the manual
+    escape hatch.
     """
-    from ..harness.memory import get_backend
+    from ..harness.memory import consolidate, get_backend, note_size
 
     config = load_config(config_path)
     backend = get_backend(config)
@@ -518,6 +535,20 @@ def memory(
         if hasattr(backend, "clear"):
             backend.clear()
         typer.secho("memory cleared.", fg=typer.colors.GREEN)
+    elif action == "consolidate":
+        before = note_size(config)
+        try:
+            ran = consolidate(config)
+        except Exception as exc:
+            typer.secho(f"consolidation failed: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+        if not ran:
+            typer.secho("nothing to consolidate (memory is empty).", fg=typer.colors.YELLOW)
+        else:
+            typer.secho(
+                f"memory consolidated ({before} -> {note_size(config)} chars).",
+                fg=typer.colors.GREEN,
+            )
     else:  # show (default)
         reader = getattr(backend, "read", backend.recall)
         typer.echo(reader() or "(memory is empty)")

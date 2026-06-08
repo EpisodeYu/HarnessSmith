@@ -79,10 +79,21 @@
 - [x] **⑤ 后端契约 = 中档(recall/record + 可选 tools/on_session_end/on_compact)**(人 2026-06-07)。
 - **软确认(非阻塞,§5.3)**:`inject_max_chars=4000` 默认上限;记忆写工具 `risk=high`(只读范式只放行 read);记忆后端注册"类/工厂"而非纯函数(因记忆是多操作+有状态,异于其他函数注册表);Web 本片只给 `/memory` 端点 + CLI 管理,**富 UI 面板留作后续增量**(不卡门禁)。
 
+### 实现说明(2026-06-08 后续增量:Web 记忆配置页 + 策略 + 整理)
+
+人在使用中提了两点(经选择题确认),作为本片的后续增量补齐——**仍守薄/红线、零新增依赖、关闭逐字零痕迹**:
+
+- **bug 修复**:产物 Web 配置页把 `memory_read/append/write` 错误归入「你的工具」(custom)。根因:`web_index.html` 的 `BUILTIN_TOOLS` 白名单写死且漏了记忆工具(同 `read_skill` 当 skills 开)。修:开记忆时把这三个加入白名单 → 正确归「内置工具」。
+- **Web 记忆配置页(`data-cfg="memory"` tab)**:把原先只有 `/memory` 端点的能力做成正式 tab——**开关=`read_only`**(人选:复用 read_only 当"只读模式"开关,不新增运行期 enabled 字段;`memory.enabled` 维持生成期结构开关)、**后端下拉**(从 `/registries` 列已注册后端,未注册标 ⚠)、**容量=`inject_max_chars`**、**记忆策略提示=`policy`**、**笔记内容**显示+编辑+清空(复用 `/memory` GET/POST/DELETE)+ **整理**按钮。`memory` 纳入 `_EDITABLE_FIELDS`(可经 `/config` 改);笔记正文走独立按钮(不进主 Save 流、edit 不触发 unsaved 标记)。
+- **`policy` 字段(新增运行期 `MemoryConfig.policy`)**:一段可选指令(记什么/何时写),随 `memory_section` 注入(空笔记也注入,让 agent 从第一轮就知道策略);默认 `null`,不影响默认产物。
+- **记忆增长 / 整理时机(`auto_consolidate` + `consolidate`)**:笔记 append 无上限、注入按 `inject_max_chars` 封顶,超出=`is_oversized`(老笔记不再召回)。调研对标 **LangMem / Mem0 / Letta(MemGPT)**:整理一律放 **background / 会话边界**,不进回复 hot path(hot-path 加延迟、干扰本次回复、低质)。落地为**用 `compaction` 角色**(治"别用弱模型整理")的整理函数:① **手动**(默认)= CLI `memory consolidate` + Web「整理」按钮 + `POST /memory/consolidate`;② **自动**(opt-in,默认关)= CLI `chat` 会话结束且超容量时整理,否则只打提示(治"别在用户要简短回复时提示")。**Web 无干净的会话结束信号 → 自动整理只接 CLI chat 边界;Web 侧靠手动按钮 + 容量/超限提示**(已在 tab 与文档点明)。
+- 决策记录(人 2026-06-08 选择器):开关用 read_only(C-非新增字段)/ 笔记可编辑+清空 / 策略=后端下拉+策略提示**两者都要**且同其他页提示可 `@register_memory` 扩展 / 增长处理选 **C(默认手动边界提示 + opt-in 后台整理)**、整理时机走 background + compaction 角色。
+
 ## 5. 本 slice 注意 / 留给后续
 
 - **记忆 ≠ RAG**:记忆是 agent 故意维护的少量笔记;RAG(v1+,sqlite-vec)是外部语料检索。二者不混。
 - **on_compact 与 record 部分重叠**:`record(messages)` 每轮已拿到压缩前的全量正文,自定义后端在 `record` 里也能"抢救";`on_compact` 是更显式的压缩前钩子。内置 file 后端两者皆 no-op(工具驱动)。
-- **Web 富面板**:本片只落 `/memory` 端点(可管理 + 可测),AI-Studio 式 web 壳里的可视化记忆面板留作后续增量(避免大改 `web_index.html`)。
+- **Web 富面板**:~~本片只落 `/memory` 端点~~ **已于 2026-06-08 后续增量补齐 Web 记忆配置 tab**(见 §4「实现说明」),含读/写/清空/整理 + 配置旋钮。
 - **多记忆作用域 / USER.md 拆分**(Hermes 有 MEMORY.md + USER.md):本片单文件足够薄;多作用域/多文件留待真实需求。
-- **自动摘要写入**:作为可选自定义后端(override `record`/`on_session_end` 调 compaction 角色抽取),不进默认 file 后端。
+- **自动摘要写入 / 整理**:内置 file 后端现支持**显式整理**(`consolidate`,用 compaction 角色重写笔记;手动或会话结束 opt-in 自动,**不进回复 hot path**)。更激进的"按对话自动抽取写入"仍留作可选自定义后端(override `record`/`on_session_end`)。
+- **Web 自动整理**:Web 无干净的会话结束边界,故 `auto_consolidate` 自动整理只接 CLI `chat`;Web 侧靠 Memory tab 的「整理」按钮 + 超容量提示。若以后给 Web 加显式"结束会话"语义,可在那挂自动整理。

@@ -223,14 +223,23 @@ def get_backend(config: Config) -> MemoryBackend | None:
 
 
 def memory_section(config: Config) -> str:
-    """The system-prompt block for recalled memory (``""`` when empty/unknown)."""
+    """The system-prompt block for memory: the recalled notes (when any) plus the
+    optional ``policy`` instruction (when set). ``""`` when there is nothing to say.
+
+    The policy is injected even with an empty note so the agent knows HOW to curate
+    memory from turn one; it is static guidance, not a per-turn "consolidate now"
+    nag (consolidation happens at a boundary, never in the reply hot path)."""
     backend = get_backend(config)
     if backend is None:
         return ""
+    sections: list[str] = []
     recalled = backend.recall().strip()
-    if not recalled:
-        return ""
-    return f"{_MEMORY_HEADER}\n\n{recalled}"
+    if recalled:
+        sections.append(f"{_MEMORY_HEADER}\n\n{recalled}")
+    policy = (config.memory.policy or "").strip()
+    if policy:
+        sections.append(f"Memory policy (how to maintain your long-term memory):\n{policy}")
+    return "\n\n".join(sections)
 
 
 def register_memory_tools(config: Config, registry=default_registry) -> list[str]:
@@ -270,3 +279,74 @@ def compact_rescue(config: Config, dropped: list[dict]) -> None:
     backend = get_backend(config)
     if backend is not None and dropped:
         backend.on_compact(dropped)
+
+
+# --- Consolidation (keep a growing note small) -----------------------------
+#
+# The file backend's note grows unbounded (``memory_append`` only adds); only the
+# most-recent ``inject_max_chars`` are ever injected, so cost/context stay bounded
+# but older notes silently stop being recalled once the note is "oversized".
+# Consolidation rewrites the note smaller with the COMPACTION-role model (a capable
+# summarizer, not the live generation model). Following how memory frameworks
+# (Mem0 / Letta / LangMem) handle it, this runs in the BACKGROUND — at a session
+# boundary or on demand — NOT in the reply hot path, so a quick reply or a weak
+# generation model is never affected.
+
+_CONSOLIDATE_INSTRUCTION = (
+    "You are condensing an agent's long-term memory note. Rewrite it so it is "
+    "shorter and well-organized: keep durable facts, user preferences, and "
+    "decisions; merge duplicates; drop anything stale, redundant, or transient. "
+    "Preserve meaning. Output ONLY the rewritten note in markdown — no preamble, "
+    "no code fences."
+)
+
+
+def note_size(config: Config) -> int:
+    """Length of the on-disk note (``0`` if the backend has no readable note)."""
+    backend = get_backend(config)
+    reader = getattr(backend, "read", None) if backend is not None else None
+    return len(reader()) if reader is not None else 0
+
+
+def is_oversized(config: Config) -> bool:
+    """True when the note is larger than what gets injected — i.e. older notes
+    won't be recalled until it's consolidated."""
+    return note_size(config) > config.memory.inject_max_chars
+
+
+def consolidate(config: Config, *, client=None, mock: bool = False) -> bool:
+    """Condense the note via the ``compaction``-role model. Returns ``True`` if it
+    ran (a backend with a readable+writable, non-empty note). ``client`` may be
+    passed (tests); otherwise one is built lazily for the ``compaction`` role
+    (falling back to the first profile, same as context summarization)."""
+    backend = get_backend(config)
+    if backend is None or not hasattr(backend, "read") or not hasattr(backend, "write"):
+        return False
+    text = backend.read().strip()
+    if not text:
+        return False
+    if client is None:
+        from .llm import ClientRouter
+
+        client = ClientRouter(config, mock=mock).client_for("compaction")
+    rewritten = (
+        client.complete(
+            [
+                {"role": "system", "content": _CONSOLIDATE_INSTRUCTION},
+                {"role": "user", "content": text},
+            ],
+            None,
+        ).content
+        or ""
+    ).strip()
+    if rewritten:
+        backend.write(rewritten)
+    return True
+
+
+def maybe_auto_consolidate(config: Config, *, mock: bool = False) -> bool:
+    """Consolidate iff ``auto_consolidate`` is on AND the note is oversized. Meant
+    for a session boundary (CLI ``chat`` exit), never the reply hot path."""
+    if not config.memory.auto_consolidate or not is_oversized(config):
+        return False
+    return consolidate(config, mock=mock)

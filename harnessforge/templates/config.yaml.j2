@@ -156,4 +156,6 @@ memory:
   path: .harness/memory.md
   inject_max_chars: 4000   # cap injected note size (keeps the prompt thin)
   read_only: false         # true = only the read tool (the agent can't write memory)
+  policy: null             # optional: what/when to remember — injected to shape how the agent curates memory
+  auto_consolidate: false  # true = condense an oversized note at chat-session end (uses the compaction role, never the reply path)
 {% endif %}

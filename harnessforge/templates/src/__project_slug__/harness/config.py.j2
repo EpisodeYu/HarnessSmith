@@ -275,7 +275,14 @@ class McpConfig(BaseModel):
     ``harness/memory.py``; add your own with ``@register_memory``). ``path`` is the
     file backend's note (kept under ``.harness/``, gitignored, never holds
     secrets). ``inject_max_chars`` caps how much of the note is injected so memory
-    stays thin. ``read_only`` offers only the read tool (the agent can't write).
+    stays thin (it is also the "oversized" mark for consolidation). ``read_only``
+    offers only the read tool (the agent can't write).
+
+    ``policy`` is an optional instruction (what/when to remember) injected with the
+    memory section to shape HOW the agent curates memory — without editing the main
+    system prompt. ``auto_consolidate`` (off by default) condenses an oversized note
+    at a session boundary (CLI ``chat`` exit) via the ``compaction`` role — never in
+    the reply hot path, so a quick reply or a weak generation model isn't affected.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -284,6 +291,8 @@ class McpConfig(BaseModel):
     path: str = ".harness/memory.md"
     inject_max_chars: int = Field(default=4000, gt=0)
     read_only: bool = False
+    policy: str | None = None
+    auto_consolidate: bool = False
 
 
 {% endif %}

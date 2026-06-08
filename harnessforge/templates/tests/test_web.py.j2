@@ -458,7 +458,9 @@ def test_memory_endpoints_roundtrip(tmp_path):
     """GET/POST/DELETE /memory read, overwrite, and clear the note; /registries
     lists the registered backends."""
     client = _memory_client(tmp_path)
-    assert client.get("/memory").json() == {"content": "", "read_only": False}
+    got = client.get("/memory").json()
+    assert got["content"] == "" and got["read_only"] is False
+    assert got["size"] == 0 and got["oversized"] is False  # size/oversized surfaced
 
     assert client.post("/memory", json={"content": "remember this"}).json()["ok"] is True
     assert client.get("/memory").json()["content"] == "remember this"
@@ -466,6 +468,35 @@ def test_memory_endpoints_roundtrip(tmp_path):
 
     assert client.delete("/memory").json()["ok"] is True
     assert client.get("/memory").json()["content"] == ""
+
+
+def test_memory_config_is_editable(tmp_path):
+    """memory config knobs round-trip through /config (so the Memory tab can edit
+    backend / capacity / read_only / policy / auto_consolidate)."""
+    client = _memory_client(tmp_path)
+    assert "memory" in client.get("/config").json()  # surfaced for the panel
+
+    resp = client.post("/config", json={"memory": {
+        "backend": "file", "path": str(tmp_path / "memory.md"),
+        "inject_max_chars": 1234, "policy": "remember decisions", "auto_consolidate": True,
+    }})
+    assert resp.status_code == 200
+    mem = client.get("/config").json()["memory"]
+    assert mem["inject_max_chars"] == 1234
+    assert mem["policy"] == "remember decisions"
+    assert mem["auto_consolidate"] is True
+
+
+def test_memory_consolidate_endpoint(tmp_path):
+    """POST /memory/consolidate rewrites an oversized note via the (mock) compaction
+    model; an empty note is a no-op."""
+    client = _memory_client(tmp_path)
+    assert client.post("/memory/consolidate").json()["ran"] is False  # empty -> no-op
+
+    client.post("/memory", json={"content": "lots of\nold\nnotes\nhere"})
+    data = client.post("/memory/consolidate").json()
+    assert data["ok"] is True and data["ran"] is True
+    assert data["content"]  # rewritten note returned
 
 
 def test_memory_read_only_rejects_writes(tmp_path):
