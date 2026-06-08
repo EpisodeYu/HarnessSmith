@@ -133,7 +133,12 @@ def test_baked_defaults_fill_behavioral_fields(client):
     generated product is complete out of the box (edited later in the product)."""
     structural = {"project_slug": "barebones", "paradigms": ["agent"], "interfaces": {"cli": True}}
     y = client.post("/spec", json={"spec": structural}).json()["yaml"]
-    assert "model: gpt-4o-mini" in y           # default LLM profile
+    # The LLM profile is scaffolded with the env-var NAMES but NO model — the
+    # one-click wizard never asks which model, so it must not guess one
+    # (gpt-4o-mini mis-fires on non-OpenAI providers). The product gates chat
+    # until the user sets a model on its own config page.
+    assert "name: default" in y                # default LLM profile (scaffold)
+    assert "gpt-4o-mini" not in y              # no guessed model
     assert "api_key_env: OPENAI_API_KEY" in y  # env NAME only
     assert "You are a helpful assistant." in y  # default system prompt
     # default budget guardrail (new shape: combine + named conditions)

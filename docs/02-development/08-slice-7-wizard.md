@@ -50,7 +50,7 @@
 ### 2.1 生成器 wizard:结构-only 表单 + 烤默认(决策 B)
 - **首控件 = 语言**;前端 i18n 字典覆盖全部可见文案,切换即换(零新增依赖)。
 - **UI 只暴露结构**:基本(显示名→slug、`paradigms` 多选+默认、语言)+ 能力(`interfaces.web`、`mcp.enabled`+catalog 多选、`skills.enabled`、`memory.enabled`(Slice 8B 新增))+ 产出。**不展示** llms/prompts/tools/context/budget/observability/roles。
-- **后端烤默认值**(`app.py _BAKED_DEFAULTS`,仅缺省时填):默认 LLM profile(`name=default`/`model=gpt-4o-mini`/`api_key_env=OPENAI_API_KEY`/`base_url_env=OPENAI_BASE_URL`)+ `roles.generation=default` + `prompts.system="You are a helpful assistant."` + 内置工具(get_current_time/calculator)开 + `budget.max_steps=8`;context/observability 走 `config.yaml` 模板默认。这样产物开箱即跑,用户在**产物配置页 / `.env`** 里改这些。显式传入(或手写 spec)优先于默认。
+- **后端烤默认值**(`app.py _BAKED_DEFAULTS`,仅缺省时填):默认 LLM profile(`name=default`/`model=""`(留空)/`api_key_env=OPENAI_API_KEY`/`base_url_env=OPENAI_BASE_URL`)+ `roles.generation=default` + `prompts.system="You are a helpful assistant."` + 内置工具(get_current_time/calculator)开 + `budget.max_steps=8`;context/observability 走 `config.yaml` 模板默认。**model 故意留空**:一键向导从不问用哪个模型,猜一个(如 gpt-4o-mini)只会在非 OpenAI provider 上 400;产物在用户于配置页填好 model 前**门控对话**(web `hasLLM` 要求非空 model)。env-var 名仍预填,用户在**产物配置页 / `.env`** 里补 model + key。显式传入(或手写 spec)优先于默认。
 - **显示名→slug**:前端 `lower / 非字母数字→_ / 去首尾_ / 数字开头补_`;用户改过 slug 后不再自动覆盖;后端按 `spec._SLUG_RE` 兜底校验。
 
 ### 2.2 后端校验 + 产出
@@ -66,7 +66,7 @@
 
 在 §2.3 基础上对**产物端 web**做了一轮易用性优化(只动产物模板 `web_index.html.j2` 前端 + 运行期 `LLMProfileConfig`/`trace`/`llm` 三处,**不改 `HarnessSpec`**;LLM 维持 provider-agnostic Chat Completions):
 
-- **未配置 LLM → 对话禁用**:对话页加 "请先配置 LLM" 横幅(可点跳到 配置→LLM),`cfg.llms` 为空时禁用输入框/发送/范式下拉/流式;页面启动即拉 `/config` 判定(后端不变)。
+- **未配置 LLM → 对话禁用**:对话页加 "请先配置 LLM" 横幅(可点跳到 配置→LLM),禁用输入框/发送/范式下拉/流式;页面启动即拉 `/config` 判定(后端不变)。**门控判定 = 没有任一 profile 带非空 `model`**(`hasLLM` 看 `cfg.llms.some(p => p.model.trim())`,而非仅看 `cfg.llms` 是否为空)——因为向导/模板会烤一个只带 env-var 名、`model` 留空的脚手架 profile,只有用户在配置页填好 model 才解禁,避免半配置状态用空/猜测 model 直接打 API。
 - **LLM 配置页多配置 + 分区**:`+ 添加配置` / 每条 `删除`;每条**默认只展开** name / model / API key / Base URL,采样旋钮(temperature / max_tokens / **reasoning effort**)收进「高级」`<details>`,单价收进「定价」`<details>`。
 - **env 变量名 + 写入 .env 合并**:API key 与 Base URL 各一行 = 「变量名输入框(默认 `OPENAI_API_KEY` / `OPENAI_BASE_URL`)+ 写入式值输入框 + 写入 .env 按钮」;复用 `POST /env`(write-only,值不回显),新增 Base URL 也能写 `.env`。提示文案「在 .env 设置该 key/url 的值(如已存在则覆盖)」。逻辑:不填值=沿用已有环境变量,填了=覆盖写入 `.env`。
 - **角色下拉**:`roles` 由自由文本改为下拉,固定展示 `generation` + `compaction`(各选已有 profile;compaction 空=回落 generation),保留任何额外已配角色。
@@ -130,7 +130,7 @@
 - [x] **⑤ context 条件/策略改造(人 2026-06-06 拍板,选择题确认)**:① **轮数 + token 是可组合的触发条件**(`triggers: {max_tokens, max_turns}` + `combine: or/and`,选 A:dict 形态);② **可扩展走薄注册表 + 装饰器**(`@register_strategy`/`@register_condition`,选 A,和 tools/paradigms 同套、守 §6 "非运行期抽象层"红线,**不**用 Protocol/ABC);③ **默认改为 192k token 触发压缩、不限轮数**;④ **默认策略 = `summarize`**(选 B,取代决策表原 `truncate` 默认;缺 compaction 角色时回落首个 profile,即用 generation 模型做摘要——实现说明 2026-06-08 RT-1,**非**回落 truncate)。改 `context.py`/`config.py`/`config.yaml`/产物配置页 + `00-overview §3` 决策表 + `01 §3/§4`,属 §5.2 大改动跑全量回归。
 - [x] **⑥ 扩展可发现性(人 2026-06-07 拍板,选择题确认)**:让"注册成功的自定义策略/条件/范式在产物里**可见可选**。① 产物 `GET /registries` 内省 `STRATEGIES`/`CONDITIONS`/`PARADIGMS`(纯名字、无密钥);② Context tab 策略下拉 + **每条已注册条件一个阈值输入**(选 A),Paradigms tab **已注册范式勾选列表 + default 下拉**(选 A),保存后顺手刷新 chat 模式下拉;③ **UI 不匹配告警**——config 选了未注册名字时标 ⚠(选 ①);④ **CLI `<pkg> info`** 列"已注册 vs 已启用"并标记未注册项(选 ②);⑤ Context/Paradigms tab 各加"可 `@register_*` 自定义,import 后即现"提示 + AGENTS.md 专章。改 `web.py`/`web_index.html`/`cli.py`/`AGENTS.md` + 测试。
 - [ ] **③ 字段是否齐 / 对外可读(实现后真实验收)**:起 wizard + 产物 serve 点一遍,确认覆盖与中英措辞。
-- **软确认(非阻塞,`CLAUDE.md §5.3`)**:`POST /generate` 取 render-only(卡 UI 规避,始终提供 spec 下载 / `new --spec` 接力);无构建单页(Tailwind CDN);wizard 依赖进 `[wizard]` extra;后端 `_BAKED_DEFAULTS` 取默认 LLM(`gpt-4o-mini` + `OPENAI_API_KEY`/`OPENAI_BASE_URL`)、默认 system prompt、内置工具开、`budget.max_steps=8`(仅缺省时填,显式优先);采样/单价/context 等其余行为性走产物 `config.yaml` 模板默认 + 产物配置页。
+- **软确认(非阻塞,`CLAUDE.md §5.3`)**:`POST /generate` 取 render-only(卡 UI 规避,始终提供 spec 下载 / `new --spec` 接力);无构建单页(Tailwind CDN);wizard 依赖进 `[wizard]` extra;后端 `_BAKED_DEFAULTS` 取默认 LLM(`model` 留空 + `OPENAI_API_KEY`/`OPENAI_BASE_URL`,产物配置页填 model 前门控对话)、默认 system prompt、内置工具开、`budget.max_steps=8`(仅缺省时填,显式优先);采样/单价/context 等其余行为性走产物 `config.yaml` 模板默认 + 产物配置页。
 
 ## 5. 本 slice 注意
 

@@ -86,10 +86,14 @@ _LAUNCH_STEPS = ("render", "sync", "serve")
 # product complete and runnable out of the box. Secrets are env-var NAMES only.
 # Only filled when absent/empty, so an explicit spec (or a hand-written one) wins.
 _BAKED_DEFAULTS: dict = {
+    # The LLM profile is scaffolded with the env-var NAMES but NO model: the
+    # one-click wizard never asks which model, so guessing one (gpt-4o-mini) only
+    # mis-fires on non-OpenAI providers. The generated product gates chat until
+    # the user sets a model on its own config page (+ the key in .env).
     "llms": [
         {
             "name": "default",
-            "model": "gpt-4o-mini",
+            "model": "",
             "api_key_env": "OPENAI_API_KEY",
             "base_url_env": "OPENAI_BASE_URL",
         }

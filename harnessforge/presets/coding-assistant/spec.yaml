@@ -9,7 +9,7 @@ project_slug: coding_assistant
 
 llms:
   - name: default
-    model: gpt-4o-mini
+    model: ""                   # set your model id, e.g. gpt-4o-mini (provider-specific); empty = configure before running
     api_key_env: OPENAI_API_KEY
     base_url_env: OPENAI_BASE_URL
 

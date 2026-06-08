@@ -5,7 +5,7 @@ project_slug: {{ project_slug }}
 
 llms:
 {% for profile in llms %}  - name: {{ profile.name }}
-    model: {{ profile.model }}
+    model: {{ profile.model | tojson }}   # required: your model id (e.g. gpt-4o); empty = configure before chatting
     api_key_env: {{ profile.api_key_env }}
 {% if profile.base_url_env %}    base_url_env: {{ profile.base_url_env }}
 {% endif %}    # Optional sampling knobs (sent ONLY when set; leave unset to use the model
