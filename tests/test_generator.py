@@ -787,6 +787,24 @@ def test_launch_script_name_follows_display_name(tmp_path, spec):
     assert (out / "My_ Assistant.bat").is_file()
 
 
+def test_launch_scripts_bootstrap_uv_when_missing(tmp_path, spec):
+    """When uv (and the console command) are absent, the launcher offers to
+    install uv — winget first, then the official installer — so a fresh Windows
+    box needs nothing preinstalled."""
+    out = tmp_path / "bootstrap"
+    generate(spec, out, git_init=False)
+    sh = (out / "agent_harness.sh").read_text(encoding="utf-8")
+    bat = (out / "agent_harness.bat").read_text(encoding="utf-8")
+    # consent prompt + the installed-command fallback are in both
+    assert "Install uv now?" in sh and "Install uv now?" in bat
+    # Windows: winget (signed) first, official installer as fallback; uv located
+    # at its known install path since a fresh PATH isn't visible this session
+    assert "astral-sh.uv" in bat and "astral.sh/uv/install.ps1" in bat
+    assert r"%USERPROFILE%\.local\bin\uv.exe" in bat
+    # POSIX: the official shell installer
+    assert "astral.sh/uv/install.sh" in sh
+
+
 def test_launch_script_no_web_runs_chat(tmp_path, spec):
     """Without web, the one-click script launches the terminal chat REPL."""
     out = tmp_path / "chatlaunch"

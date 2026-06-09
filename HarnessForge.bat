@@ -1,22 +1,64 @@
 @echo off
 REM One-click launcher for the HarnessForge wizard (opens the spec wizard in your browser).
-REM Prefers uv (auto-syncs the optional [wizard] extra); falls back to a harnessforge command.
+REM Prefers uv (auto-syncs the [wizard] extra); offers to install uv if it's missing.
 setlocal
 cd /d "%~dp0"
 
-where uv >nul 2>nul
-if not errorlevel 1 (
-    uv run --extra wizard harnessforge wizard --open
-    goto :done
-)
+set "UV="
+
+call :find_uv
+if defined UV goto :run
+
+REM No uv yet: an already-installed harnessforge command works too.
 where harnessforge >nul 2>nul
 if not errorlevel 1 (
     harnessforge wizard --open
     goto :done
 )
-echo Could not find "uv" or "harnessforge" on your PATH.
-echo Install uv ^(https://docs.astral.sh/uv/^) and run this from the repo, or
-echo pip install "harnessforge[wizard]" then run "harnessforge wizard --open".
+
+call :install_uv
+call :find_uv
+if not defined UV goto :no_runtime
+
+:run
+"%UV%" run --extra wizard harnessforge wizard --open
+goto :done
+
+:find_uv
+REM Locate uv on PATH or at the two standard user-level install locations
+REM (the current cmd session won't see a freshly added PATH entry).
+set "UV="
+where uv >nul 2>nul && set "UV=uv"
+if defined UV exit /b
+if exist "%USERPROFILE%\.local\bin\uv.exe" set "UV=%USERPROFILE%\.local\bin\uv.exe"
+if defined UV exit /b
+if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe" set "UV=%LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe"
+exit /b
+
+:install_uv
+echo.
+echo   The HarnessForge wizard needs uv - a small, self-contained tool that manages
+echo   Python and dependencies for you (user-level install, no admin required).
+set "REPLY=Y"
+set /p "REPLY=  Install uv now? [Y/n] "
+if /i "%REPLY%"=="n" exit /b
+where winget >nul 2>nul
+if not errorlevel 1 (
+    echo   Installing uv via winget ...
+    winget install --id astral-sh.uv -e --accept-package-agreements --accept-source-agreements
+)
+call :find_uv
+if defined UV exit /b
+echo   Installing uv via the official installer ...
+powershell -ExecutionPolicy Bypass -NoProfile -Command "irm https://astral.sh/uv/install.ps1 | iex"
+exit /b
+
+:no_runtime
+echo.
+echo   Could not find or install uv. Install it manually (user-level, no admin):
+echo     winget install astral-sh.uv
+echo     - or -  powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+echo   then double-click this again.
 pause
 exit /b 1
 
