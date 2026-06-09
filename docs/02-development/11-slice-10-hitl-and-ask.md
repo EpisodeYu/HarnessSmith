@@ -1,0 +1,123 @@
+# 02·11 - Slice 10:HITL 交互确认 + ask_question 工具（共享一套交互往返）
+
+> 目标:补齐事实标准 harness 的**人在环交互层**。两件能力共用同一套"循环在边界**暂停 → 推结构化 UI → 等用户回应 → 解除继续**"的往返底座,上层是两个可独立开关的能力:
+> - **ask_question 工具**(本片**先做**):模型主动调用的内置工具,弹"选择题/文本输入"卡片向用户澄清,答案作为 `tool_result` 喂回。对齐 Cursor 的 AskQuestion。
+> - **HITL 工具确认**(本片**后做**):框架在工具执行边界拦截,弹 allow / reject / always-allow,让危险工具敢"预置不放行"。对齐 Claude Code / Cursor 的工具放行。
+>
+> **缘起 & 排期**:Slice 10 原登记仅 HITL 确认(见 `00-overview §2` Slice 10 行 / `../03-feature-landscape-and-proposals.md §3 T1-B`)。2026-06-09 人新增 ask_question 诉求并定向:**两者共用一套交互管道,先做 ask_question(更简单、纯模型主动)、HITL 抒后,但底座要让 HITL 直接复用**;两份开发计划一次出齐。
+>
+> **薄/红线**:零新增运行期依赖(`contextvars`/`threading`/`queue` 均 stdlib;Web 复用现成 FastAPI/SSE)。HITL 是**护栏(威胁模型 A)非安全边界**——锁能力仍靠"生成期不编译进去"(`01 §4`),文档须讲清这条。**不**借 HITL 把 `shell` 默认开(改 `01 §6` 全局口径需人签)。属 **§5.2 大改动**(动范式核心 `run_tool` + `llm`/`cli`/`web` + 前端 + 新增 `interaction.py`,跨 ≥3 文件),实现时跑全量回归。
+
+---
+
+## 0. 边界与口径
+
+- **两条能力、一套机制**:ask_question(模型主动问)与 HITL 确认(框架拦截问)语义不同——前者结果是喂回模型的 `tool_result`,后者结果是放行/拒绝某次工具执行——但在 CLI/Web 上都需要同一套"暂停-弹窗-回传"往返。**共享底座 = `harness/interaction.py`(`Asker` 协议 + `ask()` + contextvar 注入)+ CLI/Web 两个 `Asker` 实现 + 前端结构化卡片组件 + Web `POST /chat/{run_id}/respond` 回传管道**。先做 ask_question 时把底座一次建全,HITL 只加"工具边界调用 + 触发配置 + allow 等级",不重写管道。
+- **触发依据 = 放行清单,不是单次危险度**(2026-06-09 调研定向,见 §5 取证):主流(Claude Code `default` / Cursor `Allowlist`)都是 **fail-closed**——"工具/命令在不在放行清单里"决定问不问,不在调用时现场判断这次危不危险;**只读是唯一的默认豁免**。故 HITL 触发用**不绑 risk 的放行清单模型**:`tools.confirm` 取 `none`(默认)/ `high` / `all` / 显式工具名列表;放行后从"要问集"移除。`risk=high` 只是 `high` 档的便捷选择器,不是硬编码的唯一触发源。
+- **HITL 默认零痕迹、不破坏黄金路径**:`tools.confirm` 默认 `none`(谁都不问 = 当前行为),所以 mock 非交互 golden 不受影响。开启确认后,**非交互 / Web 公开面默认拒绝**(已登记)。
+- **ask_question 默认内置开启**(人 2026-06-09 选 default_on):按内置安全工具对待(同 `calculator`),`risk=safe`、默认进 allowlist;非交互场景须优雅降级(见 §2),不得让"模型一问就把单发 `run` 挂死"。
+- **HITL 是护栏非安全边界**:确认能拦住"可信但手滑",拦不住改源码的代码所有者(own-your-code 没有地板);强隔离仍交 Docker(威胁模型 B)。与 Slice 9 的关系:Slice 9 是"事后停/续/改",Slice 10 是"事前问/逐次放行",都挂在循环边界但各自独立(不再像旧 Checkpoints 那样配对共建)。
+
+---
+
+## 1. 共享底座:交互往返(ask_question 先做时一次建全,HITL 复用)
+
+### 1.1 新增产物 `harness/interaction.py`（旁路扩展点,不在核心循环里）
+
+一个统一的"问用户"通道,与 `tools`/`hooks` 同级的薄模块:
+
+- `AskRequest`(dataclass):
+  - `kind: Literal["question", "approval"]` — 谁发起、什么语义。
+  - `prompt: str` — 问题正文 / 确认说明。
+  - `options: list[Option]` — 每项 `{id, label}`;question 由模型给,approval 由 HITL 固定填(allow_once/reject/...)。
+  - `allow_text: bool` — 是否允许自由文本输入(question 常开,approval 常关)。
+  - `allow_multiple: bool` — 多选(question 用)。
+  - `context: dict` — approval 携带 `tool`/`arguments`/`risk` 供 UI 展示。
+- `AskResponse`(dataclass):`option_ids: list[str]` + `text: str | None` + 便捷属性 `selected`(单选首个)。
+- `Asker`(Protocol):`def ask(self, req: AskRequest) -> AskResponse`。
+- 注入脊柱:`_CURRENT: ContextVar[Asker | None]` + `using_asker(asker)`(contextmanager)+ 模块级 `ask(req) -> AskResponse`(读 contextvar)。**工具/边界都经 `ask()` 调用,不必改 tool 签名或 `run()` 形参**——这是"扩展性优先"的关键:ask_question 工具体内 `from ..interaction import ask` 即可,HITL 边界同理。
+- 降级(无 asker / 非交互):`NonInteractiveAsker` — question → `AskResponse(text="(no interactive user available; proceed using your best judgment)")` 让模型自行决定、绝不挂死;approval → 选 `reject`(fail-closed,符合"非交互默认拒绝")。
+
+> **为什么用 contextvar 而非新增 `run()` 形参**:Slice 9 已给 `run()` 加了 `cancel`/`checkpoint` 两个穿透回调;再加 asker 会让范式签名继续膨胀,且 ask 要深入到**工具函数体内部**(tool 是纯函数,拿不到 `run()` 的局部),contextvar 是唯一不改 tool 签名又能触达的薄注入。入口 `with using_asker(...)` 包住整个 turn,worker 线程内显式设置(contextvar 不跨 `threading.Thread` 继承)。
+
+### 1.2 CLI 实现 `CliAsker`
+
+- 渲染:`prompt` + 编号选项(`[1] ... [2] ...`),`typer.prompt` 读输入;`allow_text` 时空选项也接受自由文本。
+- 与 Slice 9 协作:ask 期间首个 Ctrl-C 视为取消该 ask(返回降级/拒绝),不与 `_interruptible`(`cli.py:32`)的取消令牌打架。
+- TTY 探测:`sys.stdin.isatty()` 为假(管道/CI/`--mock` 冒烟)→ 用 `NonInteractiveAsker`,保证单发 `run`、Docker 冒烟、golden 不被阻塞。
+
+### 1.3 Web 实现 `WebAsker` + 回传管道(复用 Slice 9 的 run 注册表)
+
+现状 `_chat_events`(`web.py:144`)的 worker 线程把事件经 `queue` **单向** push 给 SSE。升级为**双向**:
+
+- `WebAsker.ask(req)`:生成 `request_id` → 把 `("ask", {request_id, ...req})` 投进事件队列(前端据此弹卡片)→ **阻塞**在该 run 的"回传队列"上 `get()` → 拿到回传转成 `AskResponse` 返回。
+- `create_app` 扩 `app.state.runs`:现为 `run_id -> cancel Event`(`web.py:286`,仅 stop 用),并存一张 `run_id -> {request_id -> reply Queue}`(或在 run 记录上挂 pending 表)。
+- 新增 `POST /chat/{run_id}/respond`(body:`{request_id, option_ids, text}`)→ 把回传投进对应队列,解除 worker 阻塞。未知 run/request 幂等 200。
+- **stop 联动**:`POST /chat/{run_id}/stop`(`web.py:337`)或断连(`GeneratorExit`,`web.py:252`)置 cancel 时,同时给所有 pending 回传队列投一个"取消"哨兵 → 阻塞中的 ask 立即返回(approval=reject / question=降级),不留挂起线程。
+- **超时 / 公开面默认拒绝**:`WebAsker` 可配可选等待上限,超时按 fail-closed(approval=reject)。公开面隔离沿用 Slice 13+ backlog 的"管理面/公开面隔离"前提。
+
+### 1.4 前端结构化卡片(`web_index.html`,question/approval 共用一个组件)
+
+- 监听 `event: ask` → 在对话流里渲染一张卡片:`prompt` + 选项按钮(单/多选)+(可选)文本框 + 提交。提交 → `POST /chat/{run_id}/respond`。
+- 主题化、内联(不用 `window.confirm/prompt`),沿用 Slice 8 §4b / Slice 9 重问的内联确认范式。
+- approval 卡片额外展示工具名 + 参数预览 + 风险标记;question 卡片展示模型给的选项 + "跳过"。
+
+---
+
+## 2. 计划 A:ask_question 工具（先做)
+
+- **新增内置工具 `ask_question`**(`harness/tools.py`,`risk=safe`,默认随产物生成 + 默认进 `config.yaml` allowlist):
+  - 参数 schema:`question: str`、`options: string[]`(可空 = 纯文本问)、`allow_multiple: bool=false`、`allow_free_text: bool=true`。
+  - 工具体:构造 `AskRequest(kind="question", ...)` → `ask()` → 把 `AskResponse` 格式化成确定字符串回模型(如 `User selected: <label>` / `User answered: <text>` / `User skipped.`)。
+- **入口接线**:`cli.run`/`cli.chat`、`web._chat_events` 各自 `with using_asker(CliAsker()/WebAsker(...))` 包住 `run_loop(...)`;Web 在 worker 线程内设置 asker。
+- **降级**:非交互(CLI 非 TTY、`--mock`)→ `NonInteractiveAsker` 让模型自行决定;不改变现有单发 `run` 语义。
+- **薄取舍 / 待签**:是否给 spec 开关(见 §5 决策点①)。推荐**不动 spec**——当内置工具直接生成,`interaction.py` 底座始终生成(同"范式注册表始终在"先例),想关就运行期从 allowlist 移除。
+
+---
+
+## 3. 计划 B:HITL 工具确认（后做,复用 §1 底座)
+
+- **触发配置(运行期,不进 spec)**:`config.yaml` 新增 `tools.confirm`(或顶层 `confirm` 段)= `none`(默认)/ `high` / `all` / 显式工具名列表。默认 `none` → 零痕迹、不破坏 golden。
+- **确认边界 + allow 等级(干净 4 档,对齐 Codex CLI)**:在 `run_tool`(`paradigms/__init__.py:94`)执行工具前,若工具命中"要问集"(放行清单 − 会话已放行集),`ask(AskRequest(kind="approval", context={tool,args,risk}, options=[allow_once, reject, allow_session, allow_always]))` —— 这 4 档对齐 Codex 的 Accept once / Reject / **Accept for session** / **Accept and add to policy**(2026-06-09 调研,见 §5 取证):
+  - `allow_once` → 执行本次,下次该工具再问。
+  - `reject` → 不执行,返回 `ERROR: user rejected tool <name>`(模型可自纠;不崩循环,沿用 `run_tool` 既有 ERROR 语义)。
+  - `allow_session` → 加进进程内"本会话放行集",本对话内该工具不再问(内存,重启重置)。**这就是"会话内该命令的所有调用全放行"**(人 2026-06-09 问及;= Codex "Accept for session" 的 identical-operation 等价,我们按工具名粒度),**已含、无需另设档**。
+  - `allow_always` → 永久:写回 `config.yaml`(把该工具移出 `confirm` 集 / 加豁免,经 `save_config` 保注释;= Codex "add to policy")。
+- **持久度由档本身表达,不另设 `remember` 旋钮**:`allow_session`(内存)与 `allow_always`(写 config)已覆盖"记会话 vs 记持久"两级(人 2026-06-09 选"两者都给、默认 session";UI 默认高亮 `allow_session` 档)。
+- **不加 `allow_all_readonly`、不放"会话级全部放行"逐次档**(人 2026-06-09 签):只读靠默认豁免(`confirm` 不纳入 safe,或用 `high` 档);"会话级全放行"(Cline `--auto-approve`/Codex `never` 类)是 mode/flag 语义,用运行期把 `confirm` 临时切 `none` 等价覆盖,不进弹窗以免误点降护栏。
+- **不改 `before_tool` 语义**:`hooks.before_tool`(`hooks.py:22`)保持观察型;确认走 `interaction.ask()`(经 contextvar),`run_tool` 多接一个 `confirm_set: set[str] | None`。文档把"HITL 确认 live in before_tool"一句更新为"live at the tool-execution boundary via interaction.ask()"。
+- **非交互 / Web 公开面默认拒绝**:`NonInteractiveAsker` approval=reject;断连/超时=reject。
+- **红线**:确认是护栏非保证;**不**据此把 `shell`/写工具默认开(改 `01 §6` 需人签,见 §5 决策点④,沿用既有登记)。
+
+---
+
+## 4. 退出门禁（实现后逐项勾;A 先交付可单独绿,B 再补)
+
+- [ ] **黄金路径**:preset/web 生成 → `uv sync && pytest` 绿 → mock 跑通一次工具调用(HITL `confirm: none` 默认不阻断 mock)。
+- [ ] **共享底座**:`interaction.ask()` 经 contextvar 解析;无 asker / 非交互 → 降级(question 不挂死、approval 拒绝)单测绿。
+- [ ] **ask_question(A)**:CLI(`CliAsker`,可注入假 stdin)与 Web(`WebAsker` + `POST /respond`)各跑通一次"模型调 ask_question → 弹 → 回传 → 答案进 `tool_result`";非 TTY/`--mock` 降级绿。
+- [ ] **HITL(B)四档**:`allow_once`/`reject`/`allow_session`/`allow_always`(mock asker)绿;`reject` 返回 ERROR 且循环不崩;**非交互默认拒绝断言**;`allow_session` 本会话该工具不再问;`allow_always` 写回 `config.yaml`(注释保留)。
+- [ ] **触发口径**:`confirm` = `none`(零问)/ `high`(只高危)/ `all`(含只读)/ 工具名列表 各命中正确;只读默认豁免。
+- [ ] **Web stop 联动**:stop / 断连置 cancel 时,pending ask 立即解除(reject/降级),无挂起线程。
+- [ ] **关闭仍薄**:`confirm: none` 逐字不阻断;ask_question 从 allowlist 移除后不 offer;**无新增运行期依赖**(golden `uv.lock` FORBIDDEN 断言不含 langchain/langgraph/adk)。
+- [ ] **大改动回归**:golden 全量 + Docker build/run mock 全绿。
+- [ ] `ReadLints` clean。
+
+---
+
+## 5. 人审决策点（实现前请人签）
+
+- [x] **① ask_question 启用形态(人 2026-06-09 签:不动 spec)**:当内置工具直接生成 + 默认进 allowlist,`interaction.py` 底座始终生成(同范式注册表先例);要关 = 运行期移出 allowlist。不加 spec 开关(不触 `CLAUDE.md §6.1` 改 spec schema)。
+- [x] **② allow 等级集合(人 2026-06-09 签:干净 4 档)**:`allow_once / reject / allow_session / allow_always`,对齐 Codex Accept once / Reject / Accept for session / add to policy。**不加 `allow_all_readonly`**(只读默认豁免);**不放"会话级全放行"逐次档**(用运行期 `confirm=none` 等价)。`allow_session` 即"会话内该工具全放行"(人问及,已含)。
+- [x] **③ always-allow 记到哪(人 2026-06-09 签:两者都给、默认 session)**:由 `allow_session`(内存)+ `allow_always`(写回 `config.yaml`,经 `save_config` 保注释)两档表达,不另设 `remember` 旋钮;UI 默认高亮 `allow_session`。
+- [ ] **④ 是否据 HITL 把 `shell`/写工具默认开**:= 改 `01 §6` 全局口径,**默认不动**(确认只是额外闸,危险工具仍默认不启用),沿用既有登记。
+- **软确认(`§5.3` 可自主)**:`request_id`/`run_id` 风格沿用 `uuid4().hex[:12]`;contextvar 注入而非新增 `run()` 形参;前端卡片复用 Slice 8/9 内联确认范式。
+
+---
+
+## 6. 注意 / 留给后续
+
+- **底座先建全**:做 A 时 `interaction.py` + `Asker` + CLI/Web 实现 + 前端卡片 + `POST /respond` 一次到位,B 只加"工具边界调用 + `confirm` 配置 + allow 等级",避免管道写两遍。
+- **不抄的(违薄或重叠)**:Claude 式 pattern/参数级匹配(`Bash(npm *)`,我们工具是函数粒度用不上)、`auto` LLM classifier 放行(要再跑模型,重)、`bypass/yolo`(= `confirm: none` 天然覆盖)、`plan` 只读 mode(已用 plan/ask 范式 + allowlist 覆盖)。
+- **公开面隔离**:Web 开 HITL/ask 后,管理面与公开面隔离是 Slice 13+ backlog 的前提(同 `/config`)。
+- **多 ask 并发**:本片按"一个 run 同一时刻至多一个 pending ask"实现(循环是串行的);若将来 subagent 并发,再扩 pending 表。
