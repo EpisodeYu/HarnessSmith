@@ -795,14 +795,20 @@ def test_launch_scripts_bootstrap_uv_when_missing(tmp_path, spec):
     generate(spec, out, git_init=False)
     sh = (out / "agent_harness.sh").read_text(encoding="utf-8")
     bat = (out / "agent_harness.bat").read_text(encoding="utf-8")
-    # consent prompt + the installed-command fallback are in both
-    assert "Install uv now?" in sh and "Install uv now?" in bat
+    # install choice prompt + the installed-command fallback are in both
+    assert "Choose [1/2/n]" in sh and "Choose [1/2/n]" in bat
     # Windows: winget (signed) first, official installer as fallback; uv located
     # at its known install path since a fresh PATH isn't visible this session
     assert "astral-sh.uv" in bat and "astral.sh/uv/install.ps1" in bat
     assert r"%USERPROFILE%\.local\bin\uv.exe" in bat
     # POSIX: the official shell installer
     assert "astral.sh/uv/install.sh" in sh
+    # China-mirror fallback (option 2): pip + Tsinghua mirror, run via the system
+    # Python with uv's own mirror env vars so `uv run` doesn't hit GitHub either.
+    for text in (sh, bat):
+        assert "pypi.tuna.tsinghua.edu.cn" in text
+        assert "UV_DEFAULT_INDEX" in text and "UV_PYTHON_PREFERENCE" in text
+        assert "only-system" in text and "-m uv run" in text
     # Guard against the recursion that spammed "maximum setlocal recursion level"
     # on real cmd.exe: the .bat must stay a flat goto-based script (no setlocal,
     # no call-based subroutines), ending via the built-in :eof label.

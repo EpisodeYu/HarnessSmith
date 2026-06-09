@@ -23,16 +23,34 @@ if [ -z "$uv_bin" ]; then
     echo "[HarnessForge] Found the harnessforge command; launching ..."
     exec harnessforge wizard --open
   fi
-  echo "[HarnessForge] uv is not installed yet."
-  echo "  The HarnessForge wizard needs uv - a small, self-contained tool that manages"
-  echo "  Python and dependencies for you (user-level install, no root)."
-  printf "  Install uv now? [Y/n] "
-  read -r reply </dev/tty 2>/dev/null || reply=Y
-  case "$reply" in
+  echo "[HarnessForge] uv is not installed yet. How would you like to install it?"
+  echo "    [1] Standard - official installer (downloads from GitHub)"
+  echo "    [2] China mirror - pip + Tsinghua mirror (needs python3 already installed)"
+  echo "    [n] Don't install"
+  printf "  Choose [1/2/n]: "
+  read -r choice </dev/tty 2>/dev/null || choice=1
+  case "$choice" in
     [Nn]*) ;;
-    *) echo "[HarnessForge] Installing uv via the official installer ..."
-       curl -LsSf https://astral.sh/uv/install.sh | sh \
-         || echo "[HarnessForge] uv install failed; see https://docs.astral.sh/uv/" >&2 ;;
+    2)
+      if command -v python3 >/dev/null 2>&1; then py=python3
+      elif command -v python >/dev/null 2>&1; then py=python
+      else py=; fi
+      if [ -n "$py" ]; then
+        echo "[HarnessForge] Installing uv via pip + Tsinghua mirror ..."
+        "$py" -m pip install --user uv -i https://pypi.tuna.tsinghua.edu.cn/simple || true
+        if "$py" -m uv --version >/dev/null 2>&1; then
+          export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+          export UV_PYTHON_PREFERENCE=only-system
+          echo "[HarnessForge] Launching: $py -m uv run --extra wizard harnessforge wizard --open"
+          exec "$py" -m uv run --extra wizard harnessforge wizard --open
+        fi
+      fi
+      echo "[HarnessForge] China path needs python3 first (then: pip install uv -i <Tsinghua>)." >&2
+      ;;
+    *)
+      echo "[HarnessForge] Installing uv via the official installer ..."
+      curl -LsSf https://astral.sh/uv/install.sh | sh \
+        || echo "[HarnessForge] uv install failed; see https://docs.astral.sh/uv/" >&2 ;;
   esac
   uv_bin="$(find_uv || true)"
 fi
@@ -44,5 +62,6 @@ fi
 
 echo "[HarnessForge] Could not find or install uv. Install it (user-level, no root):" >&2
 echo "    curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+echo "    - or (China) -  pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple" >&2
 echo "  then re-run this script." >&2
 exit 1
