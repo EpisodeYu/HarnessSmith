@@ -144,6 +144,7 @@
         open_product: "跳转到", generating: "正在生成…",
         ready: "产物已就绪,点「跳转」打开。", failed: "失败",
         step_render: "生成代码", step_sync: "安装依赖 (uv sync)", step_serve: "启动产物 Web",
+        sync_hint: "首次安装依赖会下载若干包,慢网络下可能要几分钟,请耐心等待。",
         forward_note: "远程访问产物?先在你的机器转发该端口:",
       },
       en: {
@@ -170,6 +171,7 @@
         open_product: "Open", generating: "Generating…",
         ready: "Product is ready — click Open.", failed: "Failed",
         step_render: "Generate code", step_sync: "Install deps (uv sync)", step_serve: "Start product web",
+        sync_hint: "First install downloads several packages; on a slow network this can take a few minutes.",
         forward_note: "Reaching the product remotely? Forward its port from your machine first:",
       },
     };
@@ -286,19 +288,32 @@
     });
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const STEP_ICON = { done: "✓", running: "…", error: "✗", pending: "○" };
     const STEP_CLS = {
       done: "text-emerald-700", running: "text-slate-800 font-medium",
       error: "text-red-600", pending: "text-slate-400",
     };
 
-    function renderProgress(steps) {
+    // Render the step list; beneath an actively-running ``sync`` step also show
+    // uv's latest output + elapsed seconds, so a slow install reads as progressing
+    // rather than frozen. ``logTail``/``elapsed`` are only set while sync runs.
+    function renderProgress(steps, logTail, elapsed) {
       const box = $("progress");
       box.classList.remove("hidden");
-      box.innerHTML = steps.map((s) =>
-        "<div class='flex items-center gap-2 " + (STEP_CLS[s.status] || "") + "'>" +
-        "<span class='w-4 text-center'>" + (STEP_ICON[s.status] || "○") + "</span>" +
-        "<span>" + t("step_" + s.key) + "</span></div>").join("");
+      box.innerHTML = steps.map((s) => {
+        let row = "<div class='flex items-center gap-2 " + (STEP_CLS[s.status] || "") + "'>" +
+          "<span class='w-4 text-center'>" + (STEP_ICON[s.status] || "○") + "</span>" +
+          "<span>" + t("step_" + s.key) + "</span>" +
+          (s.status === "running" && s.key === "sync" && elapsed != null
+            ? "<span class='text-xs text-slate-400'>" + elapsed + "s</span>" : "") +
+          "</div>";
+        if (s.status === "running" && s.key === "sync") {
+          row += "<div class='ml-6 text-xs text-slate-400'>" + t("sync_hint") + "</div>";
+          if (logTail) row += "<div class='ml-6 font-mono text-xs text-slate-500 break-all'>" + esc(logTail) + "</div>";
+        }
+        return row;
+      }).join("");
     }
 
     // Show the jump button up-front but disabled; enable it only once the launch
@@ -331,11 +346,16 @@
     // Poll the launch job's step-by-step progress until done or error.
     async function trackJob(jobId) {
       showJumpButton(false);
+      let syncStart = null;
       while (true) {
         let job;
         try { job = await (await fetch("/generate/status/" + jobId)).json(); }
         catch (e) { await sleep(1500); continue; }
-        renderProgress(job.steps || []);
+        const syncStep = (job.steps || []).find((s) => s.key === "sync");
+        if (syncStep && syncStep.status === "running" && syncStart === null) syncStart = Date.now();
+        const elapsed = (syncStart !== null && syncStep && syncStep.status === "running")
+          ? Math.round((Date.now() - syncStart) / 1000) : null;
+        renderProgress(job.steps || [], job.log_tail, elapsed);
         if (job.done && job.url) {
           showJumpButton(true, job.url);
           showForwardHint(job.url);

@@ -196,11 +196,12 @@ def _wait_port(host: str, port: int, *, timeout: float = 300.0) -> bool:
     return False
 
 
-# Generous upper bound on the product's first ``uv sync`` — it may download a
-# managed Python plus a handful of wheels. Long enough for a slow-but-working
-# mirror to finish, short enough that a truly stalled fetch (a blocked index or
-# Python download) surfaces an error instead of hanging the wizard forever.
-_UV_SYNC_TIMEOUT = 600.0
+# Backstop for the product's first ``uv sync`` — it may download a managed Python
+# plus a handful of wheels, which behind a slow/firewalled network legitimately
+# takes many minutes. Set deliberately generous so a slow-but-working install is
+# never killed (the UI shows uv's live output + elapsed time, so the user sees it
+# progressing); this only bounds a *truly* wedged process from leaking forever.
+_UV_SYNC_TIMEOUT = 1800.0
 
 
 def _product_env() -> dict[str, str]:
@@ -251,9 +252,9 @@ def _uv_sync(target_dir: Path) -> tuple[int, str]:
             ).returncode
         except subprocess.TimeoutExpired:
             log.write(
-                f"\n[harnessforge] uv sync exceeded {int(_UV_SYNC_TIMEOUT)}s and was "
-                "aborted — the package index or a managed-Python download may be "
-                "unreachable (behind a firewall, try a mirror).\n"
+                f"\n[harnessforge] uv sync did not finish within {int(_UV_SYNC_TIMEOUT)}s "
+                "and was aborted — the package index or a managed-Python download is "
+                "likely unreachable (behind a firewall, try a mirror).\n"
             )
             code = 124
     return code, _log_tail(log_path)
@@ -300,6 +301,10 @@ def _set_step(job: dict, key: str, status: str) -> None:
 def _run_launch(job: dict, target_dir: Path, project_slug: str, *, host: str = "127.0.0.1") -> None:
     """Worker: ``uv sync`` then start serve, updating ``job`` step-by-step."""
     try:
+        # Expose the sync log so the status endpoint can stream uv's live output
+        # (the install can be slow behind a firewall; without this the UI looks
+        # frozen during the quiet download phase).
+        job["setup_log"] = str(target_dir / ".setup.log")
         _set_step(job, "sync", "running")
         code, log_tail = _uv_sync(target_dir)
         if code != 0:
@@ -453,6 +458,11 @@ def create_app() -> FastAPI:
         job = _JOBS.get(job_id)
         if job is None:
             return JSONResponse({"error": "unknown job"}, status_code=404)
+        # Tack on uv's latest output (read live from the log) so the UI can show
+        # the install progressing instead of looking frozen. Never mutates the job.
+        setup_log = job.get("setup_log")
+        if setup_log:
+            return {**job, "log_tail": _log_tail(Path(setup_log), lines=4)}
         return job
 
     return app

@@ -272,6 +272,26 @@ def test_product_env_drops_parent_venv(monkeypatch):
     assert env["UV_DEFAULT_INDEX"] == "https://mirror.example/simple"
 
 
+def test_status_streams_live_setup_log_tail(client, tmp_path):
+    """While sync runs, the status endpoint tacks uv's latest output (read live
+    from .setup.log) onto the job so the UI shows it progressing, not frozen."""
+    import harnessforge.wizard.app as app_mod
+
+    log = tmp_path / ".setup.log"
+    log.write_text(
+        "Resolved 42 packages\nDownloading openai\nPrepared 42 packages\n",
+        encoding="utf-8",
+    )
+    job = app_mod._new_job()
+    job["setup_log"] = str(log)
+    app_mod._JOBS[job["id"]] = job
+    try:
+        data = client.get(f"/generate/status/{job['id']}").json()
+    finally:
+        app_mod._JOBS.pop(job["id"], None)
+    assert "Prepared 42 packages" in data["log_tail"]
+
+
 def test_run_launch_reports_sync_failure_without_hanging(tmp_path, monkeypatch):
     """A non-zero ``uv sync`` marks the sync step 'error' and records a message
     with the log path + tail, then the worker returns — the UI stops spinning
