@@ -109,6 +109,7 @@
 - **缺 uv 自举(人 2026-06-09 定向,针对"Windows 难要求预装 uv")**:不做真·捆绑环境(生成器跑在 Linux,产不出 Windows venv/二进制;且违薄)。**uv 本身即自带环境**(单二进制、自管 Python+依赖、用户级免管理员),故脚本在 uv/已装命令都缺时**带 y/N 确认地自举装 uv**:Windows 先 `winget install astral-sh.uv`(签名包、无远程脚本执行)、回落官方 `irm …install.ps1|iex`,装后用已知路径(`%USERPROFILE%\.local\bin\uv.exe` / WinGet `Links`)立即续跑(避开当前 cmd 会话 PATH 未刷新);POSIX 走 `curl …install.sh|sh`。**首次联网**装 uv+依赖、之后本地(人选"可联网";完全离线另走 wheels/烤镜像,未做)。都失败给手动指引。
 - **打开网页**:生成器 `wizard` 与产物 `serve` 各加 `--open/--no-open`(默认关,保留现有/无头/SSH 行为;脚本传 `--open`),后台线程**等端口可连再 `webbrowser.open`**——保留自动选端口逻辑,8000 被占即顺延、不崩。
 - **测试**:`test_generator.py` 增 `launch_script_stem` 清洗参数化 + 脚本恒生成/可执行位/无残留 Jinja + web→`serve --open`·非 web→`chat` + 空格/非法名落地;`test_cli.py` 增 `wizard --help` 含 `--open`。回归:golden(thin/web/wizard〔显示名带空格〕/uvx)+ Docker 冒烟全绿。
+- **Windows `.bat` 三处真机修复(2026-06-09,用户实测反馈驱动)**:① **递归刷屏**——初版用 `setlocal`+`call :find_uv` 子程序结构在真实 cmd.exe 上自我重入,刷"已达最大 setlocal 递归层";改写为**扁平 `goto` 流程**(无 `setlocal`/无 `call`/出口 `goto :eof`,uv 临时加 PATH 再 `where` 复检)。② **双击没反应**——`@echo off` 下每步静默 + 失败即关窗,用户看不到任何东西;**每步加 `echo [<slug>] Step …` 进度日志 + 结尾 `pause`**(长驻进程退出后才暂停),窗口既是反馈也是 debug log。③ **echo 元字符**——`echo` 行一律用 `project_slug`(`[a-z0-9_]` 安全)而非 `display_name`(原样可能含 `& < > |` 破坏 cmd 解析,只留在 `REM`);手动指引里 `irm …|iex` 的管道转义为 `^|`。测试守卫:`.bat` 无 `setlocal`/`call :`、用 `goto :eof`、含进度日志,且 echo 行无裸 `& < > |`。`.sh` 同步加进度日志(`setlocal` 是 cmd 专属、`.sh` 本无此问题)。
 
 ## 3. 退出门禁(对应 `01 §8` Non-blocker;✅ 实现并自验证)
 

@@ -809,6 +809,32 @@ def test_launch_scripts_bootstrap_uv_when_missing(tmp_path, spec):
     low = bat.lower()
     assert "setlocal" not in low and "call :" not in low
     assert "goto :eof" in low
+    # Progress logging so the window isn't a silent black box, and a pause so it
+    # doesn't vanish before the user can read it.
+    assert "Step 1/4" in bat and "Launching:" in bat and "Process exited" in bat
+    assert "pause" in low
+
+
+def test_launch_bat_echo_safe_for_metachar_display_name(tmp_path):
+    """A display name with cmd metacharacters (& < > |) must never reach an
+    `echo` line — it would break batch parsing. The echoes use project_slug
+    (always [a-z0-9_]); the raw display name lives only in REM comments."""
+    from harnessforge.spec import HarnessSpec
+
+    spec = HarnessSpec(
+        project_slug="agent_harness", display_name="A & B <c> | d"
+    )
+    import re
+
+    out = tmp_path / "meta"
+    generate(spec, out, git_init=False)
+    bat = (out / f"{launch_script_stem(spec)}.bat").read_text(encoding="utf-8")
+    for line in bat.splitlines():
+        if line.lstrip().lower().startswith("echo"):
+            # ^-escaped metachars (e.g. the `^|` in the install hint) are fine;
+            # only a BARE & < > | would break cmd parsing.
+            unescaped = re.sub(r"\^.", "", line)
+            assert not any(ch in unescaped for ch in "&<>|"), f"unsafe echo: {line!r}"
 
 
 def test_launch_script_no_web_runs_chat(tmp_path, spec):
