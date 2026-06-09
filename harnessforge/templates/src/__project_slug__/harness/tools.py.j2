@@ -165,10 +165,10 @@ def calculator(expression: str) -> str:
         "prefer it over guessing on consequential choices. Do NOT use it for things "
         "you can determine yourself. Offer `options` for a multiple-choice question "
         "(set allow_multiple to let them pick several), or omit them for a free-text "
-        "one. An 'Other' free-text choice is added automatically when allow_free_text "
-        "(the default), so do NOT add your own 'Other'/'something else' option. If no "
-        "interactive user is available the answer says so and you should proceed on "
-        "your best judgment."
+        "one. The user can ALWAYS type a custom answer (an 'Other' free-text choice "
+        "is offered automatically), so do NOT add your own 'Other'/'something else' "
+        "option. If no interactive user is available the answer says so and you "
+        "should proceed on your best judgment."
     ),
     parameters={
         "type": "object",
@@ -186,10 +186,6 @@ def calculator(expression: str) -> str:
                 "type": "boolean",
                 "description": "Allow selecting more than one option.",
             },
-            "allow_free_text": {
-                "type": "boolean",
-                "description": "Allow a typed reply in addition to any options (default true).",
-            },
         },
         "required": ["question"],
         "additionalProperties": False,
@@ -200,12 +196,14 @@ def ask_question(
     question: str,
     options: list | None = None,
     allow_multiple: bool = False,
-    allow_free_text: bool = True,
 ) -> str:
     """Ask the user via the shared interaction channel; format their reply for the
     model. The actual UI (terminal prompt / web card) is whatever asker the entry
     point bound for this turn; with none (pipe / CI / --mock) it degrades to a
-    "no user available" answer so the loop never hangs."""
+    "no user available" answer so the loop never hangs.
+
+    Free text is always allowed (a Cursor-style "Other" escape), so the user is
+    never trapped into picking only from ``options``."""
     from .interaction import AskRequest, Option, ask
 
     labels = [str(opt) for opt in (options or [])]
@@ -215,7 +213,7 @@ def ask_question(
             kind="question",
             prompt=question,
             options=offered,
-            allow_text=bool(allow_free_text),
+            allow_text=True,
             allow_multiple=bool(allow_multiple),
         )
     )

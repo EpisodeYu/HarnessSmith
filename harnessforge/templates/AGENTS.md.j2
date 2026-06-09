@@ -73,14 +73,12 @@ move when a request is ambiguous or a decision is genuinely the user's (which
 option, confirm an assumption). The user's answer comes back as the tool result;
 the model continues from there.
 
-- The model can offer `options` (a multiple-choice question), set `allow_multiple`
-  for multi-select, and `allow_free_text` (default true) for a typed answer. When
-  both options and free text are allowed, a Cursor-style **"Other…"** entry is added
-  automatically as the last choice (picking it reveals a text box) — don't add your
-  own "Other" option.
-- **CLI**: the terminal prints the question + numbered options (with an "Other"
-  entry when free text is allowed) and reads a line; commas pick several when
-  `allow_multiple`.
+- The model can offer `options` (a multiple-choice question) and set `allow_multiple`
+  for multi-select. The user can **always** type a custom answer: when options are
+  offered, a Cursor-style **"Other…"** entry is added automatically as the last
+  choice (picking it reveals a text box), so don't add your own "Other" option.
+- **CLI**: the terminal prints the question + numbered options (plus an "Other"
+  entry) and reads a line; commas pick several when `allow_multiple`.
 - **Web**: an inline card appears in the chat (radios / checkboxes + the "Other…"
   text box); the answer is POSTed to `/chat/{run_id}/respond`, unblocking the loop.
 - **Non-interactive** (a pipe, CI, `--mock`, a disconnected web client): there's no

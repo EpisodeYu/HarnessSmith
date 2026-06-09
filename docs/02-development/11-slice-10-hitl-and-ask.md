@@ -70,10 +70,12 @@
 
 > **状态:✅ 已实现(2026-06-09)**。`ask_question` 内置工具在 `tools.py` 始终注册(`risk=safe`),`config.yaml.j2` 在 `spec.tools` 之后**无条件**渲染 `ask_question: enabled: true`(对齐决策①:内置直接生成、不进 spec、要关就运行期移出 allowlist)。CLI(`run`/`chat`)与 Web(`_chat_events` worker)入口已用 `using_asker(...)` 包住 `run_loop`;非交互(CLI 非 TTY / `--mock` / Web 断连)走 `NonInteractiveAsker` 优雅降级。前端 `web_index.html` 监听 `event: ask` 渲染内联卡片(单/多选 + 文本框 + 提交/跳过),提交 `POST /chat/{run_id}/respond`。
 >
-> **交互形态(2026-06-09 人确认)**:① 选项由 **LLM 自己构造**(工具参数 `options: string[]`,调用时填);② **多选**支持(`allow_multiple`,Web checkbox / CLI 逗号分隔,`option_ids` 列表);③ **自定义输入做成 Cursor 式"最后一项 = 其他…"**:`allow_free_text`(默认 true)时,asker **在 UI 层**自动追加一个"Other…"项(Web 单选时收起文本框、选中才展开;CLI 末尾加 `[N+1] Other`,选中后再追问自定义文本)——`AskRequest.options` 仍**逐字**是模型给的选项,"Other"是 CLI/Web 各自合成、映射回既有 `text` 字段,不改协议/工具签名。工具描述已提示模型**不要自己再加 "Other" 选项**。
+> **交互形态(2026-06-09 人确认 + 实机反馈修订)**:① 选项由 **LLM 自己构造**(工具参数 `options: string[]`,调用时填);② **多选**支持(`allow_multiple`,Web checkbox / CLI 逗号分隔,`option_ids` 列表);③ **自定义输入做成 Cursor 式"最后一项 = 其他…",且对 question 恒定可用**:asker **在 UI 层**自动追加一个"Other…"项(Web 单选时收起文本框、选中才展开;CLI 末尾加 `[N+1] Other`,选中后再追问自定义文本)——`AskRequest.options` 仍**逐字**是模型给的选项,"Other"是 CLI/Web 各自合成、映射回既有 `text` 字段,不改协议/工具签名。工具描述已提示模型**不要自己再加 "Other" 选项**。
+>
+> **实机反馈修订(2026-06-09)**:① **去掉 `allow_free_text` 参数**——之前模型偶尔传 `false` 导致单选题没有自定义框、用户被困在固定选项里;现在 question **始终** `allow_text=True`(模型无法剥夺用户自定义输入的能力,对齐 Cursor);`allow_text` 仅对未来的 approval 卡片(只 allow/reject 按钮)取 false。② **Web 卡片答完即坍缩成一行摘要**(`❓ 问题 → 选中/自定义`),随对话流自然上滚,不再有大块交互控件钉在底部;并**抑制 `ask_question` 的 `→/← tool` 流水行**(卡片已表达该次交互),避免重复。
 
 - **新增内置工具 `ask_question`**(`harness/tools.py`,`risk=safe`,默认随产物生成 + 默认进 `config.yaml` allowlist):
-  - 参数 schema:`question: str`、`options: string[]`(可空 = 纯文本问)、`allow_multiple: bool=false`、`allow_free_text: bool=true`。
+  - 参数 schema:`question: str`、`options: string[]`(可空 = 纯文本问)、`allow_multiple: bool=false`。自由文本恒开(Cursor 式 "Other" 逃生口),不再有 `allow_free_text` 开关。
   - 工具体:构造 `AskRequest(kind="question", ...)` → `ask()` → 把 `AskResponse` 格式化成确定字符串回模型(如 `User selected: <label>` / `User answered: <text>` / `User skipped.`)。
 - **入口接线**:`cli.run`/`cli.chat`、`web._chat_events` 各自 `with using_asker(CliAsker()/WebAsker(...))` 包住 `run_loop(...)`;Web 在 worker 线程内设置 asker。
 - **降级**:非交互(CLI 非 TTY、`--mock`)→ `NonInteractiveAsker` 让模型自行决定;不改变现有单发 `run` 语义。

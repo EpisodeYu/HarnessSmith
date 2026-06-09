@@ -374,7 +374,18 @@
       const submit = (optionIds, text) => {
         if (answered) return;
         answered = true;
-        card.querySelectorAll("button, input, textarea").forEach((el) => { el.disabled = true; });
+        // Collapse the interactive card into a compact transcript line so it reads
+        // as part of the conversation and scrolls/flows with it (no lingering
+        // widget pinned at the bottom).
+        const picked = (data.options || [])
+          .filter((o) => (optionIds || []).includes(o.id))
+          .map((o) => o.label);
+        let summary = picked.join(", ");
+        if (text) summary = summary ? (summary + " · " + text) : text;
+        if (!summary) summary = t("ask_skip");
+        card.className = "whitespace-pre-wrap text-sm text-indigo-700";
+        card.textContent = "❓ " + data.prompt + " → " + summary;
+        log.scrollTop = log.scrollHeight;
         fetch("/chat/" + encodeURIComponent(runId) + "/respond", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -812,10 +823,12 @@
       });
       es.addEventListener("tool_call", (ev) => {
         const d = JSON.parse(ev.data);
+        if (d.name === "ask_question") return;  // shown as the ask card instead
         line("→ tool " + d.name + " " + d.arguments, "text-amber-700");
       });
       es.addEventListener("tool_result", (ev) => {
         const d = JSON.parse(ev.data);
+        if (d.name === "ask_question") return;  // the answer is already on the card
         line("← " + d.name + ": " + d.result, "text-emerald-700");
       });
       es.addEventListener("error", (ev) => {
