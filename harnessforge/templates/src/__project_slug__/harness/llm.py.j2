@@ -42,9 +42,21 @@ class LLMClient(Protocol):
 
     ``stream`` does the same thing but also forwards text tokens to ``on_delta``
     as they arrive (for live UIs); it still returns the fully assembled response.
+
+    ``cancel`` is an optional cooperative cancel predicate: ``stream`` checks it
+    each chunk and stops (closing the stream) the moment it returns ``True``, so a
+    Stop button / Ctrl-C can cut model generation mid-token. ``complete`` can't
+    interrupt its single blocking call, but accepts ``cancel`` for a uniform
+    signature (the caller re-checks it at the next step boundary).
     """
 
-    def complete(self, messages: list[dict], tools: list[dict] | None) -> LLMResponse:
+    def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None,
+        *,
+        cancel: Callable[[], bool] | None = None,
+    ) -> LLMResponse:
         ...
 
     def stream(
@@ -53,6 +65,7 @@ class LLMClient(Protocol):
         tools: list[dict] | None,
         *,
         on_delta: Callable[[str], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
     ) -> LLMResponse:
         ...
 
@@ -88,7 +101,17 @@ class OpenAIClient:
             kwargs["reasoning_effort"] = self.reasoning_effort
         return kwargs
 
-    def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
+    def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        *,
+        cancel: Callable[[], bool] | None = None,
+    ) -> LLMResponse:
+        # A single non-streaming call can't be interrupted mid-flight; ``cancel``
+        # is accepted for a uniform signature and takes effect at the next step
+        # boundary (the loop re-checks it). Web chat defaults to streaming, where
+        # cancellation IS mid-token (see ``stream``).
         resp = self._client.chat.completions.create(**self._request_kwargs(messages, tools))
         message = resp.choices[0].message
         calls = [
@@ -109,6 +132,7 @@ class OpenAIClient:
         tools: list[dict] | None = None,
         *,
         on_delta: Callable[[str], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
     ) -> LLMResponse:
         """Stream a Chat Completions response, assembling the same LLMResponse.
 
@@ -116,6 +140,11 @@ class OpenAIClient:
         usage deltas are accumulated across chunks. ``include_usage`` asks for a
         final usage chunk; providers that ignore it leave usage at 0 (so a
         cost/token budget can't trigger — same caveat as a profile without prices).
+
+        ``cancel`` is checked each chunk: when it returns ``True`` the underlying
+        HTTP stream is closed and we stop reading, returning the half-assembled
+        response (the loop discards it at the next boundary). This is how a Stop
+        button cuts the model off mid-generation without waiting for it to finish.
         """
         kwargs = self._request_kwargs(messages, tools)
         kwargs["stream"] = True
@@ -124,7 +153,11 @@ class OpenAIClient:
         content: list[str] = []
         calls: dict[int, dict[str, str]] = {}
         usage = Usage()
-        for chunk in self._client.chat.completions.create(**kwargs):
+        stream_obj = self._client.chat.completions.create(**kwargs)
+        for chunk in stream_obj:
+            if cancel is not None and cancel():
+                stream_obj.close()  # stop the model: close the HTTP stream and bail
+                break
             if chunk.usage is not None:
                 usage = Usage(
                     chunk.usage.prompt_tokens,

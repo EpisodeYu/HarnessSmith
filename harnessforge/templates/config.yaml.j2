@@ -88,6 +88,11 @@ observability:
 # secrets (keys stay in .env). enabled: false = no persistence (single-shot runs).
 # auto_title (web only): summarize a session's first message into a short title
 # (via the `title` role) for the web sidebar; the CLI never auto-titles.
+# Stop/continue: Stop (web button) / Ctrl-C (CLI) cuts the model off and saves the
+# partial conversation (status "interrupted") so the next message just continues —
+# the model sees what was already done. Each completed step is also write-ahead
+# checkpointed (status "running") via an atomic single-file write, so a hard crash
+# still leaves a resumable session; on resume a dangling tool call is auto-repaired.
 sessions:
   enabled: true
   dir: .harness/sessions

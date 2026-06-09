@@ -179,11 +179,14 @@
     const I18N = {
       en: {
         nav_chat: "Chat", nav_config: "Config", chat_placeholder: "Ask something…",
-        chat_send: "Send", chat_stream: "stream", chat_mode_title: "Loop paradigm",
+        chat_send: "Send", chat_stop: "Stop", chat_stream: "stream", chat_mode_title: "Loop paradigm",
         chat_new: "New chat", chat_sessions_title: "Saved sessions (resume)",
         chat_session_new_opt: "— new session —",
         chat_untitled: "New chat", chat_sessions_empty: "No conversations yet",
+        chat_stopped: "stopped — send again to continue",
         session_rename: "Rename", session_delete: "Delete", session_cancel: "Cancel",
+        reask_edit: "Edit this question", reask_send: "Resend",
+        reask_warn: "This discards the conversation after this point.", reask_confirm: "Regenerate",
         no_llm: "No LLM is configured yet — set a model (and its API key) before you can chat.",
         no_llm_link: "Go to Config → LLM",
         cfg_intro: "Runtime behavioral config (no secrets). Edits apply in-process.",
@@ -248,11 +251,14 @@
       },
       zh: {
         nav_chat: "对话", nav_config: "配置", chat_placeholder: "问点什么…",
-        chat_send: "发送", chat_stream: "流式", chat_mode_title: "循环范式",
+        chat_send: "发送", chat_stop: "停止", chat_stream: "流式", chat_mode_title: "循环范式",
         chat_new: "新会话", chat_sessions_title: "已保存会话(续聊)",
         chat_session_new_opt: "— 新会话 —",
         chat_untitled: "新会话", chat_sessions_empty: "还没有会话",
+        chat_stopped: "已停止 —— 再次发送即可继续",
         session_rename: "重命名", session_delete: "删除", session_cancel: "取消",
+        reask_edit: "编辑此问题", reask_send: "重新发送",
+        reask_warn: "这会丢弃此处之后的对话。", reask_confirm: "重新生成",
         no_llm: "尚未配置 LLM —— 请先设置一个 model(及其 API key)才能对话。",
         no_llm_link: "前往 配置 → LLM",
         cfg_intro: "运行期行为性配置(无密钥)。修改进程内即时生效。",
@@ -363,6 +369,9 @@
     let sessionsCache = [];      // last /sessions payload (relabel on lang switch)
     let editingId = null;        // row being inline-renamed
     let confirmingId = null;     // row showing the inline delete confirmation
+    let currentRunId = null;     // id of the in-flight run (for POST /chat/{id}/stop)
+    let activeES = null;         // the open EventSource while streaming
+    let streaming = false;       // true while a turn is in flight (Send -> Stop)
 
     function chatIsEmpty() { return !currentSession && log.children.length === 0; }
 
@@ -493,13 +502,100 @@
       renderSessionList();
     }
 
+    // A replayed user message + an inline "edit" control (re-ask). `turn` is the
+    // user-turn ordinal; clicking edit turns the line into a textarea, then an
+    // in-page confirm ("discards the rest"), then regenerates from that turn.
+    function addUserLine(text, turn) {
+      const row = document.createElement("div");
+      row.className = "flex items-start gap-2 font-semibold";
+      const span = document.createElement("div");
+      span.className = "min-w-0 flex-1 whitespace-pre-wrap";
+      span.textContent = "you: " + text;
+      row.appendChild(span);
+      if (currentSession && turn >= 0 && !streaming) {
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.className = "shrink-0 text-xs font-normal text-slate-400 hover:text-slate-700";
+        edit.textContent = "✎";
+        edit.title = t("reask_edit");
+        edit.addEventListener("click", () => beginReask(row, turn, text));
+        row.appendChild(edit);
+      }
+      log.appendChild(row);
+      log.scrollTop = log.scrollHeight;
+      return row;
+    }
+
     function renderHistory(messages) {
       log.innerHTML = "";
+      let turn = -1;
       for (const m of messages || []) {
-        if (m.role === "user") line("you: " + (m.content || ""), "font-semibold");
+        if (m.role === "user") { turn += 1; addUserLine(m.content || "", turn); }
         else if (m.role === "assistant") { if (m.content) line(m.content, "text-slate-900 whitespace-pre-wrap"); }
         else if (m.role === "tool") line("← " + (m.content || ""), "text-emerald-700");
       }
+    }
+
+    // Re-ask: edit a historical question, confirm in-page, then regenerate from
+    // that turn (the server truncates everything after it — destructive, not a fork).
+    function beginReask(row, turn, text) {
+      if (streaming) return;
+      row.innerHTML = "";
+      row.className = "rounded-lg border border-slate-300 bg-white p-2 space-y-2";
+      const ta = document.createElement("textarea");
+      ta.className = "w-full rounded border px-2 py-1 text-sm";
+      ta.rows = 2; ta.value = text;
+      const bar = document.createElement("div");
+      bar.className = "flex items-center gap-2";
+      const send = document.createElement("button");
+      send.type = "button";
+      send.className = "rounded bg-slate-800 px-3 py-1 text-xs text-white";
+      send.textContent = t("reask_send");
+      send.addEventListener("click", () => confirmReask(row, turn, ta.value));
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "px-2 py-1 text-xs text-slate-500";
+      cancel.textContent = t("session_cancel");
+      cancel.addEventListener("click", () => { if (currentSession) openSession(currentSession); });
+      bar.append(send, cancel);
+      row.append(ta, bar);
+      ta.focus();
+    }
+
+    function confirmReask(row, turn, newText) {
+      const trimmed = (newText || "").trim();
+      if (!trimmed) return;
+      const bar = document.createElement("div");
+      bar.className = "flex items-center gap-2 rounded bg-amber-50 p-2 text-xs text-amber-800";
+      const warn = document.createElement("span");
+      warn.className = "flex-1"; warn.textContent = t("reask_warn");
+      const ok = document.createElement("button");
+      ok.type = "button"; ok.className = "shrink-0 rounded bg-amber-600 px-2 py-0.5 text-white";
+      ok.textContent = t("reask_confirm");
+      ok.addEventListener("click", () => commitReask(turn, trimmed));
+      const no = document.createElement("button");
+      no.type = "button"; no.className = "shrink-0 px-2 py-0.5 text-slate-500";
+      no.textContent = t("session_cancel");
+      no.addEventListener("click", () => bar.remove());
+      bar.append(warn, ok, no);
+      row.appendChild(bar);
+    }
+
+    // Reload the authoritative history, cut it at this user turn, replay it, then
+    // regenerate by sending the edited question with edit_turn (the server saves
+    // the truncated+new body over the old one).
+    async function commitReask(turn, text) {
+      if (!currentSession) return;
+      try {
+        const data = await (await fetch("/sessions/" + encodeURIComponent(currentSession))).json();
+        const msgs = data.messages || [];
+        let count = -1, cut = msgs.length;
+        for (let i = 0; i < msgs.length; i++) {
+          if (msgs[i].role === "user") { count += 1; if (count === turn) { cut = i; break; } }
+        }
+        renderHistory(msgs.slice(0, cut));
+      } catch (err) { /* fall back to whatever's on screen */ }
+      startChat(text, { editTurn: turn });
     }
 
     async function openSession(id) {
@@ -528,22 +624,49 @@
     loadSessions();
     updateMainTitle();
 
-    $("chat-form").addEventListener("submit", (e) => {
-      e.preventDefault();
-      if (!hasLLM()) { show("config"); showCfg("llm"); return; }
-      const message = $("msg").value.trim();
-      if (!message) return;
-      $("msg").value = "";
-      const mode = $("mode").value;
+    // While a turn is in flight the Send button becomes a Stop button (clicking it
+    // POSTs /chat/{run_id}/stop). Driven here so a forgotten reset can't strand it.
+    function setStreaming(on) {
+      streaming = on;
+      const btn = $("chat-send");
+      btn.textContent = on ? t("chat_stop") : t("chat_send");
+      btn.classList.toggle("bg-red-600", on);
+      btn.classList.toggle("bg-slate-800", !on);
+    }
+    function endStream(es) {
+      if (es) es.close();
+      if (activeES === es) activeES = null;
+      currentRunId = null;
+      setStreaming(false);
+    }
+    // Stop the running turn: the server sets the cancel token, the loop ends at the
+    // next boundary, emits `stopped`, and saves the partial conversation (resumable).
+    function stopChat() {
+      if (!currentRunId) return;
+      fetch("/chat/" + encodeURIComponent(currentRunId) + "/stop", { method: "POST" }).catch(() => {});
+    }
+
+    // Run one turn over SSE. `opts.editTurn` (re-ask) regenerates from a past user
+    // turn; `opts.mode` overrides the dropdown (used internally). Reused by the
+    // form submit and by re-ask.
+    function startChat(message, opts) {
+      opts = opts || {};
+      const mode = (opts.mode != null) ? opts.mode : $("mode").value;
+      const stream = $("stream").checked;
       line("you" + (mode ? " (" + mode + ")" : "") + ": " + message, "font-semibold");
 
-      const stream = $("stream").checked;
       let answer = null;
       let url = "/chat?message=" + encodeURIComponent(message) + "&stream=" + stream;
       if (mode) url += "&mode=" + encodeURIComponent(mode);
       if (currentSession) url += "&session=" + encodeURIComponent(currentSession);
+      if (opts.editTurn != null) url += "&edit_turn=" + encodeURIComponent(opts.editTurn);
       const es = new EventSource(url);
+      activeES = es;
+      setStreaming(true);
 
+      es.addEventListener("run", (ev) => {
+        currentRunId = JSON.parse(ev.data).run_id;  // enable Stop for this run
+      });
       es.addEventListener("session", (ev) => {
         currentSession = JSON.parse(ev.data).id;  // remember it so the next turn resumes
       });
@@ -569,15 +692,31 @@
       });
       es.addEventListener("error", (ev) => {
         if (ev.data) line("error: " + ev.data, "text-red-600");
-        es.close();
+        endStream(es);
+      });
+      es.addEventListener("stopped", (ev) => {
+        const d = JSON.parse(ev.data);
+        line(t("chat_stopped") + " · steps=" + d.steps, "text-xs text-amber-600");
+        endStream(es);
+        loadSessions();  // the partial turn is saved — refresh the picker
       });
       es.addEventListener("final", (ev) => {
         const d = JSON.parse(ev.data);
         if (answer === null) line(d.answer, "text-slate-900 whitespace-pre-wrap");
         line("[" + d.mode + "] [" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=" + d.cost_usd, "text-xs text-slate-400");
-        es.close();
+        endStream(es);
         loadSessions();  // refresh the picker (new session appears / preview updates)
       });
+    }
+
+    $("chat-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (streaming) { stopChat(); return; }  // the button is "Stop" mid-turn
+      if (!hasLLM()) { show("config"); showCfg("llm"); return; }
+      const message = $("msg").value.trim();
+      if (!message) return;
+      $("msg").value = "";
+      startChat(message, {});
     });
 
     // ---- config: functional sub-tabs ------------------------------------

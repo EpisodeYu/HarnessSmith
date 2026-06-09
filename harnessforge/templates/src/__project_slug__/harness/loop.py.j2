@@ -40,6 +40,8 @@ def run(
     trace: Trace | None = None,
     on_delta: Callable[[str], None] | None = None,
     history: list[dict] | None = None,
+    cancel: Callable[[], bool] | None = None,
+    checkpoint: Callable[[list[dict]], None] | None = None,
 ) -> RunResult:
     """Run one turn using paradigm ``mode`` (defaults to ``config.paradigms.default``).
 
@@ -47,6 +49,10 @@ def run(
     not a registered paradigm. Every other argument is forwarded unchanged to the
     selected paradigm, so the call site is identical to the old single loop.
     ``history`` is prior conversation messages (no system prompt) to resume from.
+    ``cancel`` is a cooperative stop predicate (checked at each step boundary and
+    forwarded to the LLM stream so Stop / Ctrl-C cut generation mid-token);
+    ``checkpoint`` is called with the conversation body after each completed step
+    (write-ahead, so a crash mid-turn still leaves resumable work on disk).
     """
     paradigms = config.paradigms
     name = mode or paradigms.default
@@ -66,4 +72,6 @@ def run(
         trace=trace,
         on_delta=on_delta,
         history=history,
+        cancel=cancel,
+        checkpoint=checkpoint,
     )

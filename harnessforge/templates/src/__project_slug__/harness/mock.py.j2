@@ -38,7 +38,13 @@ class MockLLM:
         self._step = 0
         self._usage = Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
 
-    def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
+    def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        *,
+        cancel: Callable[[], bool] | None = None,
+    ) -> LLMResponse:
         if self._script is None:
             if self._step == 0 and tools:
                 self._step += 1
@@ -72,11 +78,22 @@ class MockLLM:
         tools: list[dict] | None = None,
         *,
         on_delta: Callable[[str], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
     ) -> LLMResponse:
         """Same result as :meth:`complete`, but emit any text to ``on_delta``
-        token-by-token so streaming UIs can be tested offline."""
+        token-by-token so streaming UIs can be tested offline.
+
+        ``cancel`` is honored between tokens (mirroring the real client): once it
+        returns ``True`` we stop emitting and return the half-assembled content,
+        so a test can simulate "stop at the N-th token"."""
         response = self.complete(messages, tools)
         if on_delta is not None and response.content:
+            emitted: list[str] = []
             for token in re.findall(r"\S+\s*", response.content):
+                if cancel is not None and cancel():
+                    return LLMResponse(
+                        content="".join(emitted) or None, usage=response.usage
+                    )
+                emitted.append(token)
                 on_delta(token)
         return response

@@ -65,9 +65,9 @@ def test_resume_seeds_history_into_next_turn(tmp_path):
     seen: dict = {}
 
     class Spy(MockLLM):
-        def complete(self, messages, tools=None):
+        def complete(self, messages, tools=None, *, cancel=None):
             seen["messages"] = messages
-            return super().complete(messages, tools)
+            return super().complete(messages, tools, cancel=cancel)
 
     r2 = run(
         "second question",
@@ -224,3 +224,107 @@ def test_cli_chat_repl_multi_turn(tmp_path):
     assert len(files) == 1  # one continuous session across both turns
     msgs = json.loads(files[0].read_text(encoding="utf-8"))["messages"]
     assert sum(1 for m in msgs if m["role"] == "user") == 2
+
+
+# --- Slice 9: stop / continue / re-ask (session-level time travel) ---------
+
+
+def test_save_records_status_and_status_of(tmp_path):
+    """`save` records how the turn ended; a plain save defaults to complete."""
+    sdir = str(tmp_path / "s")
+    msgs = [{"role": "user", "content": "q"}]
+    session_store.save("x", msgs, sdir)
+    assert session_store.status_of("x", sdir) == "complete"
+
+    session_store.save("x", msgs, sdir, status="interrupted")
+    assert session_store.status_of("x", sdir) == "interrupted"
+    assert session_store.status_of("missing", sdir) == "complete"  # unknown -> complete
+
+
+def test_checkpoint_marks_running_and_is_atomic(tmp_path):
+    """A write-ahead checkpoint persists the body with status running (resumable),
+    and leaves no stray temp file behind (atomic os.replace)."""
+    sdir = tmp_path / "s"
+    body = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]
+    session_store.checkpoint("wa", body, str(sdir))
+
+    assert session_store.status_of("wa", str(sdir)) == "running"
+    assert session_store.load("wa", str(sdir)) == body
+    assert list(sdir.glob(".*tmp*")) == []  # the temp file was replaced, not left
+
+
+def test_repair_orphan_tool_results_injects_missing_results():
+    """A dangling tool_use (assistant tool call without its result) gets a synthetic
+    error result so the sequence is legal again; clean histories are unchanged."""
+    orphan = [
+        {"role": "user", "content": "do it"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+            ],
+        },
+        # crash mid-batch: the tool result for call_1 was never written
+    ]
+    fixed = session_store.repair_orphan_tool_results(orphan)
+    tool_msgs = [m for m in fixed if m.get("role") == "tool"]
+    assert tool_msgs and tool_msgs[0]["tool_call_id"] == "call_1"
+    assert "interrupted" in tool_msgs[0]["content"].lower()
+
+    clean = [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "a"},
+    ]
+    assert session_store.repair_orphan_tool_results(clean) == clean
+
+
+def test_load_repairs_uncleanly_finished_session(tmp_path):
+    """A session that wasn't cleanly finished (status != complete) is repaired on
+    load, so a hard crash mid-tool-batch still yields an API-legal resume history."""
+    sdir = tmp_path / "s"
+    sdir.mkdir()
+    orphan = [
+        {"role": "user", "content": "do it"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+            ],
+        },
+    ]
+    (sdir / "crashed.json").write_text(
+        json.dumps({"id": "crashed", "status": "running", "messages": orphan}),
+        encoding="utf-8",
+    )
+    history = session_store.load("crashed", str(sdir))
+    # every assistant tool call now has a matching tool result -> legal for the API
+    requested = {
+        tc["id"]
+        for m in history
+        if m.get("role") == "assistant"
+        for tc in (m.get("tool_calls") or [])
+    }
+    answered = {m.get("tool_call_id") for m in history if m.get("role") == "tool"}
+    assert requested <= answered
+
+
+def test_turns_and_truncate_to_turn(tmp_path):
+    """`turns` lists user-message boundaries; `truncate_to_turn` cuts before the
+    n-th user turn (the web re-ask)."""
+    messages = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "second"},
+        {"role": "assistant", "content": "a2"},
+    ]
+    turns = session_store.turns(messages)
+    assert [t["index"] for t in turns] == [0, 1]
+    assert turns[1]["preview"] == "second"
+
+    # truncate before turn 1 -> keep only the first turn
+    cut = session_store.truncate_to_turn(messages, 1)
+    assert cut == messages[:2]
+    assert session_store.truncate_to_turn(messages, 0) == []  # before everything
+    assert session_store.truncate_to_turn(messages, 9) == messages  # out of range = all

@@ -147,6 +147,8 @@ def _chat_events(
     session_id: str | None = None,
     history: list[dict] | None = None,
     auto_title: bool = False,
+    runs: dict | None = None,
+    lock=None,
 ):
     """Drive one ``run()`` in a worker thread and yield its events as SSE.
 
@@ -157,17 +159,37 @@ def _chat_events(
     ``session_id`` when sessions are enabled. When ``auto_title`` is set, the
     first message is summarized into a session title (``title`` role) BEFORE the
     answer so the sidebar names the session up front.
+
+    A cancel token is registered in ``runs`` under a fresh ``run_id`` (emitted as
+    the first ``event: run``) so ``POST /chat/{run_id}/stop`` — or a client
+    disconnect (``GeneratorExit``) — can stop the loop mid-flight. An interrupted
+    turn still persists its partial body (``status="interrupted"``) and emits
+    ``event: stopped`` instead of ``event: final``, so the chat stays resumable.
+    Each completed step is also write-ahead checkpointed for crash safety.
     """
     q: queue.Queue = queue.Queue()
     hooks = _StreamHooks(q, load_hooks(config))
     on_delta = (lambda text: q.put(("token", {"text": text}))) if stream else None
     router = ClientRouter(config, mock=mock)
 
+    # Register this run's cancel token so /stop (and disconnect) can reach it.
+    run_id = session_store.new_id()
+    cancel_event = threading.Event()
+    if runs is not None and lock is not None:
+        with lock:
+            runs[run_id] = cancel_event
+
     # Auto-title first (best-effort): the sidebar gets a name before the answer.
     new_title = ""
     if auto_title and message.strip():
         title_role = "title" if "title" in config.roles else "generation"
         new_title = _generate_title(router.client_for(title_role), message)
+
+    save_mode = mode or config.paradigms.default
+
+    def _checkpoint(body: list[dict]) -> None:
+        if session_id is not None and config.sessions.enabled:
+            session_store.checkpoint(session_id, body, config.sessions.dir, mode=save_mode)
 
     def worker() -> None:
         try:
@@ -179,40 +201,59 @@ def _chat_events(
                 hooks=hooks,
                 on_delta=on_delta,
                 history=history,
+                cancel=cancel_event.is_set,
+                checkpoint=_checkpoint,
             )
+            interrupted = result.stop_reason == "interrupted"
             if session_id is not None and config.sessions.enabled:
                 session_store.save(
                     session_id, result.messages, config.sessions.dir,
                     mode=result.mode, title=new_title or None,
+                    status="interrupted" if interrupted else "complete",
                 )
 {% if spec.memory.enabled %}            from ..harness.memory import record_turn
 
             record_turn(config, result.messages)
-{% endif %}            q.put(("final", {
+{% endif %}            payload = {
                 "answer": result.answer,
                 "mode": result.mode,
                 "stop_reason": result.stop_reason,
                 "steps": result.steps,
                 "tokens": result.trace.total_tokens,
                 "cost_usd": round(result.trace.cost_usd, 6),
-            }))
+                "session": session_id,
+            }
+            # Interrupted = stopped on purpose: emit `stopped` (resumable), not a
+            # synthetic final answer.
+            q.put(("stopped" if interrupted else "final", payload))
         except Exception as exc:  # never leave the stream hanging
             q.put(("error", {"where": "run", "error": str(exc)}))
         finally:
             q.put(None)
 
-    # Tell the client which session this turn belongs to (so it can resume),
-    # then the title (if we made one) so the sidebar updates immediately.
+    # Announce the run id (for /stop) + session id (to resume) up front, then the
+    # title (if we made one) so the sidebar updates immediately.
+    yield _sse("run", {"run_id": run_id})
     if session_id is not None:
         yield _sse("session", {"id": session_id})
     if new_title:
         yield _sse("title", {"id": session_id, "title": new_title})
     threading.Thread(target=worker, daemon=True).start()
-    while True:
-        item = q.get()
-        if item is None:
-            break
-        yield _sse(*item)
+    try:
+        while True:
+            item = q.get()
+            if item is None:
+                break
+            yield _sse(*item)
+    except GeneratorExit:
+        # Client disconnected (closed tab / dropped network): cancel the run so
+        # the loop stops at the next boundary instead of running on unwatched.
+        cancel_event.set()
+        raise
+    finally:
+        if runs is not None and lock is not None:
+            with lock:
+                runs.pop(run_id, None)
 
 
 def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
@@ -220,6 +261,10 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
     app = FastAPI(title="{{ display_name }} — web")
     app.state.config = config or load_config()
     app.state.mock = mock
+    # In-flight chat runs: run_id -> cancel Event, so POST /chat/{run_id}/stop can
+    # signal a running loop. The lock guards the dict across worker threads.
+    app.state.runs = {}
+    app.state.runs_lock = threading.Lock()
     # Load config.extensions so custom @register_* (tools / paradigms / conditions /
     # backends) are available to this web process; serve() also runs the full
     # diagnostics + fail-fast before binding.
@@ -238,12 +283,18 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
         stream: bool = True,
         mode: str | None = None,
         session: str | None = None,
+        edit_turn: int | None = None,
     ) -> StreamingResponse:
         cfg = app.state.config
         # Resume the given session, or mint a new id; disabled sessions => one-shot.
         if cfg.sessions.enabled:
             session_id = session or session_store.new_id()
             history = session_store.load(session_id, cfg.sessions.dir) if session else []
+            # Re-ask: an edited historical question. Drop everything from that user
+            # turn onward, then regenerate from there (destructive truncation — the
+            # later conversation is overwritten on save, not forked).
+            if edit_turn is not None and history:
+                history = session_store.truncate_to_turn(history, edit_turn)
         else:
             session_id, history = None, None
         # Auto-title a session that has no title yet (new, or an earlier attempt
@@ -258,9 +309,22 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
             _chat_events(
                 message, cfg, mock=app.state.mock, stream=stream, mode=mode,
                 session_id=session_id, history=history, auto_title=auto_title,
+                runs=app.state.runs, lock=app.state.runs_lock,
             ),
             media_type="text/event-stream",
         )
+
+    @app.post("/chat/{run_id}/stop")
+    def stop_chat(run_id: str) -> dict:
+        """Stop an in-flight chat run: set its cancel token so the loop ends at the
+        next boundary (mid-token for a streaming turn; the partial answer is
+        dropped and the conversation saved as resumable). Idempotent — an unknown
+        or already-finished run_id is a no-op 200."""
+        with app.state.runs_lock:
+            event = app.state.runs.get(run_id)
+        if event is not None:
+            event.set()
+        return {"ok": True, "run_id": run_id}
 
     @app.get("/sessions")
     def sessions() -> dict:

@@ -438,6 +438,107 @@ def test_test_llm_requires_a_model(monkeypatch):
     data = resp.json()
     assert data["ok"] is False
     assert "model" in data["error"].lower()
+
+
+# --- Slice 9: stop / continue / re-ask over the web ------------------------
+
+
+def test_chat_emits_run_id():
+    """Every turn announces a run id (so the client can POST .../stop)."""
+    body = _client().get("/chat", params={"message": "hi", "stream": "false"}).text
+    run = _sse_event_data(body, "run")
+    assert run and run["run_id"]
+
+
+def test_stop_endpoint_sets_cancel_token_and_is_idempotent():
+    """POST /chat/{id}/stop sets the registered run's cancel token; an unknown or
+    already-finished id is a clean no-op 200 (idempotent)."""
+    import threading
+
+    app = create_app(_config(), mock=True)
+    event = threading.Event()
+    app.state.runs["live"] = event
+    client = TestClient(app)
+
+    assert client.post("/chat/live/stop").status_code == 200
+    assert event.is_set()
+    assert client.post("/chat/ghost/stop").status_code == 200  # unknown -> no-op 200
+
+
+def test_stop_interrupts_run_and_saves_resumable_partial(tmp_path):
+    """A stopped run emits `event: stopped` (not `final`) and persists its partial
+    conversation as interrupted, so it can be resumed."""
+    import json
+    import threading
+
+    from {{ project_slug }}.interfaces.web import _chat_events
+    from {{ project_slug }}.harness import session as session_store
+
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "get_current_time", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": True, "dir": str(tmp_path / "sessions"), "auto_title": False},
+    })
+    sdir = str(tmp_path / "sessions")
+    runs, lock = {}, threading.Lock()
+    sid = session_store.new_id()
+
+    gen = _chat_events(
+        "hello", config, mock=True, stream=False, session_id=sid, history=[],
+        runs=runs, lock=lock,
+    )
+    first = next(gen)  # `event: run` — the worker thread hasn't started yet
+    assert "event: run" in first
+    run_id = json.loads(first.split("data: ", 1)[1])["run_id"]
+    runs[run_id].set()  # trip the cancel token before the loop runs
+    frames = "".join(gen)  # drains: the worker starts already-cancelled
+
+    assert "event: stopped" in frames and "event: final" not in frames
+    assert session_store.status_of(sid, sdir) == "interrupted"
+    msgs = session_store.load(sid, sdir)
+    assert any(m["role"] == "user" and m["content"] == "hello" for m in msgs)
+
+
+def test_reask_edit_turn_truncates_and_regenerates(tmp_path):
+    """?edit_turn=N truncates the session to before that user turn and regenerates,
+    overwriting the later conversation (destructive re-ask, not a fork)."""
+    client = _session_client(tmp_path, auto_title=False)
+    sid = _sse_session_id(
+        client.get("/chat", params={"message": "first", "stream": "false"}).text
+    )
+    client.get("/chat", params={"message": "second", "stream": "false", "session": sid})
+    users = [
+        m["content"]
+        for m in client.get(f"/sessions/{sid}").json()["messages"]
+        if m["role"] == "user"
+    ]
+    assert users == ["first", "second"]
+
+    # Re-ask turn 1 (the "second" question) with an edit.
+    client.get(
+        "/chat",
+        params={"message": "second-edited", "stream": "false", "session": sid, "edit_turn": 1},
+    )
+    after = [
+        m["content"]
+        for m in client.get(f"/sessions/{sid}").json()["messages"]
+        if m["role"] == "user"
+    ]
+    assert after == ["first", "second-edited"]  # turn 1 replaced; nothing after it
+
+
+def test_index_has_stop_and_reask_ui():
+    """The chat ships the Stop button flow (run id + /stop + stopped) and in-page
+    re-ask (edit/confirm), with no native confirm/prompt dialogs."""
+    body = _client().get("/").text
+    assert "function startChat" in body and "function stopChat" in body
+    assert "function setStreaming" in body
+    assert "/stop" in body and 'addEventListener("run"' in body
+    assert 'addEventListener("stopped"' in body
+    assert "beginReask" in body and "commitReask" in body and "edit_turn" in body
+    assert "window.confirm" not in body and "window.prompt" not in body
 {% if spec.memory.enabled %}
 
 def _memory_client(tmp_path):

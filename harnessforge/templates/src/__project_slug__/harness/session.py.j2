@@ -16,6 +16,7 @@ a file to forget a conversation.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from pathlib import Path
@@ -32,6 +33,19 @@ def _path(session_id: str, sessions_dir: str) -> Path:
     return Path(sessions_dir) / f"{Path(session_id).name}.json"
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically (temp file + ``os.replace``).
+
+    A hard crash (kill -9 / power loss / OOM) mid-write can't leave a half-written,
+    corrupt session file: we write a sibling ``.<name>.tmp`` and ``os.replace`` it
+    into place, which is atomic on the same filesystem. The reader therefore always
+    sees either the old file or the complete new one — never a truncated mix.
+    """
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _read(session_id: str, sessions_dir: str) -> dict:
     path = _path(session_id, sessions_dir)
     if not path.is_file():
@@ -42,9 +56,62 @@ def _read(session_id: str, sessions_dir: str) -> dict:
         return {}
 
 
+def repair_orphan_tool_results(messages: list[dict]) -> list[dict]:
+    """Make a (possibly crash-interrupted) history legal for the chat API again.
+
+    A hard crash *during* a tool batch can persist an assistant message that
+    requested tool calls without all of their ``tool`` results — an "orphan
+    tool_use". The chat API rejects such a sequence, so on resume we inject a
+    synthetic error ``tool`` result for every requested ``tool_call_id`` that has
+    no matching result, right after the assistant message. Clean histories are
+    returned unchanged (same dicts), so this is a safe no-op normally.
+    """
+    satisfied = {
+        m.get("tool_call_id")
+        for m in messages
+        if m.get("role") == "tool" and m.get("tool_call_id")
+    }
+    out: list[dict] = []
+    for message in messages:
+        out.append(message)
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            for call in message["tool_calls"]:
+                call_id = call.get("id")
+                if call_id and call_id not in satisfied:
+                    out.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": "ERROR: interrupted before this tool ran",
+                        }
+                    )
+                    satisfied.add(call_id)
+    return out
+
+
 def load(session_id: str, sessions_dir: str) -> list[dict]:
-    """Return the stored message body for ``session_id`` (``[]`` if unknown)."""
-    return _read(session_id, sessions_dir).get("messages", [])
+    """Return the stored message body for ``session_id`` (``[]`` if unknown).
+
+    If the session wasn't cleanly finished (``status != "complete"``, e.g. it was
+    stopped or the process was killed) or a dangling ``tool_use`` is detected, the
+    body is repaired (:func:`repair_orphan_tool_results`) so a resumed turn is
+    legal for the chat API. Clean sessions are returned verbatim.
+    """
+    data = _read(session_id, sessions_dir)
+    messages = data.get("messages", [])
+    if data.get("status", "complete") != "complete":
+        return repair_orphan_tool_results(messages)
+    repaired = repair_orphan_tool_results(messages)
+    return repaired if repaired != messages else messages
+
+
+def status_of(session_id: str, sessions_dir: str) -> str:
+    """The session's stored ``status`` (``"complete"`` if none / unknown).
+
+    ``"running"`` means a turn was checkpointed but never cleanly finished (a hard
+    crash); ``"interrupted"`` means it was stopped on purpose (Stop / Ctrl-C).
+    """
+    return _read(session_id, sessions_dir).get("status", "complete")
 
 
 def title_of(session_id: str, sessions_dir: str) -> str:
@@ -59,13 +126,17 @@ def save(
     *,
     mode: str = "agent",
     title: str | None = None,
+    status: str = "complete",
 ) -> None:
     """Persist the conversation body for ``session_id`` (creating the dir).
 
     Stores only the message body (no system prompt) and never a secret — keys
     stay in ``.env`` and never reach ``messages``. ``created`` and any existing
     ``title`` are preserved across updates (pass ``title`` to set/replace it);
-    ``updated`` is refreshed each save.
+    ``updated`` is refreshed each save. ``status`` records how the turn ended:
+    ``"complete"`` (clean), ``"interrupted"`` (stopped on purpose), or
+    ``"running"`` (a mid-turn write-ahead checkpoint — see :func:`checkpoint`).
+    The write is atomic, so a crash can't corrupt the file.
     """
     directory = Path(sessions_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -76,11 +147,26 @@ def save(
         "updated": time.time(),
         "mode": mode,
         "title": title or existing.get("title", ""),
+        "status": status,
         "messages": messages,
     }
-    _path(session_id, sessions_dir).write_text(
-        json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+    _atomic_write(
+        _path(session_id, sessions_dir),
+        json.dumps(record, ensure_ascii=False, indent=2),
     )
+
+
+def checkpoint(
+    session_id: str, messages: list[dict], sessions_dir: str, *, mode: str = "agent"
+) -> None:
+    """Write-ahead the in-progress conversation after a completed step.
+
+    Called once per loop step so a hard crash mid-turn still leaves the work so
+    far on disk (status ``"running"``). On resume, :func:`load` notices the
+    non-``complete`` status and repairs any dangling ``tool_use``. This is just a
+    ``save`` with ``status="running"`` (same atomic single-file write).
+    """
+    save(session_id, messages, sessions_dir, mode=mode, status="running")
 
 
 def set_title(session_id: str, title: str, sessions_dir: str) -> bool:
@@ -91,10 +177,40 @@ def set_title(session_id: str, title: str, sessions_dir: str) -> bool:
         return False
     data["title"] = title
     data["updated"] = time.time()
-    _path(session_id, sessions_dir).write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    _atomic_write(
+        _path(session_id, sessions_dir),
+        json.dumps(data, ensure_ascii=False, indent=2),
     )
     return True
+
+
+def turns(messages: list[dict]) -> list[dict]:
+    """The user-turn boundaries in a body: ``{index, message_index, preview}`` per
+    user message. Lets a UI offer "edit this question" controls (the web re-ask),
+    where ``index`` is the turn ordinal passed to :func:`truncate_to_turn`."""
+    out: list[dict] = []
+    for message_index, message in enumerate(messages):
+        if message.get("role") == "user":
+            out.append(
+                {
+                    "index": len(out),
+                    "message_index": message_index,
+                    "preview": (message.get("content") or "")[:80],
+                }
+            )
+    return out
+
+
+def truncate_to_turn(messages: list[dict], n: int) -> list[dict]:
+    """Return the body up to (but excluding) the ``n``-th user turn (0-based).
+
+    Used by the web re-ask: drop everything from the edited question onward, then
+    re-run from there. ``n`` out of range returns a copy of the whole body.
+    """
+    user_indices = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+    if n < 0 or n >= len(user_indices):
+        return list(messages)
+    return messages[: user_indices[n]]
 
 
 def delete(session_id: str, sessions_dir: str) -> bool:

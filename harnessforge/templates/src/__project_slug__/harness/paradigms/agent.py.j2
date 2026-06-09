@@ -54,11 +54,17 @@ def run(
     trace: Trace | None = None,
     on_delta: Callable[[str], None] | None = None,
     history: list[dict] | None = None,
+    cancel: Callable[[], bool] | None = None,
+    checkpoint: Callable[[list[dict]], None] | None = None,
 ) -> RunResult:
     """Run one agent turn and return the final answer + telemetry.
 
     ``history`` is prior conversation messages (no system prompt) to resume from;
-    the returned ``RunResult.messages`` is the full body after this turn."""
+    the returned ``RunResult.messages`` is the full body after this turn. ``cancel``
+    is a cooperative stop predicate (checked at each step boundary and forwarded to
+    the LLM stream so Stop / Ctrl-C cut generation mid-token, stopping with
+    ``stop_reason="interrupted"`` on a clean message boundary); ``checkpoint`` is
+    called with the body after each completed step (write-ahead for crash safety)."""
     hooks = hooks or Hooks()
     if client is None:
         if client_for is None:
@@ -97,18 +103,31 @@ def run(
             stop_reason, answer = stop
             break
 
+        # Cooperative cancel at the step boundary (next to the budget check): a
+        # Stop / Ctrl-C between steps ends the turn cleanly here, leaving messages
+        # on a legal boundary (last tool result / user message).
+        if cancel is not None and cancel():
+            stop_reason = "interrupted"
+            break
+
         messages = fit_context(messages, context_cfg, summarizer=summarizer{% if spec.memory.enabled %}, config=config{% endif %})
         hooks.before_step(step, messages)
         try:
             if on_delta is not None:
-                response = client.stream(messages, tool_schemas or None, on_delta=on_delta)
+                response = client.stream(messages, tool_schemas or None, on_delta=on_delta, cancel=cancel)
             else:
-                response = client.complete(messages, tool_schemas or None)
+                response = client.complete(messages, tool_schemas or None, cancel=cancel)
         except Exception as exc:
             hooks.on_error("llm", exc)
             trace.event("error", where="llm", error=str(exc))
             trace.close()
             raise
+
+        # Cancelled mid-generation: drop the half-streamed response (it was never
+        # appended) and stop on the prior clean boundary.
+        if cancel is not None and cancel():
+            stop_reason = "interrupted"
+            break
 
         cost = trace.add_usage(response.usage, profile)
         trace.event(
@@ -132,6 +151,10 @@ def run(
                 {"role": "tool", "tool_call_id": call.id, "content": result}
             )
         step += 1
+        # Write-ahead the completed step (body only): a crash now still leaves a
+        # legal, resumable conversation on disk.
+        if checkpoint is not None:
+            checkpoint(messages[1:])
 
     trace.event(
         "run_end",

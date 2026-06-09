@@ -132,7 +132,7 @@ class _AlwaysToolLLM:
     def __init__(self, sleep: float = 0.0) -> None:
         self._sleep = sleep
 
-    def complete(self, messages, tools=None) -> LLMResponse:
+    def complete(self, messages, tools=None, *, cancel=None) -> LLMResponse:
         if self._sleep:
             import time
 
@@ -332,6 +332,123 @@ def test_loop_on_delta_streams_final_answer(tmp_path):
     result = run("hi", client=client, config=config, on_delta=deltas.append)
     assert result.answer == "Streamed answer."
     assert "".join(deltas) == "Streamed answer."  # only assistant text, not tool output
+
+
+# --- Slice 9: cooperative cancel (stop) + write-ahead checkpoints -----------
+
+
+def test_stream_cancel_interrupts_and_messages_stay_legal(tmp_path):
+    """A cancel that trips mid-stream stops the turn with stop_reason interrupted,
+    drops the half-streamed answer (never appended), and leaves a legal body."""
+    config = _config(tmp_path)
+    n = {"c": 0}
+
+    def cancel():
+        n["c"] += 1
+        return n["c"] > 2  # step-boundary check + one token, then cancel
+
+    deltas = []
+    client = MockLLM(script=["one two three four five"])
+    result = run("hi", client=client, config=config, on_delta=deltas.append, cancel=cancel)
+
+    assert result.stop_reason == "interrupted"
+    assert deltas and "".join(deltas) != "one two three four five"  # only a partial showed
+    # the half output was discarded: the body is just the user message (legal)
+    assert result.messages == [{"role": "user", "content": "hi"}]
+
+
+def test_cancel_at_step_boundary_stops_with_zero_steps(tmp_path):
+    """A cancel already set at the step boundary ends the turn before any LLM call."""
+    config = _config(tmp_path)
+    result = run("hi", client=MockLLM(), config=config, cancel=lambda: True)
+    assert result.stop_reason == "interrupted"
+    assert result.steps == 0
+    assert result.messages == [{"role": "user", "content": "hi"}]
+
+
+def test_checkpoint_called_after_each_completed_step(tmp_path):
+    """The write-ahead checkpoint fires once per completed tool step, with the
+    body so far (no system prompt). The final answer step doesn't checkpoint."""
+    config = _config(tmp_path)
+    bodies = []
+    client = MockLLM(script=[ScriptedCall("get_current_time", {}), "done"])
+    result = run(
+        "go", client=client, config=config, checkpoint=lambda b: bodies.append([m["role"] for m in b])
+    )
+    assert result.stop_reason == "final"
+    assert bodies == [["user", "assistant", "tool"]]
+
+
+def test_openai_client_stream_closes_on_cancel():
+    """STOP-1: OpenAIClient.stream closes the HTTP stream the moment cancel trips,
+    stops reading chunks, and returns the half-assembled response."""
+    import types
+
+    from {{ project_slug }}.harness.llm import OpenAIClient
+
+    closed = {"v": False}
+
+    def _chunk(text):
+        delta = types.SimpleNamespace(content=text, tool_calls=None)
+        return types.SimpleNamespace(usage=None, choices=[types.SimpleNamespace(delta=delta)])
+
+    class _Stream:
+        def __init__(self):
+            self._chunks = [_chunk("a"), _chunk("b"), _chunk("c")]
+
+        def __iter__(self):
+            return iter(self._chunks)
+
+        def close(self):
+            closed["v"] = True
+
+    client = OpenAIClient.__new__(OpenAIClient)  # bypass __init__ (no SDK / network)
+    client.model = "m"
+    client.temperature = client.max_tokens = client.reasoning_effort = None
+    client._client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=lambda **kw: _Stream())
+        )
+    )
+
+    seen = []
+    n = {"c": 0}
+
+    def cancel():
+        n["c"] += 1
+        return n["c"] > 1  # cancel right after the first chunk
+
+    resp = client.stream([], None, on_delta=seen.append, cancel=cancel)
+    assert closed["v"] is True  # the stream was closed, not drained
+    assert seen == ["a"] and resp.content == "a"
+
+
+def test_crash_recovery_via_checkpoint_is_resumable(tmp_path):
+    """Tier B: a turn write-ahead checkpoints each step. Simulating a hard crash
+    (only the checkpoint file remains, status != complete), load repairs+returns a
+    legal body and a fresh turn resumes from it."""
+    from {{ project_slug }}.harness import session as session_store
+
+    config = _config(tmp_path)
+    sdir = str(tmp_path / "s")
+    sid = session_store.new_id()
+    client = MockLLM(script=[ScriptedCall("get_current_time", {}), "done"])
+    # The caller "crashes" before the final save — only the per-step checkpoint
+    # write-ahead reaches disk.
+    run(
+        "go",
+        client=client,
+        config=config,
+        checkpoint=lambda body: session_store.checkpoint(sid, body, sdir),
+    )
+
+    assert session_store.status_of(sid, sdir) == "running"  # never cleanly finished
+    history = session_store.load(sid, sdir)  # repaired if needed -> legal sequence
+    assert any(m["role"] == "user" and m["content"] == "go" for m in history)
+
+    resumed = run("and now?", client=MockLLM(script=["ok"]), config=config, history=history)
+    assert resumed.stop_reason == "final"
+    assert any(m.get("content") == "go" for m in resumed.messages)  # prior turn carried
 
 
 # --- Slice 5: loop paradigms (registry + runtime mode + extension) ---------

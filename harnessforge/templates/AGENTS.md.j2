@@ -209,6 +209,40 @@ with `[system, *history, user]`, then return the conversation body as
 still works, it just won't resume. Saving/loading lives in `harness/session.py`
 (plain JSON under `.harness/sessions/`, message text only — never secrets).
 
+## Stop / continue / re-ask
+
+A turn can be **stopped** mid-flight — Ctrl-C in the CLI, the Stop button in the
+web chat. Stop is cooperative: a `cancel` predicate threads from the entry point
+into the paradigm and down into `client.stream`, which closes the HTTP stream
+mid-token. The loop only stops at a **clean boundary** — the model output is
+dropped (never half-appended) or a whole tool batch finishes first — so the saved
+`messages` are always a legal sequence (it never leaves an assistant `tool_calls`
+without its results). A stopped turn ends with `stop_reason="interrupted"`.
+
+> Stop ends the model + the loop. It does **not** roll back side effects already
+> done (files written, requests sent) — that's what your git / Docker isolation is
+> for. The harness only governs the conversation, not the world.
+
+**Continue** is automatic: a stopped (or crashed) turn saves its partial body, so
+the next message — `run --continue`, `chat`, or just sending again in the web —
+resumes with the full context. The model sees the original question and whatever
+tool steps already ran, so it picks up where it left off. There's no separate
+"continue" command; continuing is just the next message on the same session.
+
+Crash safety: each completed step is **write-ahead checkpointed** (an atomic
+single-file write, `status="running"`), so even a `kill -9` mid-turn leaves a
+resumable session. On load, a session that wasn't cleanly finished is checked for
+a dangling `tool_use` (an assistant tool call with no result, only possible from a
+hard crash mid-batch) and a synthetic error result is injected so the resumed
+history is legal — see `repair_orphan_tool_results` in `harness/session.py`.
+{% if interfaces.web %}
+**Re-ask** (web only): click ✎ on any earlier question to edit it, confirm in-page
+("discards the conversation after this point"), and the chat regenerates from that
+turn. This is a **destructive truncation** — the later messages are overwritten,
+not forked (`session.truncate_to_turn` + `?edit_turn=N` on `/chat`). The CLI has
+no re-ask (it would need a full rewind TUI); edit the session JSON by hand instead.
+{% endif %}
+
 ### Self-correction & reflection (do it with a real signal)
 
 The `agent` loop already self-corrects *online*: a failing tool comes back as an

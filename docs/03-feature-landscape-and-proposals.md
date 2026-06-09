@@ -2,9 +2,9 @@
 
 > 本文不是开发计划，也不改任何全局决策——它是一份**对标分析 + 选型建议**，供人决定 v1+ 排期时参考（排期结论已落地，见下方"排期更新"与 `02-development/00-overview.md §2`）。
 >
-> **状态更新（人 2026-06-07 已采纳）**：本文 §3 的 T1-A 会话持久化、T1-C Checkpoints、T1-B HITL 交互确认已升格为 **v1 必做切片 Slice 8 / 9 / 10**；§5 的跨会话全局记忆已上移 **v1**；§6 D-1 的 `forge add` 已写出详设 [`04-forge-add-incremental-regeneration.md`](./04-forge-add-incremental-regeneration.md)。路线图见 [`02-development/00-overview.md §2`](./02-development/00-overview.md)。其余项仍为待评估建议。
+> **状态更新（人 2026-06-07 已采纳；T1-C 于 2026-06-08 撤销）**：本文 §3 的 T1-A 会话持久化、T1-B HITL 交互确认已升格为 **v1 必做切片 Slice 8 / 10**；**T1-C Checkpoints 原列 Slice 9，经 2026-06-08 评估撤销不内建**（撤销说明见 §3 T1-C）；§5 的跨会话全局记忆已上移 **v1**；§6 D-1 的 `forge add` 已写出详设 [`04-forge-add-incremental-regeneration.md`](./04-forge-add-incremental-regeneration.md)。路线图见 [`02-development/00-overview.md §2`](./02-development/00-overview.md)。其余项仍为待评估建议。
 >
-> **排期更新（人 2026-06-07 定向，本文建议已被采纳并细化排期）**：在三件套之外又排定了几项——① **跨会话记忆**紧接 Slice 8 记为 **Slice 8B**；② **Slice 9 Checkpoints + Slice 10 HITL = 一组"工具护栏对"相邻一起做**（共用 `before_tool` + Web 审批管道）；③ **§4 T2-G MCP 健康自检/状态面板升格为 Slice 11**（三件套+记忆后的首要方向）；④ **§3 T1-D 原生 Anthropic 双规范 + 推理流式升格为 Slice 12**，§6.4 具体方案已写出待签，见 [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)；⑤ **§6 D-1 forge add / D-2 eval / D-3 presets 列入 Slice 13+ v1+ backlog**（forge add 仍为头号差异化，先做 Phase 1）。本文 §7 优先级表为当时建议，实际排期以 `02-development/00-overview.md §2` 为准。
+> **排期更新（人 2026-06-07 定向，本文建议已被采纳并细化排期）**：在三件套之外又排定了几项——① **跨会话记忆**紧接 Slice 8 记为 **Slice 8B**；② **Slice 10 HITL 交互确认**独立做（复用 `before_tool` + Web 审批管道；原与 Slice 9 Checkpoints 配对的"工具护栏对"已因 **Slice 9 于 2026-06-08 撤销**而解除，见 §3 T1-C）；③ **§4 T2-G MCP 健康自检/状态面板升格为 Slice 11**（三件套+记忆后的首要方向）；④ **§3 T1-D 原生 Anthropic 双规范 + 推理流式升格为 Slice 12**，§6.4 具体方案已写出待签，见 [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)；⑤ **§6 D-1 forge add / D-2 eval / D-3 presets 列入 Slice 13+ v1+ backlog**（forge add 仍为头号差异化，先做 Phase 1）。本文 §7 优先级表为当时建议，实际排期以 `02-development/00-overview.md §2` 为准。
 > 立项定位 / 红线以 `01-project-plan.md` 为准；切片门禁与 backlog 以 `02-development/00-overview.md` 为准。本文凡触及 `01 §6` 红线的，都显式标注"守红线"。
 >
 > **基准时间**：2026-06。MVP 已走到 Slice 7（向导 + 范式 + MCP + Skills + 产物 Web/`/config` + 全局 rule + 可组合上下文压缩）。
@@ -48,7 +48,7 @@
 | 9 | 生命周期 hooks | Claude（config shell hook）/ 标配 | ⚠️ 仅 code-level（`Hooks` 子类） | 缺 config 级 shell hook（已登记 v1+，见 §5） |
 | 10 | **工具调用 HITL 交互确认**（allow/reject/always-allow） | 全员 / **标配** | ❌ 无内置（可 `before_tool` `raise` 自实现） | **明显缺口**（已登记 v1+）→ Tier 1 |
 | 11 | **沙箱执行**（默认断网 + 限 cwd） | Codex/Cline/Claude / **标配** | ⚠️ 靠外置 Docker，产物进程内无 | 缺进程级护栏（守红线：不造沙箱，可生成 sandbox-aware wrapper）→ Tier 2 |
-| 12 | **Checkpoints**（危险操作前自动快照 + 一键回滚） | Cline/Cursor/Codex / **标配** | ❌ 无 | **明显缺口**，强契合 → Tier 1 |
+| 12 | ~~**Checkpoints**（危险操作前自动快照 + 一键回滚）~~ | Cline/Cursor/Codex / **标配** | ❌ 无（**不内建**） | **经评估撤销**（2026-06-08）：git 只盖产物仓库、盖不住 MCP/绝对路径写；见 §3 T1-C |
 | 13 | **Subagent / 隔离子上下文** | Claude/扩散中 / 快速标配 | ❌ 无（supervisor multi-agent 已登记 v1+） | 缺口，正是已规划的"agent 即 tool" → Tier 2 |
 | 14 | **会话持久化 / resume / `--continue`** | 全员 / **标配** | ❌ CLI 是单轮（"一问一答"） | **明显缺口（backlog 未登记）** → Tier 1 |
 | 15 | 任务清单跟踪（TodoWrite 式） | Claude/MS Agent Framework / 常见 | ❌ 无 | 中等缺口（backlog 未登记）→ Tier 2 |
@@ -61,7 +61,7 @@
 | 22 | 插件 / marketplace | Claude/Antigravity / 新兴 | ⚠️ 靠 MCP marketplace 文档 | 低优先 → Tier 3 |
 
 **两条总结**：
-1. 真正"已成标配、HarnessForge 还没有、且 backlog 也没登记"的只有三项：**#10 HITL 交互确认、#12 Checkpoints、#14 会话持久化/resume**。它们都薄、都不触红线、都强契合 own-your-code。这是最值得先做的一批。
+1. 真正"已成标配、HarnessForge 还没有、且 backlog 也没登记"的有三项：**#10 HITL 交互确认、#12 Checkpoints、#14 会话持久化/resume**。其中 **#10、#14 薄、不触红线、强契合 own-your-code，最值得先做**；**#12 Checkpoints 经 2026-06-08 评估撤销不内建**（理由见 §3 T1-C），改由"用户自管 git + #10 HITL + Docker"覆盖。
 2. 其余多数缺口（#9/#13/#17/#18/#19）其实**已经在 v1+ backlog 里**——本文的价值是给它们标出"哪些已经从'锦上添花'升级成'2026 标配'"，从而调整优先级。
 
 ---
@@ -84,13 +84,17 @@
 - **红线守住**：这是**护栏（威胁模型 A，可信但会手滑）**，不是"对代码所有者强制地板"——文档要继续讲明它不是安全边界（`01 §4`）；要锁死能力仍靠"生成期不编译进去"。**不要**借它把 `shell` 默认开（那会改 `01 §6` 全局口径，需人签字，已在 backlog 注明）。
 - **落地草图**：`harness/hooks.py` 加 `class ConfirmHooks(Hooks)`；CLI 走 `typer.confirm`，Web 走一个 SSE 往返的 pending-approval 事件。
 
-### T1-C · Checkpoints：危险工具前自动 git 快照 + 一键回滚（缺口 #12）
+### T1-C · ~~Checkpoints：危险工具前自动 git 快照 + 一键回滚~~（缺口 #12，**2026-06-08 评估撤销，不内建**）
 
-- **是什么**：当启用了写文件 / shell 类工具时，在执行**前**自动打一个 checkpoint（git stash/commit 到一个隐藏分支或 `.harness/checkpoints/`），提供 `<pkg> revert` / Web "撤销本次运行"。
-- **为什么**：Cline/Cursor/Codex 把"自动快照 + 一键 undo"当成自主多文件编辑的**主要安全网**。HarnessForge 的产物默认就生成在 git 仓库里（生成器 `git init`），天然有底座；这是最便宜就能拿到的"可信但会手滑"护栏。
-- **契合 & 薄**：和 own-your-code 完美契合（用户的产物本就是 git 仓库）；纯 own-code，调 `git` CLI 即可，零新增 Python 依赖。可做成 spec 开关 `tools.checkpoints: true`（或自动在检测到写类工具时启用）。
-- **红线**：无。是护栏不是沙箱——它**回滚文件**，不**阻止**破坏（破坏防护交 Docker/容器，模型 B）。文档要写清这条边界。
-- **落地草图**：复用 `before_tool`（与 T1-B 同一挂点）：高风险工具触发前 `git add -A && git commit -m "checkpoint" --quiet` 到影子 ref；`revert` 命令 `git restore` 到上一个 checkpoint。
+> **撤销结论（人 2026-06-08）**：本项不再作为内建特性（原列 **Slice 9**，现取消）。下面保留原提案与撤销理由备查。
+
+- **原提案**：启用写文件 / shell 类工具时，在执行**前**自动打一个 checkpoint（`git commit` 到隐藏分支或 `.harness/checkpoints/`），提供 `<pkg> revert` / Web "撤销本次运行"；复用 `before_tool` 挂点，纯 own-code 调 `git` CLI、零新增依赖。
+- **撤销理由**：
+  1. **盖不住真实写盘路径**：产物默认无 native 写/shell 工具，写盘能力主要来自 **MCP**（如 Desktop Commander，按绝对路径全盘操作）或用户自写工具；对产物仓库 `git commit` 只快照"一个仓库工作树"，与"全盘绝对路径写"天生对不齐——越界写与不透明 MCP 写都盖不住。
+  2. **做对就不薄**：要让 checkpoint 真正"管得住"，前提是先有一套"工作区根 + 路径受限的文件/shell 工具 + shadow-git（不污染用户真实 history）"——那是一整套 workspace 子系统，与"薄"红线（`CLAUDE.md §2`）冲突，也与用户自有 git + Docker 重叠。
+  3. **诉求已有更薄出口**：产物的 git 由开发者自己管；想要"危险工具前自动 commit"的话，`Hooks.before_tool` 挂点已就位，用户自写约 10 行即可实现（own-code，不需生成器内建）。
+- **替代覆盖**：用户自管 git（产物本就 `git init`）+ **T1-B HITL 确认**（执行前人能看到越界路径并拒绝）+ **Docker 硬隔离**（威胁模型 B）。三者各管一段。
+- **注**：本项是**文件级回滚**。它与 LangGraph 式**会话级 checkpoint**（停止 / 继续 / 重问，建在 Slice 8 sessions 之上的对话时间旅行）是两个不同层面的概念，互不替代；后者已于 2026-06-08 接管腾空的 **Slice 9 槽位**（详设见 [`02-development/10-slice-9-stop-resume-reask.md`](./02-development/10-slice-9-stop-resume-reask.md)）。
 
 ### T1-D · 原生 Anthropic 双规范 client + reasoning 流式 UX（缺口 #17/#18，backlog 已登记，建议升格）
 
@@ -163,7 +167,7 @@
 | 优先级 | 项 | 一句话理由 |
 |--------|----|-----------|
 | **P0** | T1-A 会话持久化/resume | 单轮 `run` 是当前最违和的基础缺口，最薄、零依赖 |
-| **P0** | T1-C Checkpoints | 产物本就是 git 仓库，几乎免费拿到事实标准的"自主编辑安全网" |
+| ~~P0~~ | ~~T1-C Checkpoints~~ | **2026-06-08 撤销不内建**：git 只盖产物仓库工作树、盖不住 MCP/绝对路径写；做对即需整套 workspace 子系统（违"薄"）。改由用户自管 git + HITL + Docker 覆盖（见 §3 T1-C） |
 | **P1** | T1-B HITL 交互确认 | 标配且扩展点已就位，让危险工具敢"预置不放行" |
 | **P1** | D-1 `forge add`/upgrade（安全子集先行） | **唯一的结构性护城河**，直接抵消 own-your-code 的代价 |
 | **P2** | T1-D Anthropic 双规范 + reasoning 流式 | 推理模型已主流；但改 LLM 面需人签 `§6.4` |
@@ -172,7 +176,7 @@
 | **观望** | T2-H sandbox wrapper、T3 全部 | 易触红线或边际收益低，先文档/缓做 |
 | **不做** | #20 云托管/后台 multi-agent、通用编排框架、在线 registry、真沙箱、生产级权限 | `01 §6` 红线 |
 
-> **给人的决策点（2026-06-07 已拍板，结论见下）**：① 三件套**已立为独立切片 Slice 8/9/10**，其中 **9+10 配对相邻一起做**、**跨会话记忆紧接为 Slice 8B**（人 2026-06-07）。② `forge add`/upgrade **确认为头号差异化、列入 Slice 13+ 先做 Phase 1 安全子集**（人 2026-06-07；详设 `04-forge-add`）。③ **Anthropic 双规范排为 Slice 12**，§6.4 具体方案**已写出待签** [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)（人 2026-06-07）。④ 三件套+记忆后的首要方向**确认为 Slice 11 MCP 健康/管理**（人 2026-06-07）。
+> **给人的决策点（2026-06-07 已拍板，结论见下）**：① 三件套立为独立切片 Slice 8/9/10（人 2026-06-07）；**其中 Slice 9 Checkpoints 于 2026-06-08 评估撤销**（见 §3 T1-C），剩 Slice 8 会话持久化 + Slice 10 HITL（独立做）、**跨会话记忆紧接为 Slice 8B**（人 2026-06-07）。② `forge add`/upgrade **确认为头号差异化、列入 Slice 13+ 先做 Phase 1 安全子集**（人 2026-06-07；详设 `04-forge-add`）。③ **Anthropic 双规范排为 Slice 12**，§6.4 具体方案**已写出待签** [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)（人 2026-06-07）。④ 三件套+记忆后的首要方向**确认为 Slice 11 MCP 健康/管理**（人 2026-06-07）。
 
 ---
 
@@ -181,7 +185,7 @@
 - 不引入任何 **agent 编排框架**（LangChain/LangGraph/ADK）——本文无一项需要。✅
 - 不做**通用多 agent 编排框架 / 工作流 DSL / 动态图引擎 / 运行期范式抽象层**——T2-E 严格限定为"固定拓扑、own-code、agent 即 tool"，不越界。✅
 - 不做**云托管 / 中心化配置托管**——#20 显式列为不做。✅
-- 不做**生产级权限系统 / 内置真沙箱 / 在线 MCP registry**——T1-B/T1-C/T2-H 全部框为"护栏（威胁模型 A）"，强制隔离仍交 Docker（模型 B）；不自建 registry。✅
+- 不做**生产级权限系统 / 内置真沙箱 / 在线 MCP registry**——T1-B/T2-H 框为"护栏（威胁模型 A）"，强制隔离仍交 Docker（模型 B）；不自建 registry。✅（T1-C Checkpoints 已于 2026-06-08 撤销，见 §3）
 - 不让**密钥进 git / spec / trace / 日志**——T1-A 会话落盘特别标注沿用 trace 的脱敏纪律。✅
 - **改 spec schema / LLM API 面**——T1-D 触 `§6.4`，已标"需人再签"；其余建议尽量走运行期 `config.yaml` 不动 spec 语义。✅
 
