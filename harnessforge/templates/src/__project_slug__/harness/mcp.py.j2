@@ -7,8 +7,10 @@ as built-in tools and run through the SAME loop/trace — ``loop.py`` is untouch
 stdio subprocess, ``url`` -> remote Streamable HTTP).
 
 The MCP SDK is asyncio; all of it hides behind a synchronous ``McpManager.call``.
-One background thread owns one event loop and the whole session lifecycle —
-sessions are entered and exited in the *same* task, as anyio requires.
+One background thread owns one event loop; each server gets its OWN task that
+enters and exits that server's session (anyio requires a session be entered and
+exited in the *same* task). Servers connect concurrently, so startup costs
+``max`` per-server connect time, not the sum.
 """
 
 from __future__ import annotations
@@ -105,10 +107,10 @@ def _result_text(result: Any) -> str:
 class McpManager:
     """Owns one background event loop + the full MCP session lifecycle.
 
-    ``start()`` connects every configured server (failures are isolated: a
-    server that won't start is skipped and recorded in ``errors``, not fatal)
-    and lists its tools into ``discovered``. ``call()`` is synchronous and
-    thread-safe; ``close()`` shuts the sessions down cleanly.
+    ``start()`` connects every configured server CONCURRENTLY (failures are
+    isolated: a server that won't start is skipped and recorded in ``errors``,
+    not fatal) and lists its tools into ``discovered``. ``call()`` is synchronous
+    and thread-safe; ``close()`` shuts the sessions down cleanly.
     """
 
     def __init__(self, config: McpConfig) -> None:
@@ -117,6 +119,8 @@ class McpManager:
         self._thread = threading.Thread(target=self._thread_main, daemon=True)
         self._ready: concurrent.futures.Future = concurrent.futures.Future()
         self._inbox: asyncio.Queue | None = None
+        self._closing: asyncio.Event | None = None
+        self._server_tasks: list[asyncio.Task] = []
         self._sessions: dict[str, Any] = {}
         self.discovered: dict[str, list] = {}
         self.errors: dict[str, str] = {}
@@ -133,15 +137,41 @@ class McpManager:
 
     async def _main(self) -> None:
         self._inbox = asyncio.Queue()
+        self._closing = asyncio.Event()
         timeout = self._config.connect_timeout_seconds
-        async with AsyncExitStack() as stack:
-            for server in self._config.servers:
-                try:
-                    await asyncio.wait_for(self._connect(stack, server), timeout)
-                except Exception as exc:  # failure isolation (incl. timeout)
-                    self.errors[server.name] = str(exc)
-            self._ready.set_result(True)
-            await self._serve()
+        # One task per server, all started at once: each owns its session for the
+        # whole run and connects in parallel, so startup is max(per-server), not sum.
+        done_events: list[asyncio.Event] = []
+        for server in self._config.servers:
+            done = asyncio.Event()
+            done_events.append(done)
+            self._server_tasks.append(asyncio.create_task(self._run_server(server, timeout, done)))
+        for done in done_events:  # ready once every server has connected or failed
+            await done.wait()
+        self._ready.set_result(True)
+        await self._serve()
+        self._closing.set()  # release each server task to tear down its own session
+        if self._server_tasks:
+            await asyncio.gather(*self._server_tasks, return_exceptions=True)
+
+    async def _run_server(self, server: McpServerConfig, timeout: float, done: asyncio.Event) -> None:
+        """Own ONE server's session for the whole run, inside a single task.
+
+        Connect (open transport + ``initialize`` + ``list_tools``) under ``timeout``,
+        signal ``done`` (so startup can proceed), then hold the session open until
+        ``close()``. Entering and exiting the session in the same task is required by
+        anyio; a connect failure/timeout is isolated into ``errors`` and never aborts
+        the other servers.
+        """
+        assert self._closing is not None
+        try:
+            async with AsyncExitStack() as stack:
+                await asyncio.wait_for(self._connect(stack, server), timeout)
+                done.set()
+                await self._closing.wait()  # keep the session alive until shutdown
+        except Exception as exc:  # connect failure/timeout: isolate, never fatal
+            self.errors[server.name] = str(exc)
+            done.set()
 
     async def _connect(self, stack: AsyncExitStack, server: McpServerConfig) -> None:
         """Open one server's session and list its tools (under a startup timeout)."""

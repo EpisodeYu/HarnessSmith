@@ -209,6 +209,35 @@ def test_sync_mcp_tools_resyncs_registry(manager):
         registry.get("dummy__echo")
 
 
+def test_connects_multiple_servers_concurrently():
+    """Each server gets its own task and connects in parallel; all are discovered.
+
+    Exercises the per-server-task lifecycle (>1 server) the concurrent connect path
+    relies on — both sessions are usable and tear down cleanly on close().
+    """
+    mgr = McpManager(
+        McpConfig(
+            servers=[
+                McpServerConfig(name="a", command=sys.executable, args=[DUMMY]),
+                McpServerConfig(name="b", command=sys.executable, args=[DUMMY]),
+            ]
+        )
+    )
+    mgr.start()
+    try:
+        assert "a" in mgr.discovered and "b" in mgr.discovered, mgr.errors
+        registry = Registry()
+        register_mcp_tools(
+            _config([{"name": "a__echo", "enabled": True}, {"name": "b__add", "enabled": True}]),
+            mgr,
+            registry,
+        )
+        assert "hi" in registry.call("a__echo", json.dumps({"text": "hi"}))
+        assert "5" in registry.call("b__add", json.dumps({"a": 2, "b": 3}))
+    finally:
+        mgr.close()
+
+
 def test_rebuild_manager_reconnects(manager):
     """rebuild_manager starts a fresh manager (and closes the old) for hot-reconnect."""
     from {{ project_slug }}.harness.mcp import rebuild_manager
