@@ -123,6 +123,34 @@ def test_environment_note_surfaces_disabled_capabilities():
     assert "- git" not in prompt  # active server is not listed as disabled
 
 
+def test_windows_wraps_cmd_shim_for_stdio(monkeypatch):
+    """On Windows, .cmd/.bat shims (npx) are launched via `cmd /c`; .exe is direct.
+
+    Windows CreateProcess cannot exec a .cmd batch shim, so a bare `npx` fails with
+    WinError 2 — wrapping it in `cmd /c` is what makes it spawn.
+    """
+    import shutil
+
+    from {{ project_slug }}.harness.mcp import _windows_stdio_command
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda c: r"C:\Program Files\nodejs\npx.cmd" if c == "npx" else r"C:\uv\uvx.exe",
+    )
+
+    assert _windows_stdio_command("npx", ["-y", "pkg"]) == ("cmd", ["/c", "npx", "-y", "pkg"])
+    assert _windows_stdio_command("uvx", ["pkg"]) == ("uvx", ["pkg"])
+
+
+def test_non_windows_leaves_stdio_command_untouched(monkeypatch):
+    from {{ project_slug }}.harness.mcp import _windows_stdio_command
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert _windows_stdio_command("npx", ["-y", "pkg"]) == ("npx", ["-y", "pkg"])
+
+
 def test_remote_server_injects_bearer_header(monkeypatch):
     monkeypatch.setenv("MY_MCP_TOKEN", "secret-123")
     server = McpServerConfig(name="r", url="https://example.com/mcp", auth_env="MY_MCP_TOKEN")

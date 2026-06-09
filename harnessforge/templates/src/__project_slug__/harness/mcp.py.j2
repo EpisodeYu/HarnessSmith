@@ -34,6 +34,26 @@ def _bearer_headers(server: McpServerConfig) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
+def _windows_stdio_command(command: str, args: list[str]) -> tuple[str, list[str]]:
+    """Make a stdio command launchable on Windows.
+
+    ``npx`` (and ``npm``/``yarn``) are ``.cmd`` batch shims; Windows ``CreateProcess``
+    — which the asyncio subprocess used by the MCP SDK calls — cannot execute a
+    ``.cmd``/``.bat`` directly (it fails with ``WinError 2``), even when the file is
+    on PATH. Hand those to ``cmd.exe``, which knows how to run them. Real ``.exe``
+    commands (``uvx``, ``python``, …) are launched directly and left untouched.
+    """
+    import shutil
+    import sys
+
+    if sys.platform != "win32":
+        return command, args
+    resolved = shutil.which(command)
+    if resolved and resolved.lower().endswith((".cmd", ".bat")):
+        return "cmd", ["/c", command, *args]
+    return command, args
+
+
 def _open_streams(server: McpServerConfig):
     """Return the (read, write) stream context manager for ``server``'s transport.
 
@@ -55,8 +75,9 @@ def _open_streams(server: McpServerConfig):
             value = resolve_env(name)
             if value is not None:
                 env[name] = value
+        command, args = _windows_stdio_command(server.command, server.args)
         return stdio_client(
-            StdioServerParameters(command=server.command, args=server.args, env=env)
+            StdioServerParameters(command=command, args=args, env=env)
         )
 
     headers = _bearer_headers(server)
