@@ -196,7 +196,11 @@
     const displayName = () => $("display_name").value.trim();
     function syncTarget() {
       if (!targetEdited && generateBase) {
-        $("target_dir").value = generateBase.replace(/[\\/]+$/, "") + "/" + currentSlug();
+        // Join with the base path's own separator: a Windows base (D:\...\generate)
+        // joined with a hardcoded "/" yields a mixed "...\generate/slug".
+        const base = generateBase.replace(/[\\/]+$/, "");
+        const sep = base.includes("\\") ? "\\" : "/";
+        $("target_dir").value = base + sep + currentSlug();
       }
     }
     $("project_slug").addEventListener("input", () => { slugEdited = true; syncTarget(); });
