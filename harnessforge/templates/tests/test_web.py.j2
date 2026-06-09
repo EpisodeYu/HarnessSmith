@@ -693,6 +693,9 @@ def test_index_has_ask_card_ui():
     assert 'addEventListener("ask"' in body
     assert "/respond" in body
     assert "ask_other" in body and "__other__" in body  # Cursor-style "Other…" choice
+    # Streamed text is split into a fresh line whenever a card / tool line is
+    # interleaved (so a later step's answer lands BELOW the cards, not above).
+    assert body.count("answer = null") >= 3
     assert "window.confirm" not in body and "window.prompt" not in body
 {% if spec.memory.enabled %}
 

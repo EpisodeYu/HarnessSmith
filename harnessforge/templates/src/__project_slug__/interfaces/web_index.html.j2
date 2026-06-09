@@ -819,15 +819,18 @@
         log.scrollTop = log.scrollHeight;
       });
       es.addEventListener("ask", (ev) => {
+        answer = null;  // a later text run starts a NEW line BELOW the card
         renderAskCard(JSON.parse(ev.data));  // inline card; answer POSTs to /respond
       });
       es.addEventListener("tool_call", (ev) => {
         const d = JSON.parse(ev.data);
+        answer = null;  // close the current text run so the next one lands below this
         if (d.name === "ask_question") return;  // shown as the ask card instead
         line("→ tool " + d.name + " " + d.arguments, "text-amber-700");
       });
       es.addEventListener("tool_result", (ev) => {
         const d = JSON.parse(ev.data);
+        answer = null;  // next streamed text gets a fresh line below the tool output
         if (d.name === "ask_question") return;  // the answer is already on the card
         line("← " + d.name + ": " + d.result, "text-emerald-700");
       });

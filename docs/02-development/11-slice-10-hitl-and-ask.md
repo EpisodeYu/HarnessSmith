@@ -72,7 +72,7 @@
 >
 > **交互形态(2026-06-09 人确认 + 实机反馈修订)**:① 选项由 **LLM 自己构造**(工具参数 `options: string[]`,调用时填);② **多选**支持(`allow_multiple`,Web checkbox / CLI 逗号分隔,`option_ids` 列表);③ **自定义输入做成 Cursor 式"最后一项 = 其他…",且对 question 恒定可用**:asker **在 UI 层**自动追加一个"Other…"项(Web 单选时收起文本框、选中才展开;CLI 末尾加 `[N+1] Other`,选中后再追问自定义文本)——`AskRequest.options` 仍**逐字**是模型给的选项,"Other"是 CLI/Web 各自合成、映射回既有 `text` 字段,不改协议/工具签名。工具描述已提示模型**不要自己再加 "Other" 选项**。
 >
-> **实机反馈修订(2026-06-09)**:① **去掉 `allow_free_text` 参数**——之前模型偶尔传 `false` 导致单选题没有自定义框、用户被困在固定选项里;现在 question **始终** `allow_text=True`(模型无法剥夺用户自定义输入的能力,对齐 Cursor);`allow_text` 仅对未来的 approval 卡片(只 allow/reject 按钮)取 false。② **Web 卡片答完即坍缩成一行摘要**(`❓ 问题 → 选中/自定义`),随对话流自然上滚,不再有大块交互控件钉在底部;并**抑制 `ask_question` 的 `→/← tool` 流水行**(卡片已表达该次交互),避免重复。
+> **实机反馈修订(2026-06-09)**:① **去掉 `allow_free_text` 参数**——之前模型偶尔传 `false` 导致单选题没有自定义框、用户被困在固定选项里;现在 question **始终** `allow_text=True`(模型无法剥夺用户自定义输入的能力,对齐 Cursor);`allow_text` 仅对未来的 approval 卡片(只 allow/reject 按钮)取 false。② **Web 卡片答完即坍缩成一行摘要**(`❓ 问题 → 选中/自定义`),随对话流自然上滚,不再有大块交互控件钉在底部;并**抑制 `ask_question` 的 `→/← tool` 流水行**(卡片已表达该次交互),避免重复。③ **修复流式文本与卡片错位**(实机:一回合连问多题时,模型最终总结显示在所有卡片**上方**)——根因是前端把整轮流式文本复用同一个 `answer` DOM 元素(在 step 0 的前导文本处创建,位于卡片上方,后续 step 的总结又追加进去);改为**每当插入卡片/工具行就 `answer = null`**,让后续 token 另起新行落到卡片**下方**(前导文本仍在卡片上方,符合对话顺序)。此前置 bug 非 ask 专属,任何"多步 + 步间都产文本 + 工具输出穿插"都会触发,本次一并修。
 
 - **新增内置工具 `ask_question`**(`harness/tools.py`,`risk=safe`,默认随产物生成 + 默认进 `config.yaml` allowlist):
   - 参数 schema:`question: str`、`options: string[]`(可空 = 纯文本问)、`allow_multiple: bool=false`。自由文本恒开(Cursor 式 "Other" 逃生口),不再有 `allow_free_text` 开关。
