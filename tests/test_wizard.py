@@ -256,6 +256,43 @@ def test_generate_status_unknown_job_is_404(client):
     assert client.get("/generate/status/nope").status_code == 404
 
 
+def test_product_env_drops_parent_venv(monkeypatch):
+    """The product's uv calls must NOT inherit the wizard's own VIRTUAL_ENV: the
+    wizard runs inside HarnessForge's venv (via ``uv run``), and on Windows the
+    product's ``uv sync`` would then fight the running parent over that venv's
+    locked files and never finish. A launcher-set mirror is preserved."""
+    import harnessforge.wizard.app as app_mod
+
+    monkeypatch.setenv("VIRTUAL_ENV", "/wizard/.venv")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/wizard/.venv")
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://mirror.example/simple")
+    env = app_mod._product_env()
+    assert "VIRTUAL_ENV" not in env
+    assert "UV_PROJECT_ENVIRONMENT" not in env
+    assert env["UV_DEFAULT_INDEX"] == "https://mirror.example/simple"
+
+
+def test_run_launch_reports_sync_failure_without_hanging(tmp_path, monkeypatch):
+    """A non-zero ``uv sync`` marks the sync step 'error' and records a message
+    with the log path + tail, then the worker returns — the UI stops spinning
+    instead of hanging on a stuck install."""
+    import harnessforge.wizard.app as app_mod
+
+    monkeypatch.setattr(
+        app_mod, "_uv_sync", lambda target_dir: (124, "error: failed to fetch index")
+    )
+    job = app_mod._new_job()
+    app_mod._run_launch(job, tmp_path, "my_harness")
+
+    sync = next(s for s in job["steps"] if s["key"] == "sync")
+    assert sync["status"] == "error"
+    assert job["done"] is False
+    assert ".setup.log" in job["error"]
+    assert "failed to fetch index" in job["error"]
+    # serve must not start once sync failed
+    assert next(s for s in job["steps"] if s["key"] == "serve")["status"] == "pending"
+
+
 def test_generate_does_not_launch_without_web(client, tmp_path, monkeypatch):
     """A CLI-only spec (no Web) is render-only even with ``launch`` requested."""
     import harnessforge.wizard.app as app_mod

@@ -22,6 +22,7 @@ keeping the core CLI / ``uvx harnessforge new`` free of the wizard dependencies.
 
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 import sys
@@ -195,13 +196,67 @@ def _wait_port(host: str, port: int, *, timeout: float = 300.0) -> bool:
     return False
 
 
-def _uv_sync(target_dir: Path) -> int:
-    """Run ``uv sync`` in the generated repo (installs deps); return the exit code.
-    Output is captured to ``<target>/.setup.log`` for troubleshooting."""
-    with (target_dir / ".setup.log").open("w", encoding="utf-8") as log:
-        return subprocess.run(  # noqa: S603 — local dev convenience, fixed argv
-            ["uv", "sync"], cwd=str(target_dir), stdout=log, stderr=subprocess.STDOUT
-        ).returncode
+# Generous upper bound on the product's first ``uv sync`` — it may download a
+# managed Python plus a handful of wheels. Long enough for a slow-but-working
+# mirror to finish, short enough that a truly stalled fetch (a blocked index or
+# Python download) surfaces an error instead of hanging the wizard forever.
+_UV_SYNC_TIMEOUT = 600.0
+
+
+def _product_env() -> dict[str, str]:
+    """Environment for the product's own ``uv`` invocations.
+
+    The wizard is itself launched by ``uv run`` *inside HarnessForge's venv*,
+    which exports ``VIRTUAL_ENV`` (and sometimes ``UV_PROJECT_ENVIRONMENT``)
+    pointing at that venv. Inherited unchanged, the product's ``uv sync`` /
+    ``uv run`` would target the wizard's environment instead of the product's
+    own ``.venv`` — and on Windows, where files in an in-use venv are locked,
+    that means fighting the still-running parent, so the sync never finishes.
+    Dropping those keys lets uv resolve the product's own ``.venv``. Anything
+    the launcher set (a mirror via ``UV_DEFAULT_INDEX``, ``UV_PYTHON_PREFERENCE``)
+    is preserved.
+    """
+    env = dict(os.environ)
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("UV_PROJECT_ENVIRONMENT", None)
+    return env
+
+
+def _log_tail(path: Path, lines: int = 3) -> str:
+    """Last few non-empty log lines, joined into a single-line status hint."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    kept = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return " | ".join(kept[-lines:])
+
+
+def _uv_sync(target_dir: Path) -> tuple[int, str]:
+    """Run ``uv sync`` in the generated repo (installs deps).
+
+    Returns ``(exit_code, log_tail)``; output is captured to ``<target>/.setup.log``
+    for troubleshooting. A timeout maps to exit code 124 (after killing the child)
+    so the caller reports a failure instead of leaving the UI spinning forever."""
+    log_path = target_dir / ".setup.log"
+    with log_path.open("w", encoding="utf-8") as log:
+        try:
+            code = subprocess.run(  # noqa: S603 — local dev convenience, fixed argv
+                ["uv", "sync"],
+                cwd=str(target_dir),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=_product_env(),
+                timeout=_UV_SYNC_TIMEOUT,
+            ).returncode
+        except subprocess.TimeoutExpired:
+            log.write(
+                f"\n[harnessforge] uv sync exceeded {int(_UV_SYNC_TIMEOUT)}s and was "
+                "aborted — the package index or a managed-Python download may be "
+                "unreachable (behind a firewall, try a mirror).\n"
+            )
+            code = 124
+    return code, _log_tail(log_path)
 
 
 def _launch_product(target_dir: Path, project_slug: str, port: int, *, host: str = "127.0.0.1") -> None:
@@ -216,6 +271,7 @@ def _launch_product(target_dir: Path, project_slug: str, port: int, *, host: str
         cwd=str(target_dir),
         stdout=log,
         stderr=subprocess.STDOUT,
+        env=_product_env(),
         start_new_session=True,
     )
     _LAUNCHED.append(proc)
@@ -245,9 +301,11 @@ def _run_launch(job: dict, target_dir: Path, project_slug: str, *, host: str = "
     """Worker: ``uv sync`` then start serve, updating ``job`` step-by-step."""
     try:
         _set_step(job, "sync", "running")
-        if _uv_sync(target_dir) != 0:
+        code, log_tail = _uv_sync(target_dir)
+        if code != 0:
             _set_step(job, "sync", "error")
-            job["error"] = f"uv sync failed (see {target_dir / '.setup.log'})"
+            hint = f" Last log: {log_tail}" if log_tail else ""
+            job["error"] = f"uv sync failed (see {target_dir / '.setup.log'})." + hint
             return
         _set_step(job, "sync", "done")
 
