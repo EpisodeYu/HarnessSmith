@@ -3,9 +3,11 @@
 Generated only when ``interfaces.web`` is enabled. ``/chat`` streams the loop's
 progress over Server-Sent Events by listening on the existing :class:`Hooks`
 extension point — the loop itself is untouched. ``/config`` reads and edits the
-*runtime behavioral* config in-process (prompts, budget, enabled tools, context,
-sampling) and never exposes secrets: profiles only carry env-var NAMES. Edits
-apply to the running process; restart reloads ``config.yaml`` from disk.
+*runtime behavioral* config (prompts, budget, enabled tools, context, sampling)
+and never exposes secrets: profiles only carry env-var NAMES. A Save applies the
+edit to the running process AND persists it back to ``config.yaml`` (comments
+preserved, via ruamel.yaml), so a restart keeps it instead of reverting to the
+file. Structural config (which interfaces / modules exist) is not editable here.
 
 Run it with ``{{ project_slug }} serve`` or ``uvicorn``.
 """
@@ -24,9 +26,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from ..harness.config import (
     Config,
     ConfigError,
+    DEFAULT_CONFIG_PATH,
     LLMProfileConfig,
     load_config,
     resolve_env,
+    save_config,
     set_env_value,
 )
 from ..harness.budget import BUDGET_CONDITIONS
@@ -256,10 +260,26 @@ def _chat_events(
                 runs.pop(run_id, None)
 
 
-def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
-    """Build the FastAPI app. ``config`` defaults to ``load_config()`` (config.yaml)."""
+def create_app(
+    config: Config | None = None,
+    *,
+    mock: bool = False,
+    config_path: str | Path | None = None,
+) -> FastAPI:
+    """Build the FastAPI app.
+
+    With no ``config`` it loads ``config_path`` (default ``config.yaml``) and
+    keeps that path so a ``/config`` Save persists back to it. When ``config`` is
+    passed in (e.g. tests) the path is only tracked if given explicitly — a
+    config built in code (no path) never gets written to a stray file.
+    """
     app = FastAPI(title="{{ display_name }} — web")
-    app.state.config = config or load_config()
+    if config is None:
+        config_path = config_path or DEFAULT_CONFIG_PATH
+        config = load_config(config_path)
+    app.state.config = config
+    # Where a /config Save writes back to (None = apply in-process, don't persist).
+    app.state.config_path = Path(config_path) if config_path is not None else None
     app.state.mock = mock
     # In-flight chat runs: run_id -> cancel Event, so POST /chat/{run_id}/stop can
     # signal a running loop. The lock guards the dict across worker threads.
@@ -501,6 +521,21 @@ def create_app(config: Config | None = None, *, mock: bool = False) -> FastAPI:
             app.state.config = Config.model_validate(current)
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        # Persist the editable fields back to config.yaml (comments preserved) so
+        # the edit survives a restart, not just this process. exclude_none keeps
+        # unset knobs from being written out as explicit `null`s; secrets are
+        # never in _EDITABLE_FIELDS, so only env-var NAMES ever reach the file.
+        if app.state.config_path is not None:
+            updates = app.state.config.model_dump(
+                mode="json", include=set(_EDITABLE_FIELDS), exclude_none=True
+            )
+            try:
+                save_config(updates, app.state.config_path)
+            except Exception as exc:
+                return JSONResponse(
+                    {"error": f"applied in-process but could not write config.yaml: {exc}"},
+                    status_code=500,
+                )
         return app.state.config.model_dump(mode="json", include=set(_EDITABLE_FIELDS))
 
     @app.get("/rules")

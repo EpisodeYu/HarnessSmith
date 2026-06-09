@@ -384,8 +384,10 @@ tab's dropdowns{% endif %} — and a config name that isn't registered is flagge
   which calls the client's `stream()` instead of `complete()`. Set `stream=false`
   for a single non-streamed response.
 - `GET|POST /config` — read/edit the **runtime behavioral** config (the same
-  fields as `config.yaml`). Edits apply in-process; restart reloads from disk.
-  Secrets are never returned or editable — profiles only carry env-var names.
+  fields as `config.yaml`). A POST applies in-process AND writes the edited
+  fields back to `config.yaml` (comments preserved via ruamel.yaml), so it
+  survives a restart. Secrets are never returned or editable — profiles only
+  carry env-var names, so only NAMES are ever written to the file.
 
 The CLI streams too: `{{ project_slug }} run --stream "..."`. To stream from your
 own code, pass `on_delta` (a `Callable[[str], None]`) to `run()`.

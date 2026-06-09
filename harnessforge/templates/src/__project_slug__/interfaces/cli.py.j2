@@ -688,7 +688,10 @@ def serve(
             f"    ssh -L {bind_port}:127.0.0.1:{bind_port} <user>@<host>",
             fg=typer.colors.BRIGHT_BLACK,
         )
-    uvicorn.run(create_app(config, mock=mock), host=host, port=bind_port)
+    # Pass config_path so a /config panel Save persists back to this file.
+    uvicorn.run(
+        create_app(config, mock=mock, config_path=config_path), host=host, port=bind_port
+    )
 {% endif %}
 
 if __name__ == "__main__":

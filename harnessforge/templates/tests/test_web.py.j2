@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from {{ project_slug }}.harness.config import Config, ConfigError, set_env_value
+from {{ project_slug }}.harness.config import Config, ConfigError, load_config, set_env_value
 from {{ project_slug }}.interfaces.web import create_app
 
 
@@ -341,6 +341,50 @@ def test_config_post_ignores_structural_and_secret_keys():
     assert "sk-leak" not in resp.text
     # structural identity is untouched (project_slug is not an editable field)
     assert "hacked" not in resp.text
+
+
+def test_config_post_persists_to_yaml_preserving_comments(tmp_path):
+    """A Save writes the edit back to config.yaml (so it survives a restart) while
+    keeping the file's comments — not just an in-process change. Comments on/before
+    keys survive; an inline comment inside a wholesale-replaced list (llms/tools)
+    is the accepted exception, so it isn't asserted here."""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "# my hand-written config\n"
+        "llms:\n"
+        "  - name: default\n"
+        "    model: mock-model\n"
+        "roles:\n"
+        "  generation: default\n"
+        "# behavioral prompt section\n"
+        "prompts:\n"
+        "  system: original\n"
+        "observability:\n"
+        "  trace: false\n"
+        "sessions:\n"
+        "  enabled: false\n",
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(mock=True, config_path=cfg_path))
+    resp = client.post("/config", json={"prompts": {"system": "PERSISTED"}})
+    assert resp.status_code == 200
+
+    text = cfg_path.read_text(encoding="utf-8")
+    assert "PERSISTED" in text  # written to disk, not only in-process
+    assert "# my hand-written config" in text  # document comment kept
+    assert "# behavioral prompt section" in text  # key comment kept (PyYAML would drop it)
+    # a fresh load (simulating a restart) sees the persisted value
+    assert load_config(cfg_path).prompts.system == "PERSISTED"
+
+
+def test_config_post_without_path_does_not_write_file(tmp_path, monkeypatch):
+    """An app built from an in-code config (no config_path) applies edits in the
+    running process but never creates a stray config.yaml on disk."""
+    monkeypatch.chdir(tmp_path)
+    client = _client()  # create_app(config, ...) with no config_path
+    assert client.post("/config", json={"prompts": {"system": "x"}}).status_code == 200
+    assert client.get("/config").json()["prompts"]["system"] == "x"  # live in-process
+    assert not (tmp_path / "config.yaml").exists()  # but nothing written
 
 
 def test_set_env_value_writes_and_updates(tmp_path):

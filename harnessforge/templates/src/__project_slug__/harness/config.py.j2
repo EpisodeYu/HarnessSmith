@@ -414,3 +414,44 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Config:
     if not isinstance(data, dict):
         raise ConfigError("config.yaml must be a YAML mapping at the top level")
     return Config.model_validate(data)
+{% if interfaces.web %}
+
+def _deep_merge_into(target: Any, source: dict) -> None:
+    """Update ``target`` (a ruamel round-trip mapping) in place from ``source``.
+
+    Recurses into nested mappings so a scalar tweak keeps its neighbours' inline
+    comments; lists and scalars are replaced wholesale (a list's leading comment
+    stays, but per-item inline comments on a rewritten list are not preserved).
+    """
+    for key, value in source.items():
+        if key in target and isinstance(value, dict) and hasattr(target[key], "items"):
+            _deep_merge_into(target[key], value)
+        else:
+            target[key] = value
+
+
+def save_config(updates: dict, path: str | Path = DEFAULT_CONFIG_PATH) -> bool:
+    """Write ``updates`` (a subset of config fields) back to ``config.yaml``.
+
+    Used by the web ``/config`` panel so a Save persists to disk instead of only
+    living in the running process. Uses a comment-preserving YAML round-trip
+    (``ruamel.yaml``): the file's comments and the commented-out example knobs are
+    kept; only the given top-level keys are merged in. ``updates`` must hold no
+    secrets — the panel passes only env-var NAMES (never key values). Returns
+    ``False`` (no write) when ``path`` doesn't exist, so callers given an
+    in-memory-only config (e.g. tests) never create a stray file. The import is
+    local because ``ruamel.yaml`` ships only with the web interface.
+    """
+    path = Path(path)
+    if not path.exists():
+        return False
+    from ruamel.yaml import YAML
+
+    yaml_rt = YAML()
+    yaml_rt.preserve_quotes = True
+    data = yaml_rt.load(path.read_text(encoding="utf-8")) or {}
+    _deep_merge_into(data, updates)
+    with path.open("w", encoding="utf-8") as handle:
+        yaml_rt.dump(data, handle)
+    return True
+{% endif %}

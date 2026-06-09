@@ -48,7 +48,7 @@
       </section>
 
       <section id="view-config" class="hidden flex-1 space-y-4 overflow-y-auto px-6 py-4">
-      <p class="text-sm text-slate-500" data-i18n="cfg_intro">Runtime behavioral config (no secrets). Edits apply in-process.</p>
+      <p class="text-sm text-slate-500" data-i18n="cfg_intro">Runtime behavioral config (no secrets). Save applies it live and writes it back to config.yaml.</p>
       <nav id="cfg-tabs" class="flex flex-wrap gap-1 border-b text-sm"></nav>
 
       <div data-cfg="llm" class="space-y-3">
@@ -189,7 +189,7 @@
         reask_warn: "This discards the conversation after this point.", reask_confirm: "Regenerate",
         no_llm: "No LLM is configured yet — set a model (and its API key) before you can chat.",
         no_llm_link: "Go to Config → LLM",
-        cfg_intro: "Runtime behavioral config (no secrets). Edits apply in-process.",
+        cfg_intro: "Runtime behavioral config (no secrets). Save applies it live and writes it back to config.yaml.",
         cfg_save: "Save", cfg_reload: "Reload", cfg_saved: "saved", cfg_invalid: "rejected",
         cfg_unsaved: "unsaved",
         cfg_leave_confirm: "You have unsaved config changes — they won't apply until you Save. Switch to Chat anyway?",
@@ -261,7 +261,7 @@
         reask_warn: "这会丢弃此处之后的对话。", reask_confirm: "重新生成",
         no_llm: "尚未配置 LLM —— 请先设置一个 model(及其 API key)才能对话。",
         no_llm_link: "前往 配置 → LLM",
-        cfg_intro: "运行期行为性配置(无密钥)。修改进程内即时生效。",
+        cfg_intro: "运行期行为性配置(无密钥)。保存即时生效并写回 config.yaml。",
         cfg_save: "保存", cfg_reload: "重载", cfg_saved: "已保存", cfg_invalid: "被拒绝",
         cfg_unsaved: "未保存",
         cfg_leave_confirm: "有未保存的配置修改 —— 不点保存不会生效。仍要切换到对话?",

@@ -294,6 +294,7 @@ def test_web_disabled_omits_web_files_and_deps(tmp_path, preset_spec):
     assert "fastapi" not in pyproject
     assert "uvicorn" not in pyproject
     assert "httpx" not in pyproject
+    assert "ruamel" not in pyproject  # comment-preserving write-back is web-only
 
     cli = (pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
     assert "def serve(" not in cli
@@ -312,6 +313,7 @@ def test_web_enabled_generates_web_files_and_deps(tmp_path, spec):
     pyproject = (out / "pyproject.toml").read_text(encoding="utf-8")
     assert "fastapi" in pyproject and "uvicorn" in pyproject
     assert "httpx" in pyproject  # test dep for fastapi.testclient
+    assert "ruamel.yaml" in pyproject  # comment-preserving /config write-back
     # never an agent framework, even with web enabled
     lowered = pyproject.lower()
     for forbidden in ("langchain", "langgraph", "adk"):

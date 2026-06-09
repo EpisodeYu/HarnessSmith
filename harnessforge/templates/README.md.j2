@@ -112,7 +112,8 @@ panel for the runtime behavioral config (prompts, budget, enabled tools,
 context, sampling). Streaming is toggleable; secrets are never shown or editable.
 Panel edits only take effect when you hit **Save** — the panel marks unsaved
 changes and warns before you switch tabs or reload, so a configured LLM profile
-isn't lost by forgetting to save.
+isn't lost by forgetting to save. **Save** both applies the edit live and writes
+it back to `config.yaml` (your comments are preserved), so it survives a restart.
 
 ```bash
 uv run {{ project_slug }} serve                 # http://127.0.0.1:8000

@@ -64,6 +64,7 @@ def test_golden_web_enabled_generates_locks_and_smoke_passes(tmp_path):
     lock_dependencies(out)
     lock_text = (out / "uv.lock").read_text(encoding="utf-8").lower()
     assert "fastapi" in lock_text and "uvicorn" in lock_text
+    assert "ruamel" in lock_text  # comment-preserving /config write-back dep
     for forbidden in FORBIDDEN:
         assert forbidden not in lock_text, f"{forbidden} in uv.lock"
 
