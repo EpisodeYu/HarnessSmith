@@ -94,6 +94,32 @@ class Registry:
     def schemas(self, names: list[str]) -> list[dict]:
         return [self._tools[name].schema() for name in names if name in self._tools]
 
+    def risk_of(self, name: str) -> str:
+        """The tool's risk level (``HIGH`` for an unknown name — the safe default)."""
+        tool = self._tools.get(name)
+        return tool.risk if tool is not None else HIGH
+
+    def confirm_names(self, policy: str | list[str] | None) -> set[str]:
+        """Tool names that need HITL confirmation under ``policy`` (``config.confirm``).
+
+        Fail-closed by allowlist, not by per-call risk scoring: ``"none"`` / empty
+        confirms nothing (default); ``"all"`` confirms every registered tool
+        (read-only included); ``"high"`` confirms ``risk="high"`` tools (shell /
+        file-writes / other mutating tools); a list confirms exactly the named tools.
+        The execution boundary (``run_tool``) consults this set, so a tool not
+        offered in the current mode never reaches confirmation anyway.
+        """
+        if not policy or policy == "none":
+            return set()
+        if policy == "all":
+            return set(self._tools)
+        if policy == "high":
+            return {n for n, t in self._tools.items() if t.risk == HIGH}
+        if isinstance(policy, (list, tuple, set)):
+            wanted = {str(x) for x in policy}
+            return {n for n in self._tools if n in wanted}
+        return set()
+
     def call(self, name: str, arguments: str) -> str:
         """Execute a tool by name with JSON-encoded arguments; return a string."""
         tool = self.get(name)

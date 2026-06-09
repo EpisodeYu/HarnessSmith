@@ -357,16 +357,41 @@
     // inline (no native browser dialogs).
     function renderAskCard(data) {
       const runId = currentRunId;
+      const isApproval = data.kind === "approval";
       const card = document.createElement("div");
-      card.className = "ask-card rounded-lg border border-indigo-300 bg-indigo-50 p-3 space-y-2";
+      // Approval (HITL confirmation) gets an amber "action needed" tint; a model
+      // question keeps the indigo card.
+      card.className = "ask-card rounded-lg border p-3 space-y-2 " +
+        (isApproval ? "border-amber-300 bg-amber-50" : "border-indigo-300 bg-indigo-50");
       const prompt = document.createElement("div");
       prompt.className = "font-medium text-slate-800 whitespace-pre-wrap";
       prompt.textContent = data.prompt;
       card.appendChild(prompt);
-      if (data.kind === "approval" && data.context && data.context.tool) {
+      if (isApproval && data.context && data.context.tool) {
         const ctx = document.createElement("div");
-        ctx.className = "text-xs text-slate-500 whitespace-pre-wrap";
-        ctx.textContent = data.context.tool + " " + (data.context.arguments || "");
+        ctx.className = "text-xs space-y-1";
+        const head = document.createElement("div");
+        head.className = "flex items-center gap-2";
+        const toolName = document.createElement("code");
+        toolName.className = "rounded bg-slate-200 px-1 text-slate-800";
+        toolName.textContent = data.context.tool;
+        head.appendChild(toolName);
+        const risk = (data.context.risk || "").toLowerCase();
+        if (risk) {
+          const pill = document.createElement("span");
+          const high = risk === "high";
+          pill.className = "rounded px-1.5 text-[10px] font-medium " +
+            (high ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700");
+          pill.textContent = risk;
+          head.appendChild(pill);
+        }
+        ctx.appendChild(head);
+        if (data.context.arguments) {
+          const args = document.createElement("div");
+          args.className = "text-slate-500 whitespace-pre-wrap break-all";
+          args.textContent = data.context.arguments;
+          ctx.appendChild(args);
+        }
         card.appendChild(ctx);
       }
 
@@ -383,8 +408,9 @@
         let summary = picked.join(", ");
         if (text) summary = summary ? (summary + " · " + text) : text;
         if (!summary) summary = t("ask_skip");
-        card.className = "whitespace-pre-wrap text-sm text-indigo-700";
-        card.textContent = "❓ " + data.prompt + " → " + summary;
+        card.className = "whitespace-pre-wrap text-sm " +
+          (isApproval ? "text-amber-700" : "text-indigo-700");
+        card.textContent = (isApproval ? "🔒 " : "❓ ") + data.prompt + " → " + summary;
         log.scrollTop = log.scrollHeight;
         fetch("/chat/" + encodeURIComponent(runId) + "/respond", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -395,13 +421,18 @@
         }).catch(() => {});
       };
 
-      if (data.kind === "approval") {
+      if (isApproval) {
         const bar = document.createElement("div");
         bar.className = "flex flex-wrap gap-2";
         (data.options || []).forEach((o) => {
           const b = document.createElement("button");
           b.type = "button";
-          b.className = "rounded bg-slate-800 px-3 py-1 text-xs text-white";
+          // Highlight "allow for session" as the recommended default; reject is
+          // styled as the cautious choice; the rest are neutral.
+          const tone = o.id === "allow_session"
+            ? "bg-indigo-600 text-white"
+            : (o.id === "reject" ? "bg-white text-red-700 border border-red-300" : "bg-slate-700 text-white");
+          b.className = "rounded px-3 py-1 text-xs " + tone;
           b.textContent = o.label;
           b.addEventListener("click", () => submit([o.id], null));
           bar.appendChild(b);

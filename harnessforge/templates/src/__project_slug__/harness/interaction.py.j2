@@ -27,11 +27,19 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Iterator, Literal, Protocol, runtime_checkable
+from typing import Callable, Iterable, Iterator, Literal, Protocol, runtime_checkable
 
 # A question with no user to answer it returns this, so the model proceeds on its
 # own best judgment instead of the run hanging on an unanswerable prompt.
 NO_USER_NOTE = "(no interactive user available; proceed using your best judgment)"
+
+# HITL tool-confirmation decisions (the option ids the framework offers when a
+# tool needs the user's OK before it runs). The four mirror Codex CLI's
+# Accept once / Reject / Accept for session / add to policy:
+ALLOW_ONCE = "allow_once"      # run it this once; ask again next time
+REJECT = "reject"              # don't run it; feed the model an ERROR so it adapts
+ALLOW_SESSION = "allow_session"  # stop asking for this tool for this conversation
+ALLOW_ALWAYS = "allow_always"  # persist the allow: write the tool out of the policy
 
 
 @dataclass
@@ -141,3 +149,118 @@ def ask(req: AskRequest) -> AskResponse:
     if asker is None:
         asker = NonInteractiveAsker()
     return asker.ask(req)
+
+
+# --- HITL tool confirmation (opt-in guardrail) -------------------------------
+#
+# The second capability on this shared channel: before the loop runs a tool the
+# `confirm` policy flagged, pause and ask the user to allow or reject it. A
+# GUARDRAIL (threat model A — a trusted user fat-fingering a dangerous tool), NOT
+# a security boundary: code you own can bypass it, real isolation is Docker. It
+# uses the SAME ``ask()`` round-trip (``kind="approval"``), so non-interactive
+# runs and a stopped/disconnected web run reject by default (fail-closed).
+
+
+def approval_options() -> list[Option]:
+    """The four fixed choices shown on a tool-confirmation card."""
+    return [
+        Option(ALLOW_ONCE, "Allow once"),
+        Option(REJECT, "Reject"),
+        Option(ALLOW_SESSION, "Allow for this session"),
+        Option(ALLOW_ALWAYS, "Always allow"),
+    ]
+
+
+class ToolConfirmer:
+    """Decides whether a tool call must pause for the user's OK, and remembers
+    session/persistent allows.
+
+    ``needs`` is the set of tool names that require confirmation (derived from the
+    ``confirm`` policy — see ``Registry.confirm_names``). :meth:`check` asks unless
+    the tool is already allowed for this conversation (``_session``). The decision
+    drives the four outcomes: allow once (run, ask again), reject (refuse with an
+    ERROR the model can adapt to), allow for session (stop asking this
+    conversation), always allow (also call ``persist`` with the remaining ``needs``
+    so it is written out of the policy in ``config.yaml``).
+    """
+
+    def __init__(
+        self,
+        needs: Iterable[str],
+        *,
+        persist: Callable[[set[str]], None] | None = None,
+        session: set[str] | None = None,
+    ) -> None:
+        self.needs = set(needs)
+        # Called on "always allow" with the remaining set of names to confirm, so
+        # the caller can write it back to config.yaml (a category policy like
+        # "high" is frozen to that explicit list — a deliberate persistent choice).
+        self._persist = persist
+        # Names already allowed for THIS conversation (in-memory; reset on restart).
+        # Shared across a chat REPL / web session so "allow for session" sticks.
+        self._session = session if session is not None else set()
+
+    def check(self, name: str, arguments: str, risk: str) -> str | None:
+        """Decide whether tool ``name`` may run. Returns ``None`` to proceed, or the
+        refusal string to feed back as the tool result when the user rejects it.
+
+        A tool not in ``needs``, or already allowed for this conversation, proceeds
+        without asking (so confirmation off / a prior allow has zero overhead)."""
+        if name not in self.needs or name in self._session:
+            return None
+        response = ask(
+            AskRequest(
+                kind="approval",
+                prompt=f"Allow the agent to run the tool `{name}`?",
+                options=approval_options(),
+                allow_text=False,
+                context={"tool": name, "arguments": arguments, "risk": risk},
+            )
+        )
+        decision = response.selected or REJECT  # no choice (blank / degrade) = reject
+        if decision == REJECT:
+            return f"ERROR: user rejected tool {name!r}"
+        if decision == ALLOW_SESSION:
+            self._session.add(name)
+        elif decision == ALLOW_ALWAYS:
+            self._session.add(name)  # don't ask again this conversation either
+            self.needs.discard(name)
+            if self._persist is not None:
+                self._persist(set(self.needs))
+        return None
+
+
+# The HITL confirmer for the current turn (parallel to the asker). Default
+# ``None`` -> ``confirm_tool`` proceeds, so confirmation off is truly free.
+_CURRENT_CONFIRMER: ContextVar[ToolConfirmer | None] = ContextVar(
+    "current_confirmer", default=None
+)
+
+
+@contextmanager
+def using_confirmer(confirmer: ToolConfirmer | None) -> Iterator[ToolConfirmer | None]:
+    """Bind ``confirmer`` as the HITL gate for the duration of the ``with`` block.
+
+    Wrap a whole turn at the entry point (CLI ``run``/``chat``, the web worker
+    thread, set inside the thread since a ContextVar doesn't cross threads). A
+    ``None`` confirmer means confirmation is off. Restores the previous one on exit.
+    """
+    token = _CURRENT_CONFIRMER.set(confirmer)
+    try:
+        yield confirmer
+    finally:
+        _CURRENT_CONFIRMER.reset(token)
+
+
+def confirm_tool(name: str, arguments: str, risk: str) -> str | None:
+    """Consult the current HITL confirmer at the tool-execution boundary.
+
+    Returns the refusal string when the user rejected the call (fed back as the
+    tool result), or ``None`` to proceed — also ``None`` when no confirmer is set
+    (confirmation off = run the tool). This is the single entry ``run_tool`` uses,
+    mirroring how a tool body reaches the user through ``ask``.
+    """
+    confirmer = _CURRENT_CONFIRMER.get()
+    if confirmer is None:
+        return None
+    return confirmer.check(name, arguments, risk)

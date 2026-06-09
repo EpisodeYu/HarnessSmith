@@ -85,7 +85,11 @@
 
 ## 3. 计划 B:HITL 工具确认（后做,复用 §1 底座)
 
-- **触发配置(运行期,不进 spec)**:`config.yaml` 新增 `tools.confirm`(或顶层 `confirm` 段)= `none`(默认)/ `high` / `all` / 显式工具名列表。默认 `none` → 零痕迹、不破坏 golden。
+> **状态:✅ 已实现(2026-06-09)**。`config.yaml` 顶层新增 `confirm` 旋钮(`none` 默认 / `high` / `all` / 工具名列表),`Config.confirm` 字段 + 校验(空→`none`,非关键字裸串报错防误关)。确认走 **`harness/interaction.py` 的 `ToolConfirmer` + `using_confirmer` contextvar 注入 + 模块级 `confirm_tool()`**,在 `run_tool`(`paradigms/__init__.py`)执行边界拦截:`confirm_tool(name, args, registry.risk_of(name))` 返回拒绝串则不执行(返回 `ERROR: user rejected tool <name>`,模型自纠、循环不崩),否则照常 `registry.call`。四档 `allow_once`/`reject`/`allow_session`/`allow_always` 对齐 Codex。CLI(`run`/`chat` 各 `with using_confirmer(_build_confirmer(...))`,`chat` 复用同一 confirmer 让 session 放行跨轮)与 Web(`_chat_events` 每请求按 `config.confirm` 重建 confirmer,会话级放行集存 `app.state.confirm_sessions[session_id]`,worker 内 `using_confirmer`)均接线;非交互(无 asker)/ Web stop·断连(`None` 哨兵)经既有 asker 降级 → approval 选 `reject`(fail-closed)。前端 `web_index.html` 的 `event: ask` 卡片 approval 分支:工具名 + 参数预览 + 风险 pill(high 红 / safe 绿)+ 四按钮(默认高亮 `allow_session`、`reject` 描红),答完坍缩成 `🔒 …→ 决定` 摘要。
+>
+> **实现说明(与初版计划的偏差)**:① **触发配置是顶层 `confirm`** 而非 `tools.confirm`(`tools:` 已是列表,无法挂子键;§0 已留"或顶层 `confirm` 段"口子)。② **`run_tool` 未新增 `confirm_set` 形参**——改用与 asker 同一套 contextvar 注入(`using_confirmer`/`confirm_tool`),三个范式文件**逐字不动**(更薄、与 ask_question 的 contextvar 范式一致;§1.1 已确立该理由)。③ **`allow_always` 写回用 stdlib 的 `config.persist_confirm`**(只重写 `confirm:` 一行/块、保留全部注释)而非 web 专属的 ruamel `save_config`——因 `save_config`/ruamel 仅在 `interfaces.web` 时生成,CLI-only 产物没有;`persist_confirm` 始终生成、零新增依赖,两个入口共用。④ **`allow_always` 在分类策略(`high`/`all`)下会把策略"冻结"为剩余工具名的显式列表**(把该工具移出 confirm 集 = 写剩余集),是一次刻意的持久选择,已在 config 注释/AGENTS.md 标注。
+
+- **触发配置(运行期,不进 spec)**:`config.yaml` 顶层新增 `confirm`(实现落在顶层而非 `tools.confirm`,见上方实现说明)= `none`(默认)/ `high` / `all` / 显式工具名列表。默认 `none` → 零痕迹、不破坏 golden。
 - **确认边界 + allow 等级(干净 4 档,对齐 Codex CLI)**:在 `run_tool`(`paradigms/__init__.py:94`)执行工具前,若工具命中"要问集"(放行清单 − 会话已放行集),`ask(AskRequest(kind="approval", context={tool,args,risk}, options=[allow_once, reject, allow_session, allow_always]))` —— 这 4 档对齐 Codex 的 Accept once / Reject / **Accept for session** / **Accept and add to policy**(2026-06-09 调研,见 §5 取证):
   - `allow_once` → 执行本次,下次该工具再问。
   - `reject` → 不执行,返回 `ERROR: user rejected tool <name>`(模型可自纠;不崩循环,沿用 `run_tool` 既有 ERROR 语义)。
@@ -93,7 +97,7 @@
   - `allow_always` → 永久:写回 `config.yaml`(把该工具移出 `confirm` 集 / 加豁免,经 `save_config` 保注释;= Codex "add to policy")。
 - **持久度由档本身表达,不另设 `remember` 旋钮**:`allow_session`(内存)与 `allow_always`(写 config)已覆盖"记会话 vs 记持久"两级(人 2026-06-09 选"两者都给、默认 session";UI 默认高亮 `allow_session` 档)。
 - **不加 `allow_all_readonly`、不放"会话级全部放行"逐次档**(人 2026-06-09 签):只读靠默认豁免(`confirm` 不纳入 safe,或用 `high` 档);"会话级全放行"(Cline `--auto-approve`/Codex `never` 类)是 mode/flag 语义,用运行期把 `confirm` 临时切 `none` 等价覆盖,不进弹窗以免误点降护栏。
-- **不改 `before_tool` 语义**:`hooks.before_tool`(`hooks.py:22`)保持观察型;确认走 `interaction.ask()`(经 contextvar),`run_tool` 多接一个 `confirm_set: set[str] | None`。文档把"HITL 确认 live in before_tool"一句更新为"live at the tool-execution boundary via interaction.ask()"。
+- **不改 `before_tool` 语义**:`hooks.before_tool`(`hooks.py:22`)保持观察型;确认走 `interaction.confirm_tool()`(经 contextvar 读 `ToolConfirmer`,**未新增 `run_tool` 形参**,见实现说明②),live at the tool-execution boundary。
 - **非交互 / Web 公开面默认拒绝**:`NonInteractiveAsker` approval=reject;断连/超时=reject。
 - **红线**:确认是护栏非保证;**不**据此把 `shell`/写工具默认开(改 `01 §6` 需人签,见 §5 决策点④,沿用既有登记)。
 
@@ -101,15 +105,15 @@
 
 ## 4. 退出门禁（实现后逐项勾;A 先交付可单独绿,B 再补)
 
-> **实现进度(2026-06-09)**:**共享底座 + 计划 A(ask_question)已实现并全绿**;计划 B(HITL 工具确认)未做(下次任务)。下方与 A/底座相关的门禁已勾,B 专属门禁留空。
+> **实现进度(2026-06-09)**:**共享底座 + 计划 A(ask_question)+ 计划 B(HITL 工具确认)均已实现并全绿**(生成器快测 132 + golden 10 + Docker 2;产物自带 interaction/ask_question/HITL 四档/触发口径/persist_confirm/Web approval 往返测试;ReadLints clean)。下方门禁全部勾选。
 
 - [x] **黄金路径**:preset/web 生成 → `uv sync && pytest` 绿 → mock 跑通一次工具调用(mock `script=None` 调首个工具 `get_current_time`,ask_question 不会被误触;`--mock` 走 `NonInteractiveAsker`)。
 - [x] **共享底座**:`interaction.ask()` 经 contextvar 解析(`using_asker`);无 asker / 非交互 → 降级(question 返回"无用户、自行判断"不挂死、approval 选 reject)单测绿(`test_ask_resolves_via_contextvar_and_restores` / `test_noninteractive_degrades_question_and_rejects_approval`)。
 - [x] **ask_question(A)**:CLI(`CliAsker`,monkeypatch `typer.prompt` 注入假 stdin:数字→选项 id、文本→自由回答、空→跳过)与 Web(`WebAsker` + `POST /chat/{run_id}/respond`)各跑通一次"模型调 ask_question → 弹 `event: ask` → 回传 → 答案进 `tool_result`"(`test_ask_question_tool_feeds_answer_back_as_tool_result` / `test_ask_question_round_trips_over_web`);非 TTY/`--mock` 降级绿(`test_ask_question_tool_degrades_without_a_user`)。
-- [ ] **HITL(B)四档**:`allow_once`/`reject`/`allow_session`/`allow_always`(mock asker)绿;`reject` 返回 ERROR 且循环不崩;**非交互默认拒绝断言**;`allow_session` 本会话该工具不再问;`allow_always` 写回 `config.yaml`(注释保留)。
-- [ ] **触发口径**:`confirm` = `none`(零问)/ `high`(只高危)/ `all`(含只读)/ 工具名列表 各命中正确;只读默认豁免。
+- [x] **HITL(B)四档**:`allow_once`/`reject`/`allow_session`/`allow_always`(mock asker)绿(`test_confirm_allow_once_runs_but_asks_every_time` / `test_confirm_reject_returns_error_and_loop_survives` / `test_confirm_allow_session_then_stops_asking` / `test_confirm_allow_always_runs_and_persists_remaining_policy`);`reject` 返回 `ERROR: user rejected tool <name>` 且循环不崩;**非交互默认拒绝断言**(`test_confirm_non_interactive_rejects_fail_closed`);`allow_session` 本会话该工具不再问;`allow_always` 写回 `config.yaml`(`persist_confirm` 注释保留,`test_persist_confirm_rewrites_only_the_confirm_line`);Web approval 往返绿(`test_hitl_tool_confirmation_round_trips_over_web`)。
+- [x] **触发口径**:`confirm` = `none`(零问,`test_confirm_none_is_zero_overhead`)/ `high`(只高危)/ `all`(含只读)/ 工具名列表 各命中正确(`test_confirm_names_resolves_each_policy`);只读默认豁免;字段校验绿(`test_confirm_config_accepts_keywords_and_lists`)。
 - [x] **Web stop 联动**:stop / 断连(`GeneratorExit`)置 cancel 时,pending ask 立即解除(投 `None` 哨兵 → question 降级 / approval 拒绝),无挂起线程(`test_stop_unblocks_a_pending_ask_fail_closed`;`/respond` 幂等 `test_respond_endpoint_routes_answer_and_is_idempotent`)。
-- [x] **关闭仍薄(A 部分)**:ask_question 从 allowlist 移除(或 `enabled: false`)后不 offer;**无新增运行期依赖**(底座只用 stdlib `contextvars`;golden `uv.lock` FORBIDDEN 断言不含 langchain/langgraph/adk 全绿)。`confirm: none` 逐字不阻断属 B,随 B 验。
+- [x] **关闭仍薄**:ask_question 从 allowlist 移除(或 `enabled: false`)后不 offer;`confirm: none`(默认)零问/零阻断、golden mock 路径不触发确认(`test_confirm_none_is_zero_overhead` + golden 全绿);**无新增运行期依赖**(底座只用 stdlib `contextvars`,`persist_confirm` 只用 stdlib `re`/`pathlib`、CLI-only 也能写回;golden `uv.lock` FORBIDDEN 断言不含 langchain/langgraph/adk 全绿)。
 - [x] **大改动回归**:golden 全量(10 项:preset/web/mcp/multi-paradigm/thin/mcp-baseline/skills/memory/wizard/uvx)+ Docker build/run mock 全绿。
 - [x] `ReadLints` clean。
 
@@ -120,7 +124,7 @@
 - [x] **① ask_question 启用形态(人 2026-06-09 签:不动 spec)**:当内置工具直接生成 + 默认进 allowlist,`interaction.py` 底座始终生成(同范式注册表先例);要关 = 运行期移出 allowlist。不加 spec 开关(不触 `CLAUDE.md §6.1` 改 spec schema)。
 - [x] **② allow 等级集合(人 2026-06-09 签:干净 4 档)**:`allow_once / reject / allow_session / allow_always`,对齐 Codex Accept once / Reject / Accept for session / add to policy。**不加 `allow_all_readonly`**(只读默认豁免);**不放"会话级全放行"逐次档**(用运行期 `confirm=none` 等价)。`allow_session` 即"会话内该工具全放行"(人问及,已含)。
 - [x] **③ always-allow 记到哪(人 2026-06-09 签:两者都给、默认 session)**:由 `allow_session`(内存)+ `allow_always`(写回 `config.yaml`,经 `save_config` 保注释)两档表达,不另设 `remember` 旋钮;UI 默认高亮 `allow_session`。
-- [ ] **④ 是否据 HITL 把 `shell`/写工具默认开**:= 改 `01 §6` 全局口径,**默认不动**(确认只是额外闸,危险工具仍默认不启用),沿用既有登记。
+- [x] **④ 是否据 HITL 把 `shell`/写工具默认开(实现保持默认不动,未触 `01 §6`)**:HITL 确认只是**额外闸**,与"危险工具默认不启用 / 锁能力靠生成期不编译"正交——实现**未**因有了确认就把 `shell`/写工具默认开,`config.yaml` 默认 `confirm: none` 且高危工具仍默认 `enabled: false`,需要时人各自显式开。改全局口径仍走 `CLAUDE.md §6`,本片不触。
 - **软确认(`§5.3` 可自主)**:`request_id`/`run_id` 风格沿用 `uuid4().hex[:12]`;contextvar 注入而非新增 `run()` 形参;前端卡片复用 Slice 8/9 内联确认范式。
 
 ---

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_CONFIG_PATH = "config.yaml"
@@ -319,6 +319,16 @@ class Config(BaseModel):
     # without editing the loop. See ``harness/extensions.py``.
     extensions: list[str] = Field(default_factory=list)
     hooks: str | None = None
+    # HITL tool confirmation (opt-in guardrail; default off). Which tools must
+    # pause for the user's OK before they run: ``"none"`` (default — confirm
+    # nothing, so the golden path is untouched), ``"high"`` (only ``risk="high"``
+    # tools — shell / file-writes / other mutating tools), ``"all"`` (every tool,
+    # read-only included), or an explicit list of tool names. A GUARDRAIL (a
+    # trusted user fat-fingering a dangerous tool), NOT a security boundary — code
+    # you own can bypass it; real isolation is Docker / not compiling a capability
+    # in. Non-interactive runs (pipe / CI / ``--mock``) and a stopped/disconnected
+    # web run reject by default (fail-closed). See ``harness/interaction.py``.
+    confirm: str | list[str] = "none"
 {% if spec.mcp.enabled %}    mcp: McpConfig = Field(default_factory=McpConfig)
 {% endif %}{% if spec.skills.enabled %}    skills: SkillsConfig = Field(default_factory=SkillsConfig)
 {% endif %}{% if spec.memory.enabled %}    memory: MemoryConfig = Field(default_factory=MemoryConfig)
@@ -342,6 +352,26 @@ class Config(BaseModel):
                 if key in data and data[key] is None:
                     data[key] = default
         return data
+
+    @field_validator("confirm", mode="before")
+    @classmethod
+    def _check_confirm(cls, value: Any) -> Any:
+        """Accept the keyword policies (``none``/``high``/``all``) or a list of tool
+        names; coerce empty (``confirm:`` with no value) to ``"none"``. A bare
+        string that isn't a keyword is rejected with a hint (use a list for a single
+        tool name) so a typo can't silently disable confirmation."""
+        if value is None:
+            return "none"
+        if isinstance(value, str):
+            if value not in {"none", "high", "all"}:
+                raise ValueError(
+                    f"confirm must be 'none', 'high', 'all', or a list of tool "
+                    f"names (got {value!r}; for one tool use a list: [{value!r}])"
+                )
+            return value
+        if isinstance(value, (list, tuple)):
+            return [str(x) for x in value]
+        raise ValueError("confirm must be a keyword (none/high/all) or a list of tool names")
 
     def profile_for(self, role: str = "generation") -> LLMProfileConfig:
         """Return the LLM profile bound to ``role`` (single profile in Slice 1)."""
@@ -414,6 +444,37 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Config:
     if not isinstance(data, dict):
         raise ConfigError("config.yaml must be a YAML mapping at the top level")
     return Config.model_validate(data)
+
+
+_CONFIRM_KEY_RE = re.compile(r"^confirm\s*:")
+
+
+def persist_confirm(policy: str | list[str], path: str | Path = DEFAULT_CONFIG_PATH) -> bool:
+    """Rewrite the top-level ``confirm:`` HITL policy in ``config.yaml`` in place.
+
+    Used by an "always allow" decision to write a tool out of the confirmation
+    policy. Stdlib-only and comment-safe (no ruamel needed, so it also works in
+    CLI-only builds that don't ship the web extra): only the ``confirm:`` value
+    line — plus any indented block-style continuation — is replaced; every comment
+    and other key is left untouched. A list is written inline (``[a, b]``); a
+    keyword is written as-is. Returns ``False`` (no write) when ``path`` is missing
+    or has no ``confirm:`` key, so an in-memory-only config never spawns a file.
+    """
+    path = Path(path)
+    if not path.exists():
+        return False
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = next((i for i, ln in enumerate(lines) if _CONFIRM_KEY_RE.match(ln)), None)
+    if start is None:
+        return False
+    # Drop the confirm: line plus any indented continuation (a block list/scalar).
+    end = start + 1
+    while end < len(lines) and lines[end][:1] in (" ", "\t"):
+        end += 1
+    rendered = policy if isinstance(policy, str) else "[" + ", ".join(policy) + "]"
+    lines[start:end] = [f"confirm: {rendered}"]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True
 {% if interfaces.web %}
 
 def _deep_merge_into(target: Any, source: dict) -> None:

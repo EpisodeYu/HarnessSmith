@@ -57,6 +57,17 @@ tools:
   - name: memory_write
     enabled: true    # long-term memory: replace the whole note (writes a local file)
 {% endif %}
+# HITL tool confirmation (opt-in guardrail; default off). Which tools must pause
+# for your OK before they run — a safety net against the agent fat-fingering a
+# dangerous tool. One of: none (default, never ask), high (only risk=high tools
+# like shell/file-writes), all (every tool, read-only included), or an explicit
+# list of tool names (e.g. [shell, write_file]). On a prompt you pick: allow once
+# / reject / allow for this session / always allow (the last rewrites this line).
+# A GUARDRAIL, not a security boundary — code you own can bypass it; real
+# isolation is Docker. Non-interactive runs (pipe / CI / --mock) and a stopped or
+# disconnected web run reject by default (fail-closed).
+confirm: none
+
 # Context-window management (runtime knob). A condition in `triggers` decides
 # WHEN to compact (combined by `combine`: or/and); `strategy` decides HOW.
 # truncate = keep system + recent turns; summarize = fold older turns via the

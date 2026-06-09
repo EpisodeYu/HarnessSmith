@@ -685,13 +685,69 @@ def test_stop_unblocks_a_pending_ask_fail_closed():
     assert reply_q.get_nowait() is None  # the pending ask was released (fail-closed)
 
 
+def test_hitl_tool_confirmation_round_trips_over_web(monkeypatch):
+    """A confirmed tool pauses the run with an `event: ask` of kind 'approval'
+    (tool + args + risk in context); delivering an allow decision (as POST
+    /chat/{id}/respond would) unblocks the loop and the tool actually runs."""
+    import json
+    import threading
+
+    import {{ project_slug }}.interfaces.web as webmod
+    from {{ project_slug }}.harness.config import Config
+    from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
+    from {{ project_slug }}.interfaces.web import _chat_events
+
+    class _Router:
+        def __init__(self, *a, **k):
+            pass
+
+        def client_for(self, role="generation"):
+            return MockLLM(
+                script=[ScriptedCall("calculator", {"expression": "6 * 7"}), "Done"]
+            )
+
+    monkeypatch.setattr(webmod, "ClientRouter", _Router)
+
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "calculator", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "confirm": ["calculator"],  # confirm this specific tool
+    })
+    runs, pending, lock = {}, {}, threading.Lock()
+    gen = _chat_events(
+        "hi", config, mock=True, stream=False, runs=runs, pending=pending, lock=lock,
+        confirm_sessions={}, config_path=None,
+    )
+
+    run_id, ask = None, None
+    for frame in gen:
+        if "event: run" in frame and run_id is None:
+            run_id = json.loads(frame.split("data: ", 1)[1])["run_id"]
+        if "event: ask" in frame:
+            ask = json.loads(frame.split("data: ", 1)[1])
+            break
+    assert ask and ask["kind"] == "approval"
+    assert ask["context"]["tool"] == "calculator"
+    assert {o["id"] for o in ask["options"]} >= {"allow_once", "reject", "allow_session", "allow_always"}
+
+    # Deliver an "allow once" decision; the loop resumes and runs the tool.
+    pending[run_id][ask["request_id"]].put({"option_ids": ["allow_once"], "text": None})
+    rest = "".join(gen)
+    assert "event: final" in rest
+    assert "42" in rest  # calculator actually ran after the approval
+
+
 def test_index_has_ask_card_ui():
-    """The chat renders an inline ask card (model ask_question / HITL) and posts the
-    answer to /respond — themed, no native prompt/confirm."""
+    """The chat renders an inline ask card (model ask_question / HITL approval) and
+    posts the answer to /respond — themed, no native prompt/confirm."""
     body = _client().get("/").text
     assert "function renderAskCard" in body
     assert 'addEventListener("ask"' in body
     assert "/respond" in body
+    assert "isApproval" in body  # the HITL approval branch (tool + risk + buttons)
     assert "ask_other" in body and "__other__" in body  # Cursor-style "Other…" choice
     # Streamed text is split into a fresh line whenever a card / tool line is
     # interleaved (so a later step's answer lands BELOW the cards, not above).

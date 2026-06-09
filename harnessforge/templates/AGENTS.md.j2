@@ -54,9 +54,10 @@ Treat `plan` / `ask` read-only as a **model-A guardrail**, not a security sandbo
 high-risk tools aren't offered, anything outside the offered set is refused at
 execution, and the prompt tells the model not to change things — but the guarantee
 is only as correct as your `risk` labels (a mutating tool you forgot to mark
-`high` slips through). For a hard guarantee against a misbehaving model or a
-mislabeled tool, gate execution with a hook (human-in-the-loop confirmation) or run
-in an isolated environment (container / read-only filesystem).
+`high` slips through). For a stronger gate, turn on HITL tool confirmation (the
+`confirm` knob — see below) so a flagged tool must be allowed before it runs; for a
+hard guarantee against a misbehaving model, run in an isolated environment
+(container / read-only filesystem).
 {% if interfaces.web %}
 Once allowlisted it also appears in the web **Config → Tools** tab, listed under
 **Your tools** at the top (the generated built-ins follow; each MCP server's
@@ -103,8 +104,37 @@ answer = ask(AskRequest(
 # answer.selected -> "0"/"1"; answer.text -> a typed reply (when allowed)
 ```
 
-The same channel is what tool-execution confirmation (HITL allow/reject, `kind=
-"approval"`) builds on — same pause → structured prompt → wait → resume round-trip.
+## Confirm before a tool runs (HITL, opt-in)
+
+The same channel powers **human-in-the-loop tool confirmation**: before the loop
+runs a tool you flagged, it pauses and asks you to allow or reject it (`kind=
+"approval"` — same pause → prompt → wait → resume round-trip). Off by default, so
+the golden path is untouched. Turn it on with the `confirm` knob in `config.yaml`:
+
+```yaml
+confirm: high            # none (default) | high | all | [list, of, tool, names]
+```
+
+- `none` confirms nothing; `high` confirms `risk="high"` tools (shell / file-writes
+  / mutating MCP tools); `all` confirms every tool (read-only included); a list
+  confirms exactly the named tools. The trigger is an **allowlist** (is this tool in
+  the confirm set?), not a per-call risk guess — only read-only is exempt by default.
+- On a prompt you pick one of four (aligned with Codex CLI): **allow once** (run it,
+  ask again next time), **reject** (don't run it — the model gets an `ERROR` it can
+  adapt to, the loop never crashes), **allow for this session** (stop asking for that
+  tool this conversation, in memory), or **always allow** (also writes the tool out
+  of the `confirm` policy in `config.yaml`, so it sticks across restarts).
+- **CLI**: a numbered prompt in the terminal. **Web**: an inline approval card
+  (tool + arguments + a risk badge + the four buttons).
+- **Non-interactive** (a pipe / CI / `--mock`) and a stopped or disconnected web run
+  **reject by default** (fail-closed).
+
+This is a **guardrail** (it stops a trusted user / model fat-fingering a dangerous
+tool), **not a security boundary**: code you own can bypass it, and a capability you
+truly want unavailable should not be compiled in at all (don't allowlist it). For a
+hard guarantee against a misbehaving model, run in a container. Confirmation lives at
+the **tool-execution boundary** (`run_tool` → `interaction.confirm_tool`), not in a
+hook, so `hooks.before_tool` stays a pure observer.
 
 ## Swap the model / provider
 

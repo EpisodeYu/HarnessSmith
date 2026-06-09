@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
 from ..hooks import Hooks
+from ..interaction import confirm_tool
 from ..llm import LLMResponse, ToolCall
 from ..tools import Registry
 from ..trace import Trace
@@ -106,17 +107,27 @@ def run_tool(
     — not merely left out of the schema. The refusal is returned as an ERROR
     observation so the model can self-correct, keeping the read-only contract true
     even if the model goes off-script.
+
+    HITL tool confirmation also lives at this boundary: ``confirm_tool`` consults
+    the current confirmer (set via ``interaction.using_confirmer`` at the entry
+    point) and, for a tool the ``confirm`` policy flagged, asks the user to allow
+    or reject it. A rejection comes back as an ERROR observation (the model adapts,
+    the loop never crashes); with no confirmer set (confirmation off) it is a no-op.
     """
     hooks.before_tool(call)
     trace.event("tool_call", name=call.name, arguments=call.arguments)
     if allowed is not None and call.name not in allowed:
         result = f"ERROR: tool {call.name!r} is not available in this mode"
     else:
-        try:
-            result = registry.call(call.name, call.arguments)
-        except Exception as exc:
-            hooks.on_error("tool", exc)
-            result = f"ERROR: {exc}"
+        refusal = confirm_tool(call.name, call.arguments, registry.risk_of(call.name))
+        if refusal is not None:  # HITL: user rejected (or non-interactive fail-closed)
+            result = refusal
+        else:
+            try:
+                result = registry.call(call.name, call.arguments)
+            except Exception as exc:
+                hooks.on_error("tool", exc)
+                result = f"ERROR: {exc}"
     trace.event("tool_result", name=call.name, result=result)
     hooks.after_tool(call, result)
     return result

@@ -41,8 +41,10 @@ from ..harness.hooks import Hooks
 from ..harness.interaction import (
     AskResponse,
     NonInteractiveAsker,
+    ToolConfirmer,
     noninteractive_response,
     using_asker,
+    using_confirmer,
 )
 from ..harness.llm import ClientRouter, LLMResponse, OpenAIClient, ToolCall
 from ..harness.loop import run as run_loop
@@ -208,6 +210,8 @@ def _chat_events(
     runs: dict | None = None,
     pending: dict | None = None,
     lock=None,
+    confirm_sessions: dict | None = None,
+    config_path=None,
 ):
     """Drive one ``run()`` in a worker thread and yield its events as SSE.
 
@@ -255,6 +259,32 @@ def _chat_events(
         else NonInteractiveAsker()
     )
 
+    # HITL tool-confirmation gate (None when the `confirm` policy is off). The
+    # allow-set is scoped to this session (so "allow for session" sticks across the
+    # session's messages); "always allow" rewrites config.yaml + applies in-process.
+    from ..harness.tools import registry as _tool_registry
+
+    confirm_needs = _tool_registry.confirm_names(config.confirm)
+    confirmer = None
+    if confirm_needs:
+        if confirm_sessions is not None and session_id is not None:
+            session_set = confirm_sessions.setdefault(session_id, set())
+        else:
+            session_set = set()
+
+        def _persist_confirm(remaining: set[str]) -> None:
+            from ..harness.config import persist_confirm
+
+            policy = sorted(remaining)
+            config.confirm = policy  # apply in-process so a later message agrees
+            if config_path is not None:
+                try:
+                    persist_confirm(policy, config_path)
+                except Exception:
+                    pass  # in-process allow still holds; persistence is best-effort
+
+        confirmer = ToolConfirmer(confirm_needs, persist=_persist_confirm, session=session_set)
+
     # Auto-title first (best-effort): the sidebar gets a name before the answer.
     new_title = ""
     if auto_title and message.strip():
@@ -269,10 +299,10 @@ def _chat_events(
 
     def worker() -> None:
         try:
-            # Set the asker inside the worker thread: a ContextVar does not
-            # propagate across threads, so the loop must bind it here to reach
-            # the user (ask_question / HITL) from this thread.
-            with using_asker(asker):
+            # Set the asker + HITL confirmer inside the worker thread: a ContextVar
+            # does not propagate across threads, so the loop must bind them here to
+            # reach the user (ask_question / tool confirmation) from this thread.
+            with using_asker(asker), using_confirmer(confirmer):
                 result = run_loop(
                     message,
                     mode=mode,
@@ -371,6 +401,9 @@ def create_app(
     # /chat/{run_id}/respond can deliver an answer to a blocked worker (and stop /
     # disconnect can unblock any pending ask). Guarded by the same lock.
     app.state.pending = {}
+    # HITL "allow for this session" sets, keyed by session id, so an approval
+    # sticks across a session's turns (held in process; reset on restart).
+    app.state.confirm_sessions = {}
     app.state.runs_lock = threading.Lock()
     # Load config.extensions so custom @register_* (tools / paradigms / conditions /
     # backends) are available to this web process; serve() also runs the full
@@ -417,6 +450,8 @@ def create_app(
                 message, cfg, mock=app.state.mock, stream=stream, mode=mode,
                 session_id=session_id, history=history, auto_title=auto_title,
                 runs=app.state.runs, pending=app.state.pending, lock=app.state.runs_lock,
+                confirm_sessions=app.state.confirm_sessions,
+                config_path=app.state.config_path,
             ),
             media_type="text/event-stream",
         )
