@@ -65,14 +65,15 @@ def test_meta_lists_paradigms_and_catalog(client):
 
 
 def test_meta_catalog_curates_order_defaults_and_hides_niche(client):
-    """The wizard surfaces a curated subset: default-on (fetch/ddg/git) first,
-    desktop-commander last; github (needs token) and time (niche) are hidden."""
+    """The wizard surfaces a curated subset, fetch/ddg/git first and
+    desktop-commander last; github (needs token) and time (niche) are hidden.
+    Desktop Commander is checked by default (Slice 11) — HITL-gated for safety."""
     catalog = client.get("/meta").json()["catalog"]
     names = [s["name"] for s in catalog]
     assert names == ["fetch", "ddg-search", "git", "desktop-commander"]
     assert "github" not in names and "time" not in names
     checked = {s["name"] for s in catalog if s["default_checked"]}
-    assert checked == {"fetch", "ddg-search", "git"}
+    assert checked == {"fetch", "ddg-search", "git", "desktop-commander"}
 
 
 def test_meta_exposes_generate_base_under_repo_root(client):

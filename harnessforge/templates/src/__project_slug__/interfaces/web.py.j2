@@ -196,6 +196,56 @@ def _safe_repo_path(path: str) -> Path | None:
         return None
     return candidate
 
+{% if spec.mcp.enabled %}
+def _persist_config_keys(app, keys: list[str]) -> None:
+    """Best-effort write of the named top-level config keys back to config.yaml
+    (comments preserved). No-op without a config_path (an in-memory config, e.g.
+    tests), so a runtime edit never spawns a stray file. Secrets never appear here
+    — MCP server config carries only env-var NAMES."""
+    if app.state.config_path is None:
+        return
+    from ..harness.config import save_config
+
+    dump = app.state.config.model_dump(mode="json", exclude_none=True)
+    updates = {key: dump[key] for key in keys if key in dump}
+    try:
+        save_config(updates, app.state.config_path)
+    except Exception:
+        pass  # in-process change still applies; persistence is best-effort
+
+
+def _ensure_mcp_manager(app):
+    """Return the live MCP manager, starting it on first use.
+
+    Connects EVERY configured server (so the management page has live status +
+    discovery) but registers only allowlisted tools into the registry. Idempotent
+    and lock-guarded; the blocking connect is held under ``mcp_lock`` (not
+    ``runs_lock``) so it never stalls a chat run's bookkeeping.
+    """
+    from ..harness.mcp import McpManager, sync_mcp_tools
+
+    with app.state.mcp_lock:
+        if app.state.mcp_manager is None:
+            manager = McpManager(app.state.config.mcp)
+            manager.start()
+            sync_mcp_tools(app.state.config, manager)
+            app.state.mcp_manager = manager
+        return app.state.mcp_manager
+
+
+def _rebuild_mcp_manager(app):
+    """Hot-reconnect after a server add/edit/delete: rebuild the manager from the
+    current config (the new one is started before the old is closed) and re-sync
+    the registry, so the page, the live sessions, and the model's tools all agree.
+    """
+    from ..harness.mcp import rebuild_manager, sync_mcp_tools
+
+    with app.state.mcp_lock:
+        manager = rebuild_manager(app.state.mcp_manager, app.state.config.mcp)
+        sync_mcp_tools(app.state.config, manager)
+        app.state.mcp_manager = manager
+        return manager
+{% endif %}
 
 def _chat_events(
     message: str,
@@ -405,7 +455,14 @@ def create_app(
     # sticks across a session's turns (held in process; reset on restart).
     app.state.confirm_sessions = {}
     app.state.runs_lock = threading.Lock()
-    # Load config.extensions so custom @register_* (tools / paradigms / conditions /
+{% if spec.mcp.enabled %}    # The live MCP manager: ONE per serving process, the single source of truth
+    # for the MCP page, the Tools page, and the tools offered to the model. Started
+    # lazily on the first /mcp call (or eagerly by `serve`), and rebuilt on a server
+    # edit. Its own lock guards the blocking (re)connect so it never holds up a
+    # chat run's bookkeeping (which uses runs_lock).
+    app.state.mcp_manager = None
+    app.state.mcp_lock = threading.Lock()
+{% endif %}    # Load config.extensions so custom @register_* (tools / paradigms / conditions /
     # backends) are available to this web process; serve() also runs the full
     # diagnostics + fail-fast before binding.
     import_extensions(app.state.config)
@@ -547,55 +604,108 @@ def create_app(
 {% if spec.memory.enabled %}            "memory": list(_MEMORY_BACKENDS),
 {% endif %}        }
 {% if spec.mcp.enabled %}
-    @app.get("/mcp/discover")
-    async def mcp_discover() -> dict:
-        """Connect every configured MCP server and list its tools, so the panel can
-        offer them without hand-writing the ``<server>__<tool>`` allowlist.
+    @app.get("/mcp/status")
+    async def mcp_status() -> dict:
+        """Live per-server health for the MCP management page + the Tools page dots.
 
-        Read-only: it lists what each server exposes (and which names are already
-        allowlisted/enabled); actually enabling a tool still goes through POST
-        /config. Per-server failures are reported in ``error`` (never fatal), and
-        a slow/missing server is skipped under ``connect_timeout_seconds``.
+        Reads the ONE live manager (started on first use): each configured server's
+        transport, connection state, discovered tool count, how many of its tools
+        are allowlisted, and any connect error — plus its editable config (env-var
+        NAMES only, never secret values). A server that won't connect is reported
+        (not fatal). This is also the data the page polls to "refresh promptly".
         """
-        from ..harness.mcp import McpManager
-
         config = app.state.config
         if not config.mcp.servers:
             return {"servers": []}
+        manager = await run_in_threadpool(lambda: _ensure_mcp_manager(app))
+        enabled = config.enabled_tool_names()
+        live = {s["name"]: s for s in manager.status()}
+        servers = []
+        for server in config.mcp.servers:
+            st = live.get(server.name, {})
+            servers.append({
+                "name": server.name,
+                "transport": server.kind,
+                "connected": bool(st.get("connected")),
+                "error": st.get("error"),
+                "tool_count": st.get("tool_count", 0),
+                "enabled_count": sum(1 for n in enabled if n.startswith(server.name + "__")),
+                "config": server.model_dump(mode="json", exclude_none=True),
+            })
+        return {"servers": servers}
+
+    @app.get("/mcp/discover")
+    async def mcp_discover() -> dict:
+        """List each configured server's tools (from the live manager) so the Tools
+        tab can offer them without hand-writing the ``<server>__<tool>`` allowlist.
+
+        Read-only: it reports what each server exposes + which names are already
+        allowlisted/enabled; actually enabling a tool still goes through POST
+        /config. Per-server connect failures surface in ``error`` (never fatal).
+        """
+        config = app.state.config
+        if not config.mcp.servers:
+            return {"servers": []}
+        manager = await run_in_threadpool(lambda: _ensure_mcp_manager(app))
         enabled = config.enabled_tool_names()
         listed = {tool.name for tool in config.tools}
-
-        def _scan() -> tuple[dict, dict]:
-            manager = McpManager(config.mcp)
-            try:
-                manager.start()  # connects all servers (failures isolated into .errors)
-                return (
-                    {
-                        server: [(t.name, t.description or "") for t in tools]
-                        for server, tools in manager.discovered.items()
-                    },
-                    dict(manager.errors),
-                )
-            finally:
-                manager.close()
-
-        discovered, errors = await run_in_threadpool(_scan)
         servers = []
         for server in config.mcp.servers:
             tools = []
-            for name, description in discovered.get(server.name, []):
-                full = f"{server.name}__{name}"
+            for tool in manager.discovered.get(server.name, []):
+                full = f"{server.name}__{tool.name}"
                 tools.append({
                     "name": full,
-                    "short": name,
-                    "description": description,
+                    "short": tool.name,
+                    "description": tool.description or "",
                     "listed": full in listed,
                     "enabled": full in enabled,
                 })
             servers.append(
-                {"name": server.name, "error": errors.get(server.name), "tools": tools}
+                {"name": server.name, "error": manager.errors.get(server.name), "tools": tools}
             )
         return {"servers": servers}
+
+    @app.post("/mcp/servers")
+    async def upsert_mcp_server(request: Request):
+        """Add or edit an MCP server (upsert by name), then hot-reconnect.
+
+        Validates the server config, writes it back to config.yaml (env-var NAMES
+        only — never secret values), rebuilds the manager, and returns the fresh
+        status. NOTE: adding a stdio server lets this product spawn that local
+        command — a local, trusted-user control (threat model A), so don't expose
+        /config or /mcp publicly. See README "MCP management".
+        """
+        from ..harness.config import McpServerConfig
+
+        body = await request.json()
+        try:
+            server = McpServerConfig.model_validate(body)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        config = app.state.config
+        config.mcp.servers = [s for s in config.mcp.servers if s.name != server.name] + [server]
+        _persist_config_keys(app, ["mcp"])
+        await run_in_threadpool(lambda: _rebuild_mcp_manager(app))
+        return await mcp_status()
+
+    @app.delete("/mcp/servers/{name}")
+    async def delete_mcp_server(name: str):
+        """Remove a server (and drop its ``<name>__*`` allowlist entries), then
+        hot-reconnect. Idempotent — a missing name just rebuilds unchanged."""
+        config = app.state.config
+        config.mcp.servers = [s for s in config.mcp.servers if s.name != name]
+        config.tools = [t for t in config.tools if not t.name.startswith(name + "__")]
+        _persist_config_keys(app, ["mcp", "tools"])
+        await run_in_threadpool(lambda: _rebuild_mcp_manager(app))
+        return await mcp_status()
+
+    @app.post("/mcp/reconnect")
+    async def reconnect_mcp() -> dict:
+        """Rebuild the manager from the current config (reconnect every server) —
+        the management page's "reconnect" button for a server that dropped."""
+        await run_in_threadpool(lambda: _rebuild_mcp_manager(app))
+        return await mcp_status()
 {% endif %}
 
     @app.get("/config")
@@ -665,7 +775,17 @@ def create_app(
             app.state.config = Config.model_validate(current)
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
-        # Persist the editable fields back to config.yaml (comments preserved) so
+{% if spec.mcp.enabled %}        # Keep the registry's MCP tools in lock-step with the new allowlist so what
+        # the model is offered always matches the Tools page: a newly-enabled MCP
+        # tool gets registered, a disabled one dropped. No reconnect needed — just
+        # re-register from the already-connected manager (skip if not started yet).
+        if app.state.mcp_manager is not None:
+            from ..harness.mcp import sync_mcp_tools
+
+            await run_in_threadpool(
+                lambda: sync_mcp_tools(app.state.config, app.state.mcp_manager)
+            )
+{% endif %}        # Persist the editable fields back to config.yaml (comments preserved) so
         # the edit survives a restart, not just this process. exclude_none keeps
         # unset knobs from being written out as explicit `null`s; secrets are
         # never in _EDITABLE_FIELDS, so only env-var NAMES ever reach the file.

@@ -134,3 +134,62 @@ def test_server_requires_exactly_one_transport():
         McpServerConfig(name="bad")  # neither command nor url
     with pytest.raises(Exception):
         McpServerConfig(name="bad", command="x", url="https://y")  # both
+
+
+def test_transport_field_selects_kind_and_validates():
+    """`transport` (stdio/http/sse) is inferred from shape when unset, explicit
+    otherwise — `sse` is the legacy transport for older remote servers."""
+    assert McpServerConfig(name="s", command="x").kind == "stdio"
+    assert McpServerConfig(name="r", url="https://x/mcp").kind == "http"
+    assert McpServerConfig(name="r", url="https://x/sse", transport="sse").kind == "sse"
+    assert McpServerConfig(name="r", url="https://x/mcp", transport="http").kind == "http"
+    with pytest.raises(Exception):  # transport must match the shape
+        McpServerConfig(name="bad", url="https://x", transport="stdio")
+    with pytest.raises(Exception):
+        McpServerConfig(name="bad", command="x", transport="http")
+
+
+def test_status_reports_connection_and_tool_count(manager):
+    """`McpManager.status()` is the source of truth the management page reads."""
+    rows = {r["name"]: r for r in manager.status()}
+    assert rows["dummy"]["connected"] is True
+    assert rows["dummy"]["transport"] == "stdio"
+    assert rows["dummy"]["error"] is None
+    assert rows["dummy"]["tool_count"] >= 2
+
+
+def test_sync_mcp_tools_resyncs_registry(manager):
+    """sync_mcp_tools keeps the registry in lock-step with the allowlist: it drops
+    every prior MCP entry, then re-registers the currently-allowlisted ones."""
+    from {{ project_slug }}.harness.mcp import sync_mcp_tools
+
+    registry = Registry()
+    sync_mcp_tools(_config([{"name": "dummy__echo", "enabled": True}]), manager, registry)
+    assert registry.get("dummy__echo")
+    with pytest.raises(ToolError):
+        registry.get("dummy__add")
+    # Enable add too -> resync registers it (without dropping echo).
+    sync_mcp_tools(
+        _config([{"name": "dummy__echo", "enabled": True}, {"name": "dummy__add", "enabled": True}]),
+        manager,
+        registry,
+    )
+    assert registry.get("dummy__echo") and registry.get("dummy__add")
+    # Disable echo -> resync removes it.
+    sync_mcp_tools(_config([{"name": "dummy__add", "enabled": True}]), manager, registry)
+    with pytest.raises(ToolError):
+        registry.get("dummy__echo")
+
+
+def test_rebuild_manager_reconnects(manager):
+    """rebuild_manager starts a fresh manager (and closes the old) for hot-reconnect."""
+    from {{ project_slug }}.harness.mcp import rebuild_manager
+
+    cfg = McpConfig(
+        servers=[McpServerConfig(name="dummy", command=sys.executable, args=[DUMMY])]
+    )
+    new = rebuild_manager(manager, cfg)
+    try:
+        assert "dummy" in new.discovered
+    finally:
+        new.close()

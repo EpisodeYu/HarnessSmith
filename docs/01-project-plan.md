@@ -165,7 +165,7 @@ flowchart LR
 
 本版新增/明确:
 - **LLM API 面:走 Chat Completions + `tools`,不用 Responses API。** 理由:Responses 基本是 OpenAI 专属,而绝大多数第三方/本地 OpenAI 兼容端点(vLLM、together、groq 等)只实现 `/v1/chat/completions`;选 Chat Completions 才能兑现 provider-agnostic + base_url 的承诺。
-- **安全(轻量,本地自用)**:MVP 不做沙箱/keyring/写不回显面板/全链路 redaction。只保两条硬约束——(1) **密钥不入 git**:`config.yaml`/`harness.spec.yaml` 只存 env 引用名,真值放 `.env`(gitignored);(2) **高风险工具(shell/写文件)默认不内置 / 默认关,仅 allowlist 显式开启**。HITL 确认与更强 redaction 推迟到有真实多环境/共享需求时再加。
+- **安全(轻量,本地自用)**:MVP 不做沙箱/keyring/写不回显面板/全链路 redaction。只保两条硬约束——(1) **密钥不入 git**:`config.yaml`/`harness.spec.yaml` 只存 env 引用名,真值放 `.env`(gitignored);(2) **高风险工具(shell/写文件)默认不内置 / 默认关,仅 allowlist 显式开启**。HITL 确认与更强 redaction 推迟到有真实多环境/共享需求时再加。**实现说明(Slice 10 已落地 HITL `ConfirmHooks`;Slice 11 人 2026-06-09 签字)**:**约束 (2) 对 wizard 产物有意松动**——wizard 默认启用 desktop-commander(shell + 全盘文件读写)并默认 `confirm: high`,把"全关"换成"默认预置 + HITL 逐次放行"(威胁模型 A 护栏,非安全边界;真隔离仍靠 Docker / 生成期不编译,见 §4)。仅限 wizard 产物;preset/CLI 默认仍维持高风险默认关。另:**Slice 11 的产物 Web MCP 管理面可增删/编辑 MCP server = 新安全面**(网页可让产物 spawn 任意本地命令),按本地可信定位,勿对公网暴露,详见 `02-development/12-slice-11-mcp-management.md`。
 - **API/SDK 版本与发布**:Python 3.11+;依赖 pin 版本;MCP/sqlite-vec 等仅在对应 L2/L3 模块引入并标平台要求;发布前查 PyPI 包名 `harnessforge` 是否重名;模板与产物的兼容靠 spec `version` 字段标注。
 - **可运行性契约**:产物以 **uv** 为唯一环境契约(带 `uv.lock` + `.python-version`,uv 自动管 Python 与隔离 venv);**默认生成 `Dockerfile` + `.devcontainer`** 作为环境无关的运行保障(前期即纳入,非可选);生成器**默认对新仓库冒烟自检**(`uv sync` + `pytest` + mock 跑一步),`requirements.txt` 提供 pip 兜底。详见 §7。
 

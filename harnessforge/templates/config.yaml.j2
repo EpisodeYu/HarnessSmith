@@ -66,7 +66,7 @@ tools:
 # A GUARDRAIL, not a security boundary — code you own can bypass it; real
 # isolation is Docker. Non-interactive runs (pipe / CI / --mock) and a stopped or
 # disconnected web run reject by default (fail-closed).
-confirm: none
+confirm: {{ confirm_default }}
 
 # Context-window management (runtime knob). A condition in `triggers` decides
 # WHEN to compact (combined by `combine`: or/and); `strategy` decides HOW.
@@ -135,12 +135,15 @@ budget:
 extensions: []
 # hooks: "{{ project_slug }}.harness.hooks:Hooks"   # "package.module:ClassName"
 {% if spec.mcp.enabled %}
-# MCP tool servers (runtime knob — add/remove without regenerating). Each server
-# uses stdio (set `command`) OR remote Streamable HTTP (set `url`). Secrets are
-# referenced by env-var NAME only, never values. A discovered tool is offered to
-# the model only when allowlisted in `tools:` above as `<server>__<tool>`; a
-# server is only launched when at least one of its tools is enabled. `safe_tools`
-# marks read-only tools so read-only paradigms (plan/ask) may use them.
+# MCP tool servers (runtime knob — add/remove without regenerating, or use the
+# web "MCP" tab). Each server uses stdio (set `command`) OR remote Streamable HTTP
+# / SSE (set `url`; `transport: http` default, `sse` for older servers). Secrets
+# are referenced by env-var NAME only, never values. A discovered tool is offered
+# to the model only when allowlisted in `tools:` above as `<server>__<tool>`. On
+# the CLI a server launches only when ≥1 of its tools is enabled; the web server
+# connects every configured server (so its MCP page shows live status) and offers
+# only allowlisted tools. `safe_tools` marks read-only tools so read-only
+# paradigms (plan/ask) may use them.
 mcp:
 {% if mcp_servers %}  servers:
 {% for s in mcp_servers %}    - name: {{ s.name }}

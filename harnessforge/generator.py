@@ -84,12 +84,21 @@ class GenerationResult:
     git_initialized: bool = False
 
 
-def _build_context(spec: HarnessSpec, mcp_servers: list[CatalogServer]) -> dict:
+def _build_context(
+    spec: HarnessSpec,
+    mcp_servers: list[CatalogServer],
+    confirm_default: str = "none",
+) -> dict:
     """Build the Jinja render context from a spec (+ optional MCP prefill).
 
     ``mcp_servers`` is a generation-time convenience (catalog selections) that is
     rendered into the runtime ``config.yaml`` only when ``spec.mcp.enabled``. It
     never touches the spec/snapshot — servers are a runtime knob.
+
+    ``confirm_default`` seeds the runtime ``confirm`` HITL policy in config.yaml
+    (a runtime knob, not a spec field): ``none`` by default; the wizard passes
+    ``high`` so its products gate high-risk tools (e.g. Desktop Commander) behind
+    HITL confirmation.
     """
     env_names: list[str] = []
     for profile in spec.llms:
@@ -128,6 +137,7 @@ def _build_context(spec: HarnessSpec, mcp_servers: list[CatalogServer]) -> dict:
         "mcp_servers": mcp_server_entries,
         "mcp_tool_allowlist": mcp_tool_allowlist,
         "mcp_uvx_packages": mcp_uvx_packages,
+        "confirm_default": confirm_default,
     }
 
 
@@ -163,12 +173,15 @@ def generate(
     templates_dir: Path = TEMPLATES_DIR,
     git_init: bool = True,
     mcp_servers: list[CatalogServer] | None = None,
+    confirm_default: str = "none",
 ) -> GenerationResult:
     """Render ``spec`` into ``target_dir``.
 
     ``mcp_servers`` (catalog selections from ``--mcp-server`` / a preset prefill)
     are written into the generated ``config.yaml`` when ``spec.mcp.enabled``; they
-    are a runtime knob, never added to the spec/snapshot.
+    are a runtime knob, never added to the spec/snapshot. ``confirm_default`` seeds
+    the runtime HITL ``confirm`` policy (``none`` default; the wizard passes
+    ``high``) — also a runtime knob, not part of the spec.
 
     Refuses to write into a non-empty existing directory (raises
     :class:`TargetExistsError`) so an existing repo is never clobbered.
@@ -186,7 +199,7 @@ def generate(
         undefined=StrictUndefined,
         autoescape=False,
     )
-    context = _build_context(spec, mcp_servers or [])
+    context = _build_context(spec, mcp_servers or [], confirm_default=confirm_default)
 
     result = GenerationResult(target_dir=target_dir, project_slug=spec.project_slug)
     for template_file in _iter_template_files(templates_dir):

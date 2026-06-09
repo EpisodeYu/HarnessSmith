@@ -35,10 +35,16 @@ def _bearer_headers(server: McpServerConfig) -> dict[str, str]:
 
 
 def _open_streams(server: McpServerConfig):
-    """Return the (read, write) stream context manager for ``server``'s transport."""
+    """Return the (read, write) stream context manager for ``server``'s transport.
+
+    Transport is ``server.kind`` (explicit ``transport`` or inferred from shape):
+    ``stdio`` launches a subprocess; ``http`` is the modern Streamable HTTP;
+    ``sse`` is the legacy HTTP+SSE transport for older remote servers.
+    """
     from .config import resolve_env
 
-    if server.command:
+    kind = server.kind
+    if kind == "stdio":
         import os
 
         from mcp import StdioServerParameters
@@ -53,9 +59,14 @@ def _open_streams(server: McpServerConfig):
             StdioServerParameters(command=server.command, args=server.args, env=env)
         )
 
+    headers = _bearer_headers(server)
+    if kind == "sse":  # legacy HTTP+SSE transport (older servers)
+        from mcp.client.sse import sse_client
+
+        return sse_client(server.url, headers=headers)
+
     from mcp.client import streamable_http as sh
 
-    headers = _bearer_headers(server)
     if hasattr(sh, "streamablehttp_client"):  # SDK <2.x
         return sh.streamablehttp_client(server.url, headers=headers)
     import httpx  # SDK >=2.x: headers go on a pre-built client
@@ -147,6 +158,54 @@ class McpManager:
             return
         self._loop.call_soon_threadsafe(self._inbox.put_nowait, None)
         self._thread.join(timeout=10)
+
+    def status(self) -> list[dict]:
+        """Per-server health, read after ``start()`` — the source of truth for the
+        management page / ``mcp status``: each configured server's transport, live
+        connection state, discovered tool count, and connect error (if any)."""
+        out: list[dict] = []
+        for server in self._config.servers:
+            tools = self.discovered.get(server.name)
+            out.append(
+                {
+                    "name": server.name,
+                    "transport": server.kind,
+                    "connected": server.name in self._sessions,
+                    "error": self.errors.get(server.name),
+                    "tool_count": len(tools) if tools is not None else 0,
+                }
+            )
+        return out
+
+
+def rebuild_manager(old: "McpManager | None", config: McpConfig) -> McpManager:
+    """Reconnect: start a fresh manager for ``config``, then close the old one.
+
+    The new manager is fully started (every server connected or failure-isolated)
+    BEFORE the old one is closed, so a hot-reconnect never leaves a window with no
+    sessions. The caller keeps the returned manager and re-syncs the registry.
+    """
+    manager = McpManager(config)
+    manager.start()
+    if old is not None:
+        old.close()
+    return manager
+
+
+def sync_mcp_tools(
+    config: "Config", manager: McpManager, registry: Registry | None = None
+) -> list[str]:
+    """Re-sync the registry's MCP tools to ``config`` + ``manager.discovered``.
+
+    Unlike :func:`register_mcp_tools` (append-only, for a one-shot CLI run), this
+    first DROPS every existing ``<server>__<tool>`` entry, then re-registers the
+    currently-allowlisted discovered tools — so a long-lived process (the web
+    server) stays consistent across runtime allowlist/server edits: what's
+    registered (hence offered to the model) always matches the panel's view.
+    """
+    registry = registry or default_registry
+    registry.remove_where(lambda name: "__" in name)
+    return register_mcp_tools(config, manager, registry)
 
 
 def register_mcp_tools(

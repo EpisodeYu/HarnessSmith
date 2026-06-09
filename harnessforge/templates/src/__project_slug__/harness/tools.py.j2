@@ -49,6 +49,19 @@ class Registry:
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
 
+    def unregister(self, name: str) -> None:
+        """Drop a tool by name if present (no error if it isn't)."""
+        self._tools.pop(name, None)
+
+    def remove_where(self, predicate: Callable[[str], bool]) -> None:
+        """Drop every registered tool whose name matches ``predicate``.
+
+        Used to re-sync a dynamic tool source (e.g. MCP) into the registry: clear
+        its previous entries, then re-register the current set.
+        """
+        for name in [n for n in self._tools if predicate(n)]:
+            del self._tools[name]
+
     def tool(
         self,
         *,

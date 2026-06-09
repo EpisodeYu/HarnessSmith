@@ -216,17 +216,25 @@ class McpServerConfig(BaseModel):
 
     Runtime-only (this slice adds no spec fields). Secrets are referenced by
     env-var NAME (``env`` / ``auth_env``), never stored as values.
+
+    ``transport`` is optional and disambiguates a ``url`` server: ``http`` (the
+    modern Streamable HTTP, default for a ``url``) or ``sse`` (the older HTTP+SSE
+    transport — use it for servers that don't speak Streamable HTTP yet). When
+    left unset it is inferred from shape (``command`` -> stdio, ``url`` -> http).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
     description: str = ""  # human/agent-readable capability summary (for prompts/UX)
+    # Transport selector (optional; inferred from shape when unset). ``sse`` is the
+    # legacy HTTP+SSE transport kept for older remote servers.
+    transport: Literal["stdio", "http", "sse"] | None = None
     # stdio transport (launched as a subprocess):
     command: str | None = None
     args: list[str] = Field(default_factory=list)
     env: list[str] = Field(default_factory=list)  # env-var NAMES to inject
-    # remote (Streamable HTTP) transport:
+    # remote (Streamable HTTP / SSE) transport:
     url: str | None = None
     auth_env: str | None = None  # env-var NAME holding a bearer token
     # Read-only / low-risk tool names (unprefixed). Tools listed here register as
@@ -241,7 +249,18 @@ class McpServerConfig(BaseModel):
                 f"mcp server {self.name!r} must set exactly one of "
                 "`command` (stdio) or `url` (remote HTTP/SSE)"
             )
+        if self.transport == "stdio" and not self.command:
+            raise ValueError(f"mcp server {self.name!r}: transport 'stdio' requires `command`")
+        if self.transport in ("http", "sse") and not self.url:
+            raise ValueError(
+                f"mcp server {self.name!r}: transport {self.transport!r} requires `url`"
+            )
         return self
+
+    @property
+    def kind(self) -> str:
+        """Resolved transport: explicit ``transport`` or inferred from shape."""
+        return self.transport or ("stdio" if self.command else "http")
 
 
 class McpConfig(BaseModel):

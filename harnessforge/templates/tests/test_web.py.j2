@@ -130,6 +130,85 @@ def test_index_has_mcp_discovery_ui():
     body = _client().get("/").text
     assert "/mcp/discover" in body and "function discoverMcp()" in body
     assert 'id="cfg-mcp-scan"' in body
+
+
+def _mcp_config():
+    return Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "dummy__echo", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "mcp": {"servers": [{"name": "dummy", "command": sys.executable, "args": [_DUMMY]}]},
+    })
+
+
+def test_mcp_status_reports_live_server_health():
+    """/mcp/status backs the management page: live connection + tool counts + the
+    editable server config (env-var NAMES only, never secret values)."""
+    data = TestClient(create_app(_mcp_config(), mock=True)).get("/mcp/status").json()
+    s = {x["name"]: x for x in data["servers"]}["dummy"]
+    assert s["connected"] is True and s["transport"] == "stdio" and s["error"] is None
+    assert s["enabled_count"] == 1 and s["tool_count"] >= 2
+    assert s["config"]["command"] == sys.executable  # editable config surfaced
+
+
+def test_mcp_add_and_delete_server_persists_and_reconnects(tmp_path):
+    """POST/DELETE /mcp/servers writes config.yaml back (env-var names only) and
+    hot-reconnects the manager, so a server can be managed from the panel."""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "llms:\n  - name: default\n    model: mock-model\n"
+        "roles:\n  generation: default\n"
+        "observability:\n  trace: false\n"
+        "sessions:\n  enabled: false\n"
+        "mcp:\n  servers: []\n",
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(mock=True, config_path=cfg_path))
+    resp = client.post(
+        "/mcp/servers", json={"name": "dummy", "command": sys.executable, "args": [_DUMMY]}
+    )
+    assert resp.status_code == 200, resp.text
+    assert "dummy" in {s["name"] for s in resp.json()["servers"]}
+    assert "dummy" in cfg_path.read_text(encoding="utf-8")  # persisted
+
+    resp = client.delete("/mcp/servers/dummy")
+    assert resp.status_code == 200
+    assert resp.json()["servers"] == []
+
+
+def test_mcp_add_server_rejects_invalid_config():
+    """A server with neither command nor url (or a bad transport) is a 400."""
+    client = TestClient(create_app(_mcp_config(), mock=True))
+    assert client.post("/mcp/servers", json={"name": "bad"}).status_code == 400
+
+
+def test_config_enabling_mcp_tool_registers_it_for_the_model():
+    """#3/#5 consistency: enabling a discovered-but-unlisted MCP tool via /config
+    registers it into the registry, so what the model is offered always matches the
+    Tools page."""
+    from {{ project_slug }}.harness.tools import ToolError, registry
+
+    client = TestClient(create_app(_mcp_config(), mock=True))
+    client.get("/mcp/discover")  # start the live manager (connects the dummy server)
+    with pytest.raises(ToolError):  # add isn't allowlisted yet -> not offered
+        registry.get("dummy__add")
+    resp = client.post("/config", json={"tools": [
+        {"name": "dummy__echo", "enabled": True},
+        {"name": "dummy__add", "enabled": True},
+    ]})
+    assert resp.status_code == 200
+    assert registry.get("dummy__add").name == "dummy__add"  # now offered to the model
+
+
+def test_index_has_mcp_management_ui():
+    """The product ships a dedicated MCP management tab (server list + status +
+    add/edit/delete) plus the per-server "big checkbox" on the Tools tab."""
+    body = _client().get("/").text
+    assert 'data-cfg="mcp"' in body and 'id="cfg-mcp-list"' in body
+    assert "function buildMcp()" in body and "/mcp/status" in body
+    assert "mcp-master" in body  # the per-server master checkbox (Tools tab)
 {% endif %}
 
 

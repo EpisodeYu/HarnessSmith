@@ -105,7 +105,20 @@
         <div id="cfg-tools" class="space-y-1"></div>
         <p class="text-xs text-gray-500" data-i18n="tools_extend_hint">Your own tools: register with @registry.tool in harness/tools.py, then list the name under tools: in config.yaml to see it here. MCP tools are discovered from your servers (Scan) — tick one to add it to the allowlist. The checkbox toggles a tool live (no restart). See AGENTS.md.</p>
       </div>
-
+{% if spec.mcp.enabled %}
+      <div data-cfg="mcp" class="hidden space-y-3">
+        <div class="flex items-start justify-between gap-2">
+          <p class="text-xs text-slate-500" data-i18n="mcp_hint">MCP servers this product can connect to; the dot shows live connectivity. Add / edit / remove a server here — it reconnects immediately. Local trusted control — don't expose this panel on a public network.</p>
+          <div class="flex items-center gap-2 whitespace-nowrap">
+            <span id="cfg-mcp-msg" class="text-xs text-slate-500"></span>
+            <button id="cfg-mcp-reconnect" type="button" class="rounded-lg border px-2 py-1 text-xs" data-i18n="mcp_reconnect">Reconnect</button>
+          </div>
+        </div>
+        <div id="cfg-mcp-list" class="space-y-2"></div>
+        <button id="cfg-mcp-add" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="mcp_add">+ Add server</button>
+        <p class="text-xs text-gray-500" data-i18n="mcp_extend_hint">Turn a server's tools on/off on the Tools tab (each server has a master checkbox). Secrets stay in .env — a server stores only env-var names, never values.</p>
+      </div>
+{% endif %}
       <div data-cfg="prompts" class="hidden space-y-3">
         <label class="block text-sm"><span data-i18n="prompts_system">system</span>
           <textarea id="cfg-p-system" rows="3" class="mt-1 block w-full rounded-lg border px-3 py-2"></textarea></label>
@@ -196,7 +209,7 @@
         cfg_leave_confirm: "You have unsaved config changes — they won't apply until you Save. Switch to Chat anyway?",
         cfg_reload_confirm: "Reload discards your unsaved changes. Continue?",
         subtab_llm: "LLM", subtab_context: "Context", subtab_budget: "Budget",
-        subtab_tools: "Tools", subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
+        subtab_tools: "Tools",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
         {% if spec.memory.enabled %}subtab_memory: "Memory", {% endif %}subtab_observability: "Observability",
         profiles_label: "LLM profiles", profile_add: "+ Add profile", profile_remove: "remove",
         test_btn: "Test", test_running: "testing…",
@@ -230,7 +243,17 @@
         tools_group_custom: "Your tools", tools_group_builtin: "Built-in tools", tools_group_mcp: "MCP",
         tools_scan: "Scan MCP", tools_scanning: "scanning servers…", tools_scanned: "discovered",
         tools_extend_hint: "Your own tools: register with @registry.tool in harness/tools.py, then list the name under tools: in config.yaml to see it here. MCP tools are discovered from your servers (Scan) — tick one to add it to the allowlist. The checkbox toggles a tool live (no restart). See AGENTS.md.",
-        prompts_system: "system", prompts_rules: "Rule files (always-on)",
+        tools_group_mcp_all: "all tools",
+{% if spec.mcp.enabled %}        mcp_hint: "MCP servers this product can connect to; the dot shows live connectivity. Add / edit / remove a server here — it reconnects immediately. Local trusted control — don't expose this panel on a public network.",
+        mcp_reconnect: "Reconnect", mcp_add: "+ Add server", mcp_remove: "Remove", mcp_save: "Save",
+        mcp_name: "name", mcp_transport: "transport", mcp_transport_auto: "auto",
+        mcp_command: "command", mcp_args: "args (space-separated)", mcp_env: "env var names (comma-separated)",
+        mcp_url: "url", mcp_authenv: "auth env var name", mcp_desc: "description",
+        mcp_safe_tools: "read-only tools (comma-separated, unprefixed)",
+        mcp_loading: "loading…", mcp_reconnecting: "reconnecting…", mcp_saved: "saved",
+        mcp_connected: "connected", mcp_unreachable: "unreachable", mcp_tools_word: "tools",
+        mcp_extend_hint: "Turn a server's tools on/off on the Tools tab (each server has a master checkbox). Secrets stay in .env — a server stores only env-var names, never values.",
+{% endif %}        prompts_system: "system", prompts_rules: "Rule files (always-on)",
         rule_add: "+ Add rule file", rule_path_ph: "path, e.g. RULES.md",
         rule_auto: "auto", rule_auto_hint: "Auto-recognized at the project root (CLAUDE.md) — injected even without listing it. Edit the content here; Save writes the file.",
         rules_hint: "Plain markdown files you own (the AGENTS.md / CLAUDE.md pattern), injected verbatim into every system prompt. Edit the content here; Save writes the files + the active list.",
@@ -269,7 +292,7 @@
         cfg_leave_confirm: "有未保存的配置修改 —— 不点保存不会生效。仍要切换到对话?",
         cfg_reload_confirm: "重载会丢弃未保存的修改,确定继续?",
         subtab_llm: "LLM", subtab_context: "上下文", subtab_budget: "预算",
-        subtab_tools: "工具", subtab_prompts: "提示词", subtab_paradigms: "范式",
+        subtab_tools: "工具",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_prompts: "提示词", subtab_paradigms: "范式",
         {% if spec.memory.enabled %}subtab_memory: "记忆", {% endif %}subtab_observability: "可观测",
         profiles_label: "LLM 配置", profile_add: "+ 添加配置", profile_remove: "删除",
         test_btn: "测试", test_running: "测试中…",
@@ -303,7 +326,17 @@
         tools_group_custom: "你的工具", tools_group_builtin: "内置工具", tools_group_mcp: "MCP",
         tools_scan: "扫描 MCP", tools_scanning: "正在连接服务器…", tools_scanned: "已发现",
         tools_extend_hint: "你自己的工具:在 harness/tools.py 用 @registry.tool 注册,再把名字加进 config.yaml 的 tools: 才会出现在这里。MCP 工具会从你配置的服务器自动发现(扫描)—— 勾上即加入 allowlist。勾选框可实时开关某个工具(免重启)。见 AGENTS.md。",
-        prompts_system: "系统提示", prompts_rules: "规则文件(常驻)",
+        tools_group_mcp_all: "全部工具",
+{% if spec.mcp.enabled %}        mcp_hint: "本产物可连接的 MCP 服务器;圆点显示实时连通性。在此添加 / 编辑 / 删除服务器 —— 立即热重连。本地可信控制面 —— 切勿对公网暴露此面板。",
+        mcp_reconnect: "重新连接", mcp_add: "+ 添加服务器", mcp_remove: "删除", mcp_save: "保存",
+        mcp_name: "名称", mcp_transport: "传输", mcp_transport_auto: "自动",
+        mcp_command: "command", mcp_args: "args(空格分隔)", mcp_env: "env 变量名(逗号分隔)",
+        mcp_url: "url", mcp_authenv: "auth 环境变量名", mcp_desc: "描述",
+        mcp_safe_tools: "只读工具(逗号分隔,不带前缀)",
+        mcp_loading: "加载中…", mcp_reconnecting: "重连中…", mcp_saved: "已保存",
+        mcp_connected: "已连接", mcp_unreachable: "不可达", mcp_tools_word: "工具",
+        mcp_extend_hint: "在工具标签里开关某服务器的工具(每个服务器有一个总复选框)。密钥仍放 .env —— 服务器只存环境变量名,不存真值。",
+{% endif %}        prompts_system: "系统提示", prompts_rules: "规则文件(常驻)",
         rule_add: "+ 添加规则文件", rule_path_ph: "路径,如 RULES.md",
         rule_auto: "自动", rule_auto_hint: "在项目根目录自动识别(CLAUDE.md)—— 无需列出也会注入。可在此编辑正文;保存即写入该文件。",
         rules_hint: "你拥有的纯 markdown 文件(AGENTS.md / CLAUDE.md 模式),每轮原文注入系统提示。在此编辑正文;保存会写入文件 + 生效列表。",
@@ -895,7 +928,7 @@
     });
 
     // ---- config: functional sub-tabs ------------------------------------
-    const CFG_TABS = ["llm", "context", "budget", "tools", "prompts", "paradigms",{% if spec.memory.enabled %} "memory",{% endif %} "observability"];
+    const CFG_TABS = ["llm", "context", "budget", "tools",{% if spec.mcp.enabled %} "mcp",{% endif %} "prompts", "paradigms",{% if spec.memory.enabled %} "memory",{% endif %} "observability"];
     let cfgTab = "llm";
     let cfg = {};
     // Tracks unsaved edits in the config view. Edits live only in the DOM until
@@ -939,6 +972,8 @@
       buildCfgTabs();
 {% if spec.mcp.enabled %}      // Auto-discover MCP tools the first time the Tools tab opens (cached after).
       if (name === "tools" && mcpDiscovered === null) discoverMcp();
+      // Refresh live server status every time the MCP tab opens ("refresh promptly").
+      if (name === "mcp") loadMcp();
 {% endif %}    }
 
     const numOrNull = (v) => { v = (v ?? "").toString().trim(); return v === "" ? null : Number(v); };
@@ -1237,18 +1272,29 @@
         groups.get(server).push({ name: tl.name, short: tl.name.slice(sep + 2), enabled: tl.enabled, listed: true });
       });
       // One collapsed <details> per MCP server (collapsed = the noisy tools stay
-      // out of the way); the summary shows enabled/total (+ any connect error).
+      // out of the way); the summary shows a master checkbox (the "big checkbox"
+      // total switch for all the server's tools), enabled/total, + any connect error.
       for (const [server, items] of groups) {
         const en = items.filter((e) => e.enabled).length;
         const err = errors.get(server);
         box.insertAdjacentHTML("beforeend",
-          "<details class='rounded border'><summary class='cursor-pointer px-2 py-1 text-sm'>" +
-          "<span class='font-medium'>" + t("tools_group_mcp") + " · " + server + "</span> " +
+          "<details class='rounded border'><summary class='flex cursor-pointer items-center gap-2 px-2 py-1 text-sm'>" +
+          "<input type='checkbox' class='mcp-master' data-server='" + esc(server) + "' title='" + t("tools_group_mcp_all") + "' onclick='event.stopPropagation()'/>" +
+          "<span class='font-medium'>" + t("tools_group_mcp") + " · " + esc(server) + "</span> " +
           "<span class='text-xs text-slate-500'>(" + en + "/" + items.length + ")</span>" +
-          (err ? " <span class='text-xs text-red-600'>" + esc(err) + "</span>" : "") +
+          (err ? "<span class='text-xs text-red-600'>" + esc(err) + "</span>" : "") +
           "</summary><div class='space-y-1 px-2 pb-2 pl-4'>" +
           items.map((e) => toolRow(e.name, e.short, e.enabled, e.listed)).join("") + "</div></details>");
       }
+      // Reflect each group's aggregate on its master checkbox: checked = all on,
+      // indeterminate = some on. The master is not a .tool-en, so it never enters
+      // the saved allowlist itself.
+      box.querySelectorAll(".mcp-master").forEach((m) => {
+        const cbs = m.closest("details").querySelectorAll(".tool-en");
+        const on = Array.from(cbs).filter((c) => c.checked).length;
+        m.checked = cbs.length > 0 && on === cbs.length;
+        m.indeterminate = on > 0 && on < cbs.length;
+      });
     }
 {% if spec.mcp.enabled %}
     // Scan configured MCP servers for their tools and re-render (cached per page
@@ -1271,6 +1317,76 @@
       } finally {
         if (btn) btn.disabled = false;
       }
+    }
+
+    // ---- MCP management tab (server list + status + add/edit/delete) --------
+    let mcpServers = null;  // last GET /mcp/status payload
+
+    // One server card: a live status dot + editable transport/command/url/env
+    // (env-var NAMES only, never secret values) + Save (POST /mcp/servers, which
+    // hot-reconnects) + Remove. `isNew` makes the name editable; an existing
+    // server keeps its name as the key (rename = remove + add).
+    function mcpServerCard(s, isNew) {
+      s = s || {}; const c = s.config || {};
+      const sel = c.transport || "";
+      const opt = (v, label) => "<option value='" + v + "'" + (sel === v ? " selected" : "") + ">" + label + "</option>";
+      const dot = isNew ? "" : "<span class='" + (s.connected ? "text-emerald-600" : "text-red-600") + "'>\u25cf</span> ";
+      const meta = isNew ? "" :
+        "<span class='text-xs text-slate-500'>[" + esc(s.transport) + "] " + s.enabled_count + "/" + s.tool_count + " " + t("mcp_tools_word") + "</span>" +
+        (s.error ? " <span class='text-xs text-red-600'>" + esc(s.error) + "</span>" : "");
+      const div = document.createElement("div");
+      div.className = "mcp-srv rounded-lg border p-3 space-y-2";
+      div.innerHTML =
+        "<div class='flex items-center justify-between gap-2'>" +
+          "<div class='flex items-center gap-2'>" + dot +
+            "<input class='m-name rounded border px-2 py-1 font-mono text-sm' placeholder='" + t("mcp_name") + "' value='" + esc(c.name) + "'" + (isNew ? "" : " readonly") + "/>" +
+            "<select class='m-transport rounded border px-2 py-1 text-xs'>" +
+              opt("", t("mcp_transport_auto")) + opt("stdio", "stdio") + opt("http", "http") + opt("sse", "sse") +
+            "</select>" +
+          "</div>" + meta +
+        "</div>" +
+        "<div class='grid grid-cols-2 gap-2 text-xs'>" +
+          "<label>" + t("mcp_command") + "<input class='m-command mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc(c.command) + "'/></label>" +
+          "<label>" + t("mcp_args") + "<input class='m-args mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc((c.args || []).join(" ")) + "'/></label>" +
+          "<label>" + t("mcp_url") + "<input class='m-url mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc(c.url) + "'/></label>" +
+          "<label>" + t("mcp_authenv") + "<input class='m-authenv mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc(c.auth_env) + "'/></label>" +
+          "<label>" + t("mcp_env") + "<input class='m-env mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc((c.env || []).join(", ")) + "'/></label>" +
+          "<label>" + t("mcp_safe_tools") + "<input class='m-safe mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc((c.safe_tools || []).join(", ")) + "'/></label>" +
+        "</div>" +
+        "<div class='flex items-center gap-2'>" +
+          "<button type='button' class='m-save rounded border px-3 py-1 text-xs'>" + t("mcp_save") + "</button>" +
+          "<button type='button' class='m-remove rounded border px-3 py-1 text-xs text-red-600'>" + t("mcp_remove") + "</button>" +
+          "<span class='m-status text-xs'></span>" +
+        "</div>";
+      return div;
+    }
+    // Read one card's inputs into a server config (env-var NAMES only).
+    function cardToServer(w) {
+      const g = (cls) => { const el = w.querySelector("." + cls); return el ? el.value.trim() : ""; };
+      const o = { name: g("m-name") };
+      const tr = g("m-transport"); if (tr) o.transport = tr;
+      const cmd = g("m-command"); if (cmd) o.command = cmd;
+      const args = g("m-args"); if (args) o.args = args.split(/\s+/).filter(Boolean);
+      const url = g("m-url"); if (url) o.url = url;
+      const authenv = g("m-authenv"); if (authenv) o.auth_env = authenv;
+      const env = g("m-env"); if (env) o.env = env.split(",").map((x) => x.trim()).filter(Boolean);
+      const safe = g("m-safe"); if (safe) o.safe_tools = safe.split(",").map((x) => x.trim()).filter(Boolean);
+      return o;
+    }
+    function buildMcp() {
+      const box = $("cfg-mcp-list");
+      box.innerHTML = "";
+      ((mcpServers && mcpServers.servers) || []).forEach((s) => box.appendChild(mcpServerCard(s, false)));
+    }
+    // Pull live status (GET /mcp/status) and rebuild the list. Called each time the
+    // MCP tab opens so the connection dots refresh promptly.
+    async function loadMcp() {
+      const msg = $("cfg-mcp-msg");
+      msg.className = "text-xs text-slate-500"; msg.textContent = t("mcp_loading");
+      try {
+        mcpServers = await (await fetch("/mcp/status")).json();
+        buildMcp(); msg.textContent = "";
+      } catch (e) { msg.className = "text-xs text-red-600"; msg.textContent = String(e); }
     }
 {% endif %}
 
@@ -1551,6 +1667,51 @@
       return err;
     }
 {% if spec.mcp.enabled %}    $("cfg-mcp-scan").addEventListener("click", discoverMcp);
+    // The per-server "big checkbox" on the Tools tab: toggle every tool in that
+    // server's group on/off. (The master itself is not saved; the .tool-en boxes
+    // it flips are what collectConfig writes to the allowlist.)
+    $("cfg-tools").addEventListener("change", (e) => {
+      const m = e.target.closest(".mcp-master");
+      if (!m) return;
+      m.indeterminate = false;
+      m.closest("details").querySelectorAll(".tool-en").forEach((cb) => { cb.checked = m.checked; });
+    });
+    // MCP management tab: add an editable card, reconnect all, or save/remove a
+    // server (each save/delete hot-reconnects + invalidates the Tools-tab scan).
+    $("cfg-mcp-add").addEventListener("click", () => {
+      $("cfg-mcp-list").appendChild(mcpServerCard({}, true));
+    });
+    $("cfg-mcp-reconnect").addEventListener("click", async () => {
+      const msg = $("cfg-mcp-msg");
+      msg.className = "text-xs text-slate-500"; msg.textContent = t("mcp_reconnecting");
+      try {
+        mcpServers = await (await fetch("/mcp/reconnect", { method: "POST" })).json();
+        buildMcp(); mcpDiscovered = null; msg.textContent = "";
+      } catch (e) { msg.className = "text-xs text-red-600"; msg.textContent = String(e); }
+    });
+    $("cfg-mcp-list").addEventListener("click", async (e) => {
+      const card = e.target.closest(".mcp-srv");
+      if (!card) return;
+      const status = card.querySelector(".m-status");
+      if (e.target.closest(".m-save")) {
+        status.className = "m-status text-xs text-slate-500"; status.textContent = t("mcp_reconnecting");
+        const resp = await fetch("/mcp/servers", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(cardToServer(card)),
+        });
+        const data = await resp.json();
+        if (resp.ok) { mcpServers = data; mcpDiscovered = null; buildMcp(); }
+        else { status.className = "m-status text-xs text-red-600"; status.textContent = data.error || t("cfg_invalid"); }
+        return;
+      }
+      if (e.target.closest(".m-remove")) {
+        const name = card.querySelector(".m-name").value.trim();
+        if (!name) { card.remove(); return; }  // an unsaved new card
+        const resp = await fetch("/mcp/servers/" + encodeURIComponent(name), { method: "DELETE" });
+        if (resp.ok) { mcpServers = await resp.json(); mcpDiscovered = null; buildMcp(); }
+        else { status.className = "m-status text-xs text-red-600"; status.textContent = t("cfg_invalid"); }
+      }
+    });
 {% endif %}
     $("cfg-save").addEventListener("click", async () => {
       const ruleErr = await saveRuleFiles();  // write the rule files before saving the list

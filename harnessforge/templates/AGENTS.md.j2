@@ -495,9 +495,23 @@ are referenced by env-var **name** and resolved from `.env` at runtime.
 {% if interfaces.web %}
 You don't have to write the `<server>__<tool>` lines by hand: in the web **Config
 → Tools** tab, hit **Scan MCP** (it runs on first open too) — each configured
-server's tools are listed under a collapsed group; tick one to add it to the
-allowlist and Save. You still declare the server itself in `config.yaml mcp:`.
+server's tools are listed under a collapsed group with a **master checkbox**
+(toggle the whole server's tools at once); tick one to add it to the allowlist and
+Save.
+
+The **Config → MCP** tab is the management view: each server shows a live
+connection dot (green = connected, red = unreachable, with the error), its
+transport + tool counts, and editable fields. Add / edit / delete a server there
+and it **reconnects immediately** (writing `config.yaml` back, env-var names only).
+This lets the product spawn local commands / reach URLs you configure — a **local,
+trusted control**, so don't expose `/config` or `/mcp` on a public network.
 {% endif %}
+On the CLI, `{{ project_slug }} mcp status` health-checks every configured server
+(connectivity + tool counts; an unreachable server is shown with its error).
+
+Remote servers use `url` (+ optional `auth_env`). Set `transport: sse` for an
+older server that speaks the legacy HTTP+SSE transport instead of Streamable HTTP
+(the `http` default); stdio servers infer their transport from `command`.
 
 ```yaml
 mcp:
@@ -506,6 +520,10 @@ mcp:
       command: uvx
       args: ["mcp-server-git", "--repository", "."]
       safe_tools: ["git_status", "git_log", "git_diff"]   # read-only -> risk=safe
+    - name: remote-example
+      url: https://mcp.example.com/sse
+      transport: sse          # legacy HTTP+SSE; omit (or `http`) for Streamable HTTP
+      auth_env: EXAMPLE_TOKEN  # env-var NAME holding the bearer token
   connect_timeout_seconds: 30   # a slow/failing server is skipped, never hangs
 tools:
   - name: git__git_status        # allowlist as <server>__<tool>

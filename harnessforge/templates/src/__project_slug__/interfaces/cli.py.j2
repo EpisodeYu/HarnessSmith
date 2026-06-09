@@ -693,6 +693,64 @@ def info(
     _section("memory backends (registered):", list(MEMORY_BACKENDS), {config.memory.backend})
 {% endif %}
 
+{% if spec.mcp.enabled %}
+mcp_app = typer.Typer(add_completion=False, help="Inspect MCP servers (health + tools).")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("status")
+def mcp_status(
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to config.yaml."
+    ),
+) -> None:
+    """Health-check every configured MCP server: connectivity + tool counts.
+
+    Connects each server once and lists its tools; an unreachable server is shown
+    in red with its error (e.g. a uvx/npx server needs uv/Node on PATH). Read-only
+    — it changes nothing. This is the CLI view of the web MCP management page.
+    """
+    from ..harness.mcp import McpManager
+
+    config = load_config(config_path)
+    if not config.mcp.servers:
+        typer.secho(
+            "no MCP servers configured (add them under mcp.servers in config.yaml).",
+            fg=typer.colors.YELLOW,
+        )
+        return
+    enabled = config.enabled_tool_names()
+    manager = McpManager(config.mcp)
+    try:
+        manager.start()  # connects every server (failures isolated into .status())
+        rows = manager.status()
+    finally:
+        manager.close()
+
+    hint_runtime = False
+    for row in rows:
+        name = row["name"]
+        en = sum(1 for n in enabled if n.startswith(name + "__"))
+        dot_color = typer.colors.GREEN if row["connected"] else typer.colors.RED
+        typer.secho("  ● ", fg=dot_color, nl=False)
+        if row["connected"]:
+            typer.echo(
+                f"{name}  [{row['transport']}]  "
+                f"tools: {en} enabled / {row['tool_count']} available"
+            )
+        else:
+            err = str(row["error"] or "unknown error")
+            typer.echo(f"{name}  [{row['transport']}]  unreachable: {err}")
+            if any(tok in err.lower() for tok in ("npx", "node", "uvx", "no such file")):
+                hint_runtime = True
+    if hint_runtime:
+        typer.secho(
+            "  hint: a server's launcher isn't on PATH — install Node.js (npx) / uv "
+            "(uvx) to use it.",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
+{% endif %}
+
 {% if spec.memory.enabled %}
 @app.command()
 def memory(
@@ -792,9 +850,14 @@ def serve(
     # Import extensions, surface config diagnostics, and fail-fast on hard errors
     # before binding the port. create_app re-imports (idempotent) and mounts hooks.
     _prepare_runtime(config)
-{% if spec.mcp.enabled %}    # Launched servers live for the process lifetime (uvicorn runs until Ctrl-C).
-    _start_mcp(config)
-{% endif %}{% if spec.memory.enabled %}    _setup_memory(config)
+{% if spec.memory.enabled %}    _setup_memory(config)
+{% endif %}    # Pass config_path so a /config panel Save persists back to this file.
+    application = create_app(config, mock=mock, config_path=config_path)
+{% if spec.mcp.enabled %}    # Connect MCP up front (process lifetime, failures isolated) so the page shows
+    # live status and chat offers MCP tools from the first request.
+    from .web import _ensure_mcp_manager
+
+    _ensure_mcp_manager(application)
 {% endif %}    typer.secho(
         f"Serving on http://{host}:{bind_port}  (open this; Ctrl-C to stop)",
         fg=typer.colors.GREEN,
@@ -808,10 +871,7 @@ def serve(
             f"    ssh -L {bind_port}:127.0.0.1:{bind_port} <user>@<host>",
             fg=typer.colors.BRIGHT_BLACK,
         )
-    # Pass config_path so a /config panel Save persists back to this file.
-    uvicorn.run(
-        create_app(config, mock=mock, config_path=config_path), host=host, port=bind_port
-    )
+    uvicorn.run(application, host=host, port=bind_port)
 {% endif %}
 
 if __name__ == "__main__":

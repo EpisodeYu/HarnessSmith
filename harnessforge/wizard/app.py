@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 import yaml
@@ -61,10 +62,22 @@ PARADIGMS = [
 # checked by default. The catalog itself keeps every server (``--mcp-server``
 # still resolves e.g. github/time) — this only curates the *form*. ``git`` is the
 # practical local default (keyless, read tools on); ``github`` (needs a token, no
-# enabled tools) and ``time`` (niche) are hidden here. Desktop Commander is shown
-# but unchecked (all tools high-risk) and ordered last.
+# enabled tools) and ``time`` (niche) are hidden here. Desktop Commander (shell +
+# full filesystem) is default-ON in the wizard product — safety is the HITL
+# confirmation gate (``confirm: high``, see ``_BAKED_DEFAULTS`` / ``_GENERATE_CONFIRM``),
+# a deliberate, signed loosening of the "high-risk off by default" baseline for
+# wizard products only (Slice 11). It still needs Node (npx) at runtime.
 _WIZARD_CATALOG_ORDER = ("fetch", "ddg-search", "git", "desktop-commander")
-_WIZARD_CATALOG_DEFAULT = frozenset({"fetch", "ddg-search", "git"})
+_WIZARD_CATALOG_DEFAULT = frozenset({"fetch", "ddg-search", "git", "desktop-commander"})
+
+# Catalog servers whose tools the wizard ships ENABLED by default (overriding the
+# catalog's off-by-default state). Powerful but HITL-gated (``confirm: high``).
+_WIZARD_TOOLS_ON = frozenset({"desktop-commander"})
+
+# HITL confirmation policy seeded into a wizard product's config.yaml: every
+# risk=high tool (shell / file writes / Desktop Commander) pauses for the user's
+# OK before it runs. The CLI / preset paths keep the "none" default.
+_GENERATE_CONFIRM = "high"
 
 # Background product servers launched by the one-click "generate" flow. Held so
 # the Popen handles (and their log file objects) aren't garbage-collected; the
@@ -262,10 +275,24 @@ def _spawn_launch(job: dict, target_dir: Path, project_slug: str) -> None:
     ).start()
 
 
+def _with_default_tools(server):
+    """Default-enable a server's tools for the wizard product (HITL-gated).
+
+    Powerful servers (Desktop Commander) are shipped ON by default — safety is the
+    ``confirm: high`` HITL gate, not off-by-default. Other servers keep the
+    catalog's per-tool ``default_enabled`` state. ``replace`` keeps the frozen
+    dataclass immutable."""
+    if server.name not in _WIZARD_TOOLS_ON:
+        return server
+    return replace(
+        server, tools=[replace(t, default_enabled=True) for t in server.tools]
+    )
+
+
 def _resolve_prefill(spec: HarnessSpec, names: list[str]):
     """Resolve catalog selections (only when mcp.enabled); raises CatalogError."""
     if spec.mcp.enabled and names:
-        return resolve_servers([str(n) for n in names])
+        return [_with_default_tools(s) for s in resolve_servers([str(n) for n in names])]
     return []
 
 
@@ -331,7 +358,11 @@ def create_app() -> FastAPI:
             )
         try:
             result = generate(
-                spec, target_dir, git_init=bool(body.get("git", False)), mcp_servers=servers
+                spec,
+                target_dir,
+                git_init=bool(body.get("git", False)),
+                mcp_servers=servers,
+                confirm_default=_GENERATE_CONFIRM,
             )
         except TargetExistsError as exc:
             return JSONResponse(
