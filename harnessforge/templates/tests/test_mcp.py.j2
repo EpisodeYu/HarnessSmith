@@ -53,6 +53,35 @@ def test_stdio_discovers_and_calls_tool(manager):
     assert "hello" in registry.call("dummy__echo", json.dumps({"text": "hello"}))
 
 
+def test_wildcard_enables_all_server_tools(manager):
+    """A `<server>__*` allowlist entry enables every discovered tool of that server
+    (no per-tool listing), and risk grading still follows `safe_tools`."""
+    registry = Registry()
+    config = _config(
+        [{"name": "dummy__*", "enabled": True}],
+        servers=[{"name": "dummy", "command": sys.executable, "args": [DUMMY], "safe_tools": ["echo"]}],
+    )
+    registered = register_mcp_tools(config, manager, registry)
+
+    assert set(registered) == {"dummy__echo", "dummy__add"}  # whole toolset on
+    assert registry.get("dummy__echo").risk == SAFE  # safe_tools still grades risk
+    assert registry.get("dummy__add").risk == HIGH
+
+    # The wildcard also gates active_names (what the model is offered).
+    enabled = config.enabled_tool_names()
+    assert set(registry.active_names(enabled)) == {"dummy__echo", "dummy__add"}
+    # Read-only paradigms still drop the high-risk tool, keep the safe one.
+    read_only = registry.active_names(enabled, allow_high_risk=False)
+    assert read_only == ["dummy__echo"]
+
+
+def test_disabled_wildcard_enables_nothing(manager):
+    """`<server>__*` with `enabled: false` is a no-op (no tool registered)."""
+    registry = Registry()
+    registered = register_mcp_tools(_config([{"name": "dummy__*", "enabled": False}]), manager, registry)
+    assert registered == []
+
+
 def test_non_allowlisted_tool_is_not_registered(manager):
     registry = Registry()
     # `add` is discovered but not in the allowlist -> it must not be registered.

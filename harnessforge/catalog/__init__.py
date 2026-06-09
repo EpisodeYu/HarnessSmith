@@ -79,11 +79,16 @@ class CatalogServer:
         return entry
 
     def allowlist_entries(self) -> list[dict]:
-        """``config.yaml`` ``tools`` entries (``<server>__<tool>`` + default state)."""
-        return [
-            {"name": f"{self.name}__{tool.name}", "enabled": tool.default_enabled}
-            for tool in self.tools
-        ]
+        """``config.yaml`` ``tools`` allowlist entry for this server.
+
+        A single ``<server>__*`` wildcard that enables EVERY tool the server
+        exposes (present and future), so the full toolset is available by default
+        without listing each tool by name. Per-tool risk still comes from
+        ``safe_tools`` (read-only tools stay ``safe``; the rest are ``high``), and
+        any tool can be turned off individually later from ``config.yaml`` / the web
+        Tools panel.
+        """
+        return [{"name": f"{self.name}__*", "enabled": True}]
 
 
 def _coerce_server(name: str, data: dict) -> CatalogServer:

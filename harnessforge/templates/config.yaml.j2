@@ -44,8 +44,9 @@ tools:
     enabled: {{ tool.enabled | tojson }}
 {% endfor %}  - name: ask_question
     enabled: true    # built-in: pause and ask the user a clarifying question (safe; off in non-interactive runs)
-{% if mcp_tool_allowlist %}  # MCP tools (allowlist): only enabled `<server>__<tool>` entries are offered to
-  # the model. Read tools are on; mutating/shell tools are off — flip to enable.
+{% if mcp_tool_allowlist %}  # MCP tools (allowlist): a `<server>__*` wildcard enables ALL of that server's
+  # tools (read + mutating/shell). To narrow it, replace the wildcard with explicit
+  # `<server>__<tool>` lines, or toggle individual tools on the web Tools panel.
 {% for entry in mcp_tool_allowlist %}  - name: {{ entry.name }}
     enabled: {{ entry.enabled | tojson }}
 {% endfor %}{% endif %}{% if spec.skills.enabled %}  - name: read_skill

@@ -8,6 +8,8 @@
 >
 > **状态:✅ 已完成(2026-06-05)。Part A(MCP 工具基线)+ Part B(标准 SKILL)均门禁全绿**。方向 + 决策①–⑥经人 2026-06-05 定稿(MCP 预设做基线 / 不自写 built-in / fetch 默认开 / git 预置 / DC 预填默认关 / 生成期预热 + Docker 烤镜像 / 风险按工具分级 B / `spec.skills` 仅 enabled、dirs 走运行期 B / split 推进,见 §4)。门禁见 §3(全勾)。
 >
+> **实现变更(2026-06-09,人定向)**:预填 allowlist 改为**每个 MCP server 一条 `<server>__*` 通配,默认全开**(取代原"fetch 开 / git 读开写关 / DC 全关"的逐工具默认)。即所有预填 server 的**全部工具(含写/shell)默认启用**;通配匹配在 `tools.in_allowlist` 实现,`register_mcp_tools` / `Registry.active_names` 共用。**风险分级不变**:`safe_tools` 内的读类仍 `risk=safe`(plan/ask 可用),其余 `risk=high`(仅 agent)。收窄方式:把通配换成显式 `<server>__<tool>` 行,或在 web Tools 面板逐个勾(整服开满会回存为通配)。下文 §3/§4 中"git 写默认关 / DC 全关"等表述为 2026-06-05 历史决策记录,实际默认以本条为准。
+>
 > **红线提醒**:① 能力来自成熟 MCP 生态,**不自写 built-in**(免造轮子+维护);**不做联网 MCP registry / `forge add`**(v1+);marketplace 只走"文档 + 粘贴式 config";SaaS 平台(Composio 等)只作 **remote MCP**(`url`+`auth_env`,落 Slice 4 已支持的远程传输),**不引其框架包**。② SKILL = 提示注入 + 文件读 + 用工具跑脚本,**不引框架**;高风险(脚本/写/shell)默认关(`01 §6`)。
 
 ## 0. 边界与口径(开工前先对齐)

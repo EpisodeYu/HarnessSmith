@@ -730,7 +730,11 @@ def mcp_status(
     hint_runtime = False
     for row in rows:
         name = row["name"]
-        en = sum(1 for n in enabled if n.startswith(name + "__"))
+        # A `<server>__*` wildcard enables every discovered tool.
+        if f"{name}__*" in enabled:
+            en = row["tool_count"]
+        else:
+            en = sum(1 for n in enabled if n.startswith(name + "__"))
         dot_color = typer.colors.GREEN if row["connected"] else typer.colors.RED
         typer.secho("  ● ", fg=dot_color, nl=False)
         if row["connected"]:

@@ -8,15 +8,18 @@
 # referenced by env-var NAME only — never values.
 #
 # Because the generated harness ships no built-in productivity tools, these MCP
-# presets double as the *capability baseline*: `fetch` + `git` (read) are on by
-# default, mutating git + Desktop Commander (shell/files) are predefined but off
-# (one-click enable). uvx-based servers (requires: uv) can be prewarmed at
-# generation and baked into the Docker image for offline use; Node-based servers
-# (requires: node) need Node/npx on the host.
+# presets double as the *capability baseline*. Each prefilled server is enabled by
+# a single `<server>__*` wildcard in config.yaml — its WHOLE toolset (read +
+# mutating/shell) is on by default (narrow it after generation if you want).
+# uvx-based servers (requires: uv) can be prewarmed at generation and baked into
+# the Docker image for offline use; Node-based servers (requires: node) need
+# Node/npx on the host.
 #
 # Per-tool `risk`: safe = read-only / low-impact (offered even to read-only
 # paradigms like plan/ask); high = mutating / shell / network side effects
-# (default off, agent-only). `default_enabled` seeds config.yaml's allowlist.
+# (agent-only). `risk` feeds `safe_tools` (risk grading); the per-tool
+# `default_enabled` flag is retained as documentation but the prefill now enables
+# every tool via the wildcard regardless.
 version: 1
 
 servers:
@@ -74,8 +77,8 @@ servers:
     requires: node
     source: https://github.com/wonderwhy-er/DesktopCommanderMCP
     updated: "2026-01-23"
-    # A representative subset (Desktop Commander exposes ~30 tools). All high-risk
-    # and default off: flip one to `true` in config.yaml to enable (needs Node).
+    # A representative subset (Desktop Commander exposes ~30 tools). All high-risk;
+    # the prefilled `desktop-commander__*` wildcard enables the whole set (needs Node).
     tools:
       - {name: read_file, risk: high, default_enabled: false}
       - {name: write_file, risk: high, default_enabled: false}

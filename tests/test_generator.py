@@ -535,8 +535,8 @@ def test_coding_assistant_is_an_mcp_baseline(tmp_path, preset_spec):
 
 
 def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spec):
-    """The baseline prefill lands fetch/git/DC in config.yaml with the right
-    default allowlist (fetch + git-read on, mutating git + DC off)."""
+    """The baseline prefill lands fetch/git/DC in config.yaml, each enabled by a
+    single ``<server>__*`` wildcard (the whole toolset on by default)."""
     out = tmp_path / "ca"
     servers = preset_mcp_servers("coding-assistant")
     generate(preset_spec, out, git_init=False, mcp_servers=servers)
@@ -553,14 +553,8 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
 
     config = yaml.safe_load(config_yaml)
     enabled = {t["name"] for t in config["tools"] if t["enabled"]}
-    disabled = {t["name"] for t in config["tools"] if not t["enabled"]}
-    assert "fetch__fetch" in enabled
-    assert "ddg-search__search" in enabled and "ddg-search__fetch_content" in enabled
-    assert "git__git_status" in enabled and "git__git_log" in enabled
-    assert "git__git_commit" in disabled and "git__git_add" in disabled
-    # Desktop Commander predefined but every tool default OFF (one-click enable)
-    assert any(n.startswith("desktop-commander__") for n in disabled)
-    assert not any(n.startswith("desktop-commander__") for n in enabled)
+    # Every prefilled server is enabled via its wildcard — all tools on by default.
+    assert {"fetch__*", "ddg-search__*", "git__*", "desktop-commander__*"} <= enabled
 
 
 def test_mcp_prefill_servers_do_not_leak_into_spec_snapshot(tmp_path, preset_spec):
@@ -600,7 +594,7 @@ def test_mcp_disabled_ignores_prefill(tmp_path, spec):
     generate(spec, out, git_init=False, mcp_servers=resolve_servers(["fetch"]))
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8").lower()
     assert "mcp" not in config_yaml
-    assert "fetch__fetch" not in config_yaml
+    assert "fetch__" not in config_yaml
 
 
 # --- Slice 6: standard Agent Skills (opt-in, skills.enabled) ----------------

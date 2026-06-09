@@ -264,12 +264,16 @@ def register_mcp_tools(
 ) -> list[str]:
     """Register allowlisted MCP tools into ``registry`` (default: the shared one).
 
-    Only tools whose ``{server}__{tool}`` name is enabled in ``config.tools`` are
-    registered — a non-allowlisted MCP tool is never connected to the model. Risk
-    is per-tool: a tool listed in its server's ``safe_tools`` registers as
-    ``risk=safe`` (read-only; offered to plan/ask); every other tool defaults to
-    ``risk=high`` (mutating/external; agent-only, opt in deliberately).
+    Only tools allowlisted in ``config.tools`` are registered — by exact
+    ``{server}__{tool}`` name or by a ``{server}__*`` wildcard that enables the
+    server's whole toolset (see :func:`~{{ project_slug }}.harness.tools.in_allowlist`);
+    a non-allowlisted MCP tool is never connected to the model. Risk is per-tool: a
+    tool listed in its server's ``safe_tools`` registers as ``risk=safe`` (read-only;
+    offered to plan/ask); every other tool defaults to ``risk=high`` (mutating/
+    external; agent-only, opt in deliberately).
     """
+    from .tools import in_allowlist
+
     registry = registry or default_registry
     allowed = config.enabled_tool_names()
     safe_by_server = {s.name: set(s.safe_tools) for s in config.mcp.servers}
@@ -278,7 +282,7 @@ def register_mcp_tools(
         safe = safe_by_server.get(server, set())
         for tool in tools:
             name = f"{server}__{tool.name}"
-            if name not in allowed:
+            if not in_allowlist(name, allowed):
                 continue
             registry.register(
                 Tool(

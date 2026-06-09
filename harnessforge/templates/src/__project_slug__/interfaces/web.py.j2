@@ -623,13 +623,19 @@ def create_app(
         servers = []
         for server in config.mcp.servers:
             st = live.get(server.name, {})
+            tool_count = st.get("tool_count", 0)
+            # A `<server>__*` wildcard enables every discovered tool.
+            if f"{server.name}__*" in enabled:
+                enabled_count = tool_count
+            else:
+                enabled_count = sum(1 for n in enabled if n.startswith(server.name + "__"))
             servers.append({
                 "name": server.name,
                 "transport": server.kind,
                 "connected": bool(st.get("connected")),
                 "error": st.get("error"),
-                "tool_count": st.get("tool_count", 0),
-                "enabled_count": sum(1 for n in enabled if n.startswith(server.name + "__")),
+                "tool_count": tool_count,
+                "enabled_count": enabled_count,
                 "config": server.model_dump(mode="json", exclude_none=True),
             })
         return {"servers": servers}
@@ -651,6 +657,7 @@ def create_app(
         listed = {tool.name for tool in config.tools}
         servers = []
         for server in config.mcp.servers:
+            wildcard = f"{server.name}__*" in enabled  # enables the whole server
             tools = []
             for tool in manager.discovered.get(server.name, []):
                 full = f"{server.name}__{tool.name}"
@@ -659,7 +666,7 @@ def create_app(
                     "short": tool.name,
                     "description": tool.description or "",
                     "listed": full in listed,
-                    "enabled": full in enabled,
+                    "enabled": full in enabled or wildcard,
                 })
             servers.append(
                 {"name": server.name, "error": manager.errors.get(server.name), "tools": tools}

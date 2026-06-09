@@ -1231,7 +1231,11 @@
       const box = $("cfg-tools");
       box.innerHTML = "";
       const listedEnabled = new Map();  // full name -> enabled (from config allowlist)
-      (cfg.tools || []).forEach((tl) => listedEnabled.set(tl.name, !!tl.enabled));
+      const wildServers = new Set();  // servers with an enabled `<server>__*` wildcard (all tools on)
+      (cfg.tools || []).forEach((tl) => {
+        if (tl.name.endsWith("__*")) { if (tl.enabled) wildServers.add(tl.name.slice(0, -3)); return; }
+        listedEnabled.set(tl.name, !!tl.enabled);
+      });
 
       const custom = [], builtin = [];
       (cfg.tools || []).forEach((tl) => {
@@ -1258,7 +1262,8 @@
           (s.tools || []).forEach((tl) => {
             groups.get(s.name).push({
               name: tl.name, short: tl.short,
-              enabled: listedEnabled.get(tl.name) || false, listed: listedEnabled.has(tl.name),
+              enabled: listedEnabled.get(tl.name) || wildServers.has(s.name) || false,
+              listed: listedEnabled.has(tl.name),
             });
             seen.add(tl.name);
           });
@@ -1266,7 +1271,7 @@
       }
       (cfg.tools || []).forEach((tl) => {  // listed MCP tools not covered by a scan
         const sep = tl.name.indexOf("__");
-        if (sep <= 0 || seen.has(tl.name)) return;
+        if (sep <= 0 || seen.has(tl.name) || tl.name.endsWith("__*")) return;  // wildcard isn't a row
         const server = tl.name.slice(0, sep);
         if (!groups.has(server)) groups.set(server, []);
         groups.get(server).push({ name: tl.name, short: tl.name.slice(sep + 2), enabled: tl.enabled, listed: true });
@@ -1511,11 +1516,22 @@
       // Collect from the live checkboxes: a previously-listed tool always
       // round-trips (unchecking just disables it); a discovered tool is written to
       // the allowlist only when ticked, so config isn't bloated with every tool a
-      // server happens to expose.
+      // server happens to expose. A fully-on MCP server collapses to a single
+      // `<server>__*` wildcard (so future tools stay enabled too).
       const toolsOut = [];
+      const pushCb = (cb) => {
+        if (cb.dataset.listed === "1" || cb.checked) toolsOut.push({ name: cb.dataset.name, enabled: cb.checked });
+      };
       document.querySelectorAll("#cfg-tools .tool-en").forEach((cb) => {
-        if (cb.dataset.listed === "1" || cb.checked) {
-          toolsOut.push({ name: cb.dataset.name, enabled: cb.checked });
+        if (!cb.closest("details")) pushCb(cb);  // local (custom/built-in) tool
+      });
+      document.querySelectorAll("#cfg-tools details").forEach((d) => {
+        const master = d.querySelector(".mcp-master");
+        const cbs = Array.from(d.querySelectorAll(".tool-en"));
+        if (master && cbs.length && cbs.every((c) => c.checked)) {
+          toolsOut.push({ name: master.dataset.server + "__*", enabled: true });
+        } else {
+          cbs.forEach(pushCb);
         }
       });
       patch.tools = toolsOut;

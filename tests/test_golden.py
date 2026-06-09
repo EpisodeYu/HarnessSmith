@@ -134,9 +134,9 @@ def test_golden_thin_example_stays_thin_and_smoke_passes(tmp_path):
 
 @pytest.mark.golden
 def test_golden_mcp_baseline_prefill_smoke(tmp_path):
-    """coding-assistant baseline: prefill fetch/git/DC into config.yaml, prewarm
-    the uvx servers, then smoke. fetch+git actually launch (read tools enabled);
-    Desktop Commander stays dormant (all tools off)."""
+    """coding-assistant baseline: prefill fetch/git/DC into config.yaml (each
+    enabled by a `<server>__*` wildcard), prewarm the uvx servers, then smoke.
+    fetch+git launch (their tools are enabled); DC needs Node so it's skipped."""
     spec = load_spec(preset_spec_path("coding-assistant"))
     servers = preset_mcp_servers("coding-assistant")
     out = tmp_path / "ca_baseline"
@@ -144,7 +144,7 @@ def test_golden_mcp_baseline_prefill_smoke(tmp_path):
     result = generate(spec, out, git_init=True, mcp_servers=servers)
 
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
-    assert "fetch__fetch" in config_yaml and "mcp-server-git" in config_yaml
+    assert "fetch__*" in config_yaml and "mcp-server-git" in config_yaml
 
     lock_dependencies(out)
     prewarm_mcp_servers(servers)  # warm uvx cache so the smoke launch is fast
@@ -249,7 +249,7 @@ def test_uvx_harnessforge_new_smoke(tmp_path):
     assert (out / "uv.lock").is_file()
     assert (out / "src" / "coding_assistant" / "harness" / "loop.py").is_file()
     # The CLI applied the preset's MCP prefill into the runtime config.
-    assert "fetch__fetch" in (out / "config.yaml").read_text(encoding="utf-8")
+    assert "fetch__*" in (out / "config.yaml").read_text(encoding="utf-8")
 
 
 @pytest.mark.golden

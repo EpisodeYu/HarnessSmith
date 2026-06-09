@@ -526,11 +526,21 @@ mcp:
       auth_env: EXAMPLE_TOKEN  # env-var NAME holding the bearer token
   connect_timeout_seconds: 30   # a slow/failing server is skipped, never hangs
 tools:
-  - name: git__git_status        # allowlist as <server>__<tool>
+  - name: git__*                 # wildcard: enable EVERY tool of this server
     enabled: true
-  - name: git__git_commit
-    enabled: false               # mutating -> off until you opt in
+  # Or list tools individually as <server>__<tool> to narrow the allowlist:
+  # - name: git__git_status
+  #   enabled: true
+  # - name: git__git_commit
+  #   enabled: false             # mutating -> off until you opt in
 ```
+
+A `<server>__*` wildcard enables the server's whole toolset (read + mutating),
+including tools it adds later. Risk is still per-tool: tools in `safe_tools`
+register as `risk=safe` (offered to plan/ask); the rest are `risk=high`
+(agent-only). To narrow, replace the wildcard with explicit `<server>__<tool>`
+lines (or toggle individual tools on the web Tools panel — a fully-on server
+saves back as the wildcard).
 
 ### Offline & Docker
 

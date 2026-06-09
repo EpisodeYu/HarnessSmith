@@ -18,6 +18,19 @@ SAFE = "safe"
 HIGH = "high"
 
 
+def in_allowlist(name: str, enabled: set[str]) -> bool:
+    """Whether ``name`` is allowlisted, honoring ``<server>__*`` MCP wildcards.
+
+    A wildcard entry (e.g. ``git__*``) enables EVERY tool from that MCP server, so
+    a server's full toolset is offered without listing each tool by name (and newly
+    discovered tools are picked up automatically). Plain names match exactly.
+    """
+    if name in enabled:
+        return True
+    server, sep, _ = name.partition("__")
+    return bool(sep) and f"{server}__*" in enabled
+
+
 class ToolError(Exception):
     """Raised for unknown tools or bad arguments."""
 
@@ -101,7 +114,7 @@ class Registry:
         return [
             name
             for name, tool in self._tools.items()
-            if name in enabled and (allow_high_risk or tool.risk != HIGH)
+            if in_allowlist(name, enabled) and (allow_high_risk or tool.risk != HIGH)
         ]
 
     def schemas(self, names: list[str]) -> list[dict]:

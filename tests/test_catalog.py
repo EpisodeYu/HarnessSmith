@@ -26,8 +26,8 @@ def test_ddg_search_is_keyless_uvx_web_search():
     assert ddg.uvx_package == "duckduckgo-mcp-server"
     assert ddg.auth_env is None and ddg.env == []  # keyless
     assert ddg.safe_tools == ["search", "fetch_content"]  # read-only -> usable by plan/ask
-    allow = {e["name"]: e["enabled"] for e in ddg.allowlist_entries()}
-    assert allow["ddg-search__search"] is True
+    # The prefill is a single `<server>__*` wildcard enabling the whole server.
+    assert ddg.allowlist_entries() == [{"name": "ddg-search__*", "enabled": True}]
 
 
 def test_fetch_is_a_safe_uvx_server():
@@ -45,19 +45,20 @@ def test_git_reads_are_safe_writes_are_high():
     git = get_server("git")
     assert "git_status" in git.safe_tools
     assert "git_log" in git.safe_tools
-    assert "git_commit" not in git.safe_tools  # mutating -> high
-    allow = {e["name"]: e["enabled"] for e in git.allowlist_entries()}
-    assert allow["git__git_status"] is True
-    assert allow["git__git_commit"] is False
+    assert "git_commit" not in git.safe_tools  # mutating -> high (but still enabled by the wildcard)
+    # The wildcard enables every git tool (reads + writes); `safe_tools` keeps the
+    # reads at risk=safe so plan/ask can use them, writes stay risk=high.
+    assert git.allowlist_entries() == [{"name": "git__*", "enabled": True}]
 
 
-def test_desktop_commander_is_node_and_all_off():
+def test_desktop_commander_is_node_and_wildcard_enabled():
     dc = get_server("desktop-commander")
     assert dc.command == "npx"
     assert dc.requires == "node"
     assert dc.uvx_package is None  # not baked into the image
     assert dc.safe_tools == []  # every tool high-risk
-    assert all(e["enabled"] is False for e in dc.allowlist_entries())
+    # A single wildcard enables the server's whole toolset (every tool, all high-risk).
+    assert dc.allowlist_entries() == [{"name": "desktop-commander__*", "enabled": True}]
 
 
 def test_remote_server_entry_uses_url_and_auth_env():
