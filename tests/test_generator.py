@@ -837,6 +837,30 @@ def test_launch_bat_echo_safe_for_metachar_display_name(tmp_path):
             assert not any(ch in unescaped for ch in "&<>|"), f"unsafe echo: {line!r}"
 
 
+def test_launch_bat_fallback_uses_exe_to_avoid_self_shadow(tmp_path, spec):
+    """The console-command fallback must target `<name>.exe`, never the bare
+    name. On Windows a bare `agent_harness` / `harnessforge` resolves to the
+    sibling .bat first (cwd is searched before PATH, case-insensitively), which
+    relaunches the launcher forever."""
+    # Product launcher: the default example has stem == slug == agent_harness,
+    # so the .bat and the command share a name — the exact collision case.
+    out = tmp_path / "shadow"
+    generate(spec, out, git_init=False)
+    bat = (out / "agent_harness.bat").read_text(encoding="utf-8")
+    assert "where agent_harness.exe" in bat
+    assert "agent_harness.exe %ACTION%" in bat
+    assert "where agent_harness >nul" not in bat  # bare would match the .bat
+    assert "\nagent_harness %ACTION%" not in bat
+
+    # Generator launcher at the repo root (HarnessForge.bat vs harnessforge).
+    root_bat = (
+        Path(__file__).resolve().parents[1] / "HarnessForge.bat"
+    ).read_text(encoding="utf-8")
+    assert "where harnessforge.exe" in root_bat
+    assert "harnessforge.exe wizard --open" in root_bat
+    assert "\nharnessforge wizard --open" not in root_bat  # no bare relaunch
+
+
 def test_launch_script_no_web_runs_chat(tmp_path, spec):
     """Without web, the one-click script launches the terminal chat REPL."""
     out = tmp_path / "chatlaunch"

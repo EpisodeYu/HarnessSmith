@@ -25,8 +25,11 @@ if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe" (
 where uv >nul 2>nul
 if not errorlevel 1 goto :run
 
+REM Look for the installed console script by its .exe name on purpose: a bare
+REM `harnessforge` would resolve to THIS file (HarnessForge.bat) first, since
+REM Windows searches the current dir and is case-insensitive -> infinite relaunch.
 echo [HarnessForge] Step 3/4: looking for an installed harnessforge command ...
-where harnessforge >nul 2>nul
+where harnessforge.exe >nul 2>nul
 if not errorlevel 1 (
     echo [HarnessForge] Found the harnessforge command.
     goto :run_cmd
@@ -76,9 +79,9 @@ pause >nul
 goto :eof
 
 :run_cmd
-echo [HarnessForge] Launching: harnessforge wizard --open
+echo [HarnessForge] Launching: harnessforge.exe wizard --open
 echo.
-harnessforge wizard --open
+harnessforge.exe wizard --open
 echo.
 echo [HarnessForge] Process exited (code %errorlevel%). Press a key to close.
 pause >nul

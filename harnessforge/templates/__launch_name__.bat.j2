@@ -28,8 +28,11 @@ if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe" (
 where uv >nul 2>nul
 if not errorlevel 1 goto :run
 
+REM Look for the installed console script by its .exe name on purpose: a bare
+REM `{{ project_slug }}` could resolve to THIS file ({{ project_slug }}.bat) first,
+REM since Windows searches the current dir and is case-insensitive -> relaunch loop.
 echo [{{ project_slug }}] Step 3/4: looking for an installed {{ project_slug }} command ...
-where {{ project_slug }} >nul 2>nul
+where {{ project_slug }}.exe >nul 2>nul
 if not errorlevel 1 (
     echo [{{ project_slug }}] Found the {{ project_slug }} command.
     goto :run_cmd
@@ -79,9 +82,9 @@ pause >nul
 goto :eof
 
 :run_cmd
-echo [{{ project_slug }}] Launching: {{ project_slug }} %ACTION%
+echo [{{ project_slug }}] Launching: {{ project_slug }}.exe %ACTION%
 echo.
-{{ project_slug }} %ACTION%
+{{ project_slug }}.exe %ACTION%
 echo.
 echo [{{ project_slug }}] Process exited (code %errorlevel%). Press a key to close.
 pause >nul
