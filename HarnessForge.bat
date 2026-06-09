@@ -27,7 +27,7 @@ echo [HarnessForge] Step 4/4: uv is not installed yet.
 echo.
 echo   The wizard needs uv - a small tool that manages Python and dependencies for
 echo   you (user-level install, no admin required). How would you like to install it?
-echo     [1] Standard - winget or the official installer (downloads from GitHub)
+echo     [1] Standard - official installer (downloads uv from GitHub)
 echo     [2] China mirror - pip + Tsinghua mirror (needs Python already installed)
 echo     [n] Don't install
 set "CHOICE=1"
@@ -35,16 +35,9 @@ set /p "CHOICE=  Choose [1/2/n]: "
 if /i "%CHOICE%"=="n" goto :manual
 if "%CHOICE%"=="2" goto :install_cn
 
-where winget >nul 2>nul
-if not errorlevel 1 (
-    echo [HarnessForge] Installing uv via winget ...
-    winget install --id astral-sh.uv -e --accept-package-agreements --accept-source-agreements
-)
-if exist "%USERPROFILE%\.local\bin\uv.exe" set "PATH=%USERPROFILE%\.local\bin;%PATH%"
-if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe" set "PATH=%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
-where uv >nul 2>nul
-if not errorlevel 1 goto :run
-
+REM Use the official installer directly (NOT winget): winget first updates its
+REM own source CDN, which hangs for a long time and fails on some networks (e.g.
+REM behind the GFW) even when the GitHub download itself works fine.
 echo [HarnessForge] Installing uv via the official installer ...
 powershell -ExecutionPolicy Bypass -NoProfile -Command "irm https://astral.sh/uv/install.ps1 | iex"
 if exist "%USERPROFILE%\.local\bin\uv.exe" set "PATH=%USERPROFILE%\.local\bin;%PATH%"
