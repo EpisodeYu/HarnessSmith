@@ -28,6 +28,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -204,6 +206,45 @@ def _wait_port(host: str, port: int, *, timeout: float = 300.0) -> bool:
 _UV_SYNC_TIMEOUT = 1800.0
 
 
+# Tsinghua's PyPI mirror — the same trusted, university-run mirror the launcher's
+# China-install path uses. Only an *index* mirror (wheels/sdists); it deliberately
+# does NOT touch managed-Python downloads (those would need a separate, untrusted
+# GitHub proxy — out of bounds per the supply-chain rule in CLAUDE.md).
+_CN_PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+# Env keys that already pin an index; if any is set we never override the choice.
+_INDEX_ENV_KEYS = ("UV_DEFAULT_INDEX", "UV_INDEX_URL", "UV_INDEX", "PIP_INDEX_URL")
+
+# Probe result, cached for the process (probing twice — sync then serve — is
+# pointless and the reachability of PyPI won't flip mid-launch).
+_index_probe_cached: bool | None = None
+
+
+def _pypi_reachable(url: str = "https://pypi.org/simple/", timeout: float = 3.0) -> bool:
+    """True if the official PyPI answers a quick HEAD within ``timeout``.
+
+    Any HTTP response (even an error status) counts as reachable — only a
+    connection failure / timeout (the GFW-blocked case) counts as unreachable."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=timeout):
+            return True
+    except urllib.error.HTTPError:
+        return True
+    except (urllib.error.URLError, OSError):
+        return False
+
+
+def _auto_index() -> str | None:
+    """The China-mirror index URL to fall back to, or ``None`` to keep the default.
+
+    Picks the mirror only when the official PyPI looks unreachable (e.g. behind
+    the GFW). Cached so the (up-to-``timeout``) probe runs at most once."""
+    global _index_probe_cached
+    if _index_probe_cached is None:
+        _index_probe_cached = _pypi_reachable()
+    return None if _index_probe_cached else _CN_PYPI_MIRROR
+
+
 def _product_env() -> dict[str, str]:
     """Environment for the product's own ``uv`` invocations.
 
@@ -213,13 +254,20 @@ def _product_env() -> dict[str, str]:
     ``uv run`` would target the wizard's environment instead of the product's
     own ``.venv`` — and on Windows, where files in an in-use venv are locked,
     that means fighting the still-running parent, so the sync never finishes.
-    Dropping those keys lets uv resolve the product's own ``.venv``. Anything
-    the launcher set (a mirror via ``UV_DEFAULT_INDEX``, ``UV_PYTHON_PREFERENCE``)
-    is preserved.
+    Dropping those keys lets uv resolve the product's own ``.venv``.
+
+    Index selection is automatic: an explicitly-configured index (e.g. a mirror
+    the launcher set via ``UV_DEFAULT_INDEX``) is preserved; otherwise, when the
+    official PyPI looks unreachable, a China mirror is filled in so the install
+    can still fetch deps.
     """
     env = dict(os.environ)
     env.pop("VIRTUAL_ENV", None)
     env.pop("UV_PROJECT_ENVIRONMENT", None)
+    if not any(env.get(k) for k in _INDEX_ENV_KEYS):
+        mirror = _auto_index()
+        if mirror:
+            env["UV_DEFAULT_INDEX"] = mirror
     return env
 
 

@@ -821,6 +821,22 @@ def test_launch_scripts_bootstrap_uv_when_missing(tmp_path, spec):
     assert "pause" in low
 
 
+def test_launch_scripts_auto_pick_china_mirror(tmp_path, spec):
+    """With uv already present, the launchers auto-pick the index: probe the
+    official PyPI (via curl) and fall back to the Tsinghua mirror when it's
+    unreachable — no menu — while an explicit UV_DEFAULT_INDEX still wins."""
+    out = tmp_path / "automirror"
+    generate(spec, out, git_init=False)
+    sh = (out / "agent_harness.sh").read_text(encoding="utf-8")
+    bat = (out / "agent_harness.bat").read_text(encoding="utf-8")
+    for text in (sh, bat):
+        assert "pypi.org/simple/" in text  # probes the official index
+        assert "curl" in text  # only probes when curl is available
+        assert "unreachable" in text  # the mirror-fallback notice
+        assert "pypi.tuna.tsinghua.edu.cn" in text  # the fallback mirror
+        assert "UV_DEFAULT_INDEX" in text
+
+
 def test_launch_bat_echo_safe_for_metachar_display_name(tmp_path):
     """A display name with cmd metacharacters (& < > |) must never reach an
     `echo` line — it would break batch parsing. The echoes use project_slug

@@ -15,6 +15,19 @@ find_uv() {
   return 1
 }
 
+# Auto-pick the package index: when no index is pinned and the official PyPI is
+# unreachable (e.g. behind the GFW), use the Tsinghua mirror for this run so the
+# first `uv sync` can still fetch deps. An explicit UV_DEFAULT_INDEX always wins;
+# we only probe when curl is available.
+pick_index() {
+  [ -n "${UV_DEFAULT_INDEX:-}" ] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  echo "[HarnessForge] Checking whether PyPI is reachable ..."
+  if curl -sS -m 3 -I https://pypi.org/simple/ >/dev/null 2>&1; then return 0; fi
+  echo "[HarnessForge] PyPI looks unreachable - using the Tsinghua mirror this run."
+  export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+}
+
 echo "[HarnessForge] Looking for uv ..."
 uv_bin="$(find_uv || true)"
 if [ -z "$uv_bin" ]; then
@@ -56,6 +69,7 @@ if [ -z "$uv_bin" ]; then
 fi
 
 if [ -n "$uv_bin" ]; then
+  pick_index
   echo "[HarnessForge] Launching: $uv_bin run --extra wizard harnessforge wizard --open"
   exec "$uv_bin" run --extra wizard harnessforge wizard --open
 fi

@@ -89,6 +89,19 @@ pause
 goto :eof
 
 :run
+REM Auto-pick the package index: when no index is pinned and the official PyPI is
+REM unreachable (e.g. behind the GFW), use the Tsinghua mirror for this run so the
+REM first `uv sync` can still fetch deps. An explicit UV_DEFAULT_INDEX always wins;
+REM we only probe when curl is present (ships with Windows 10 1803+).
+if defined UV_DEFAULT_INDEX goto :run_go
+where curl >nul 2>nul
+if errorlevel 1 goto :run_go
+echo [HarnessForge] Checking whether PyPI is reachable ...
+curl -sS -m 3 -I https://pypi.org/simple/ >nul 2>nul
+if not errorlevel 1 goto :run_go
+echo [HarnessForge] PyPI looks unreachable - using the Tsinghua mirror this run.
+set "UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple"
+:run_go
 echo [HarnessForge] Launching: uv run --extra wizard harnessforge wizard --open
 echo.
 uv run --extra wizard harnessforge wizard --open

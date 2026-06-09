@@ -272,6 +272,60 @@ def test_product_env_drops_parent_venv(monkeypatch):
     assert env["UV_DEFAULT_INDEX"] == "https://mirror.example/simple"
 
 
+def test_product_env_falls_back_to_china_mirror_when_pypi_unreachable(monkeypatch):
+    """No index pinned + official PyPI unreachable (e.g. GFW) -> the product's uv
+    calls get the Tsinghua mirror filled in automatically."""
+    import harnessforge.wizard.app as app_mod
+
+    monkeypatch.setattr(app_mod, "_index_probe_cached", None)
+    monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: False)
+    for k in app_mod._INDEX_ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    assert app_mod._product_env()["UV_DEFAULT_INDEX"] == app_mod._CN_PYPI_MIRROR
+
+
+def test_product_env_keeps_official_when_pypi_reachable(monkeypatch):
+    """No index pinned + official PyPI reachable -> leave uv on its default index."""
+    import harnessforge.wizard.app as app_mod
+
+    monkeypatch.setattr(app_mod, "_index_probe_cached", None)
+    monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: True)
+    for k in app_mod._INDEX_ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    assert "UV_DEFAULT_INDEX" not in app_mod._product_env()
+
+
+def test_product_env_never_overrides_an_explicit_index(monkeypatch):
+    """An explicitly-pinned index (e.g. set by the launcher) is never replaced,
+    even when the probe would say PyPI is unreachable."""
+    import harnessforge.wizard.app as app_mod
+
+    monkeypatch.setattr(app_mod, "_index_probe_cached", None)
+    monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: False)
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://my.own/simple")
+    assert app_mod._product_env()["UV_DEFAULT_INDEX"] == "https://my.own/simple"
+
+
+def test_pypi_reachable_classifies_responses(monkeypatch):
+    """A server response (even an HTTP error status) counts as reachable; only a
+    connection failure / timeout counts as unreachable."""
+    import urllib.error
+
+    import harnessforge.wizard.app as app_mod
+
+    def http_error(*a, **k):
+        raise urllib.error.HTTPError("u", 405, "no", {}, None)
+
+    monkeypatch.setattr(app_mod.urllib.request, "urlopen", http_error)
+    assert app_mod._pypi_reachable() is True
+
+    def conn_error(*a, **k):
+        raise urllib.error.URLError("blocked")
+
+    monkeypatch.setattr(app_mod.urllib.request, "urlopen", conn_error)
+    assert app_mod._pypi_reachable() is False
+
+
 def test_status_streams_live_setup_log_tail(client, tmp_path):
     """While sync runs, the status endpoint tacks uv's latest output (read live
     from .setup.log) onto the job so the UI shows it progressing, not frozen."""
