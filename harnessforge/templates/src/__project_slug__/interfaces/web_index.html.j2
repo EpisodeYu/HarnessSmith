@@ -187,7 +187,7 @@
         session_rename: "Rename", session_delete: "Delete", session_cancel: "Cancel",
         reask_edit: "Edit this question", reask_send: "Resend",
         reask_warn: "This discards the conversation after this point.", reask_confirm: "Regenerate",
-        ask_submit: "Submit", ask_skip: "Skip", ask_other_ph: "Type a reply…",
+        ask_submit: "Submit", ask_skip: "Skip", ask_other: "Other…", ask_other_ph: "Type a reply…",
         no_llm: "No LLM is configured yet — set a model (and its API key) before you can chat.",
         no_llm_link: "Go to Config → LLM",
         cfg_intro: "Runtime behavioral config (no secrets). Save applies it live and writes it back to config.yaml.",
@@ -260,7 +260,7 @@
         session_rename: "重命名", session_delete: "删除", session_cancel: "取消",
         reask_edit: "编辑此问题", reask_send: "重新发送",
         reask_warn: "这会丢弃此处之后的对话。", reask_confirm: "重新生成",
-        ask_submit: "提交", ask_skip: "跳过", ask_other_ph: "输入回答…",
+        ask_submit: "提交", ask_skip: "跳过", ask_other: "其他…", ask_other_ph: "输入回答…",
         no_llm: "尚未配置 LLM —— 请先设置一个 model(及其 API key)才能对话。",
         no_llm_link: "前往 配置 → LLM",
         cfg_intro: "运行期行为性配置(无密钥)。保存即时生效并写回 config.yaml。",
@@ -397,8 +397,22 @@
         });
         card.appendChild(bar);
       } else {
-        const inputs = [];
-        if (data.options && data.options.length) {
+        const inputs = [];  // the real-option radios/checkboxes (not "Other")
+        const hasOptions = !!(data.options && data.options.length);
+        // The free-text box. With options it's a Cursor-style "Other": hidden until
+        // the last "Other…" entry is picked; a pure free-text question shows it now.
+        let ta = null;
+        if (data.allow_text) {
+          ta = document.createElement("textarea");
+          ta.className = "w-full rounded border px-2 py-1 text-sm";
+          ta.rows = 2;
+          ta.placeholder = t("ask_other_ph");
+        }
+        const showText = () => { if (ta) { ta.classList.remove("hidden"); ta.focus(); } };
+        const hideText = () => { if (ta) ta.classList.add("hidden"); };
+
+        let other = null;  // the synthetic "Other" radio/checkbox
+        if (hasOptions) {
           const list = document.createElement("div");
           list.className = "space-y-1";
           data.options.forEach((o) => {
@@ -409,21 +423,33 @@
             inp.name = "ask_" + data.request_id;
             inp.value = o.id;
             inputs.push(inp);
+            // single-select: picking a real option puts the custom box away
+            inp.addEventListener("change", () => { if (!data.allow_multiple) hideText(); });
             const span = document.createElement("span");
             span.textContent = o.label;
             lbl.append(inp, span);
             list.appendChild(lbl);
           });
+          if (data.allow_text) {
+            const lbl = document.createElement("label");
+            lbl.className = "flex items-center gap-2 text-sm";
+            other = document.createElement("input");
+            other.type = data.allow_multiple ? "checkbox" : "radio";
+            other.name = "ask_" + data.request_id;
+            other.value = "__other__";
+            other.addEventListener("change", () => { other.checked ? showText() : hideText(); });
+            const span = document.createElement("span");
+            span.textContent = t("ask_other");
+            lbl.append(other, span);
+            list.appendChild(lbl);
+          }
           card.appendChild(list);
         }
-        let ta = null;
-        if (data.allow_text) {
-          ta = document.createElement("textarea");
-          ta.className = "w-full rounded border px-2 py-1 text-sm";
-          ta.rows = 2;
-          ta.placeholder = t("ask_other_ph");
+        if (ta) {
+          if (hasOptions) ta.classList.add("hidden");  // revealed by "Other"
           card.appendChild(ta);
         }
+
         const bar = document.createElement("div");
         bar.className = "flex items-center gap-2";
         const send = document.createElement("button");
@@ -431,7 +457,10 @@
         send.className = "rounded bg-indigo-600 px-3 py-1 text-xs text-white";
         send.textContent = t("ask_submit");
         send.addEventListener("click", () => {
-          submit(inputs.filter((i) => i.checked).map((i) => i.value), ta ? ta.value.trim() : null);
+          const ids = inputs.filter((i) => i.checked).map((i) => i.value);
+          // free text counts for a pure free-text question, or when "Other" is picked
+          const wantsText = !hasOptions || (other && other.checked);
+          submit(ids, (ta && wantsText) ? ta.value.trim() : null);
         });
         const skip = document.createElement("button");
         skip.type = "button";

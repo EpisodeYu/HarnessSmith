@@ -566,6 +566,24 @@ def test_cli_asker_parses_options_and_free_text(monkeypatch):
     assert skipped.option_ids == [] and skipped.text is None
 
 
+def test_cli_asker_other_option_prompts_for_custom_text(monkeypatch):
+    """Cursor-style: with options + free text the last entry is 'Other'; picking it
+    (here index 3) prompts again for the custom answer, returned as text."""
+    import typer
+
+    from {{ project_slug }}.harness.interaction import AskRequest, Option
+    from {{ project_slug }}.interfaces.cli import CliAsker
+
+    req = AskRequest(
+        kind="question", prompt="Pick",
+        options=[Option("0", "A"), Option("1", "B")], allow_text=True,
+    )
+    answers = iter(["3", "my own answer"])  # pick "Other" (the 3rd entry), then type
+    monkeypatch.setattr(typer, "prompt", lambda *a, **k: next(answers))
+    resp = CliAsker().ask(req)
+    assert resp.option_ids == [] and resp.text == "my own answer"
+
+
 # --- Slice 5: loop paradigms (registry + runtime mode + extension) ---------
 
 

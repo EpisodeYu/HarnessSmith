@@ -163,9 +163,12 @@ def calculator(expression: str) -> str:
         "answer. Use this when the request is ambiguous or a decision is genuinely "
         "the user's to make (which option, which file, confirm an assumption) — "
         "prefer it over guessing on consequential choices. Do NOT use it for things "
-        "you can determine yourself. Offer `options` for a multiple-choice question, "
-        "or omit them for a free-text one. If no interactive user is available the "
-        "answer says so and you should proceed on your best judgment."
+        "you can determine yourself. Offer `options` for a multiple-choice question "
+        "(set allow_multiple to let them pick several), or omit them for a free-text "
+        "one. An 'Other' free-text choice is added automatically when allow_free_text "
+        "(the default), so do NOT add your own 'Other'/'something else' option. If no "
+        "interactive user is available the answer says so and you should proceed on "
+        "your best judgment."
     ),
     parameters={
         "type": "object",

@@ -692,6 +692,7 @@ def test_index_has_ask_card_ui():
     assert "function renderAskCard" in body
     assert 'addEventListener("ask"' in body
     assert "/respond" in body
+    assert "ask_other" in body and "__other__" in body  # Cursor-style "Other…" choice
     assert "window.confirm" not in body and "window.prompt" not in body
 {% if spec.memory.enabled %}
 

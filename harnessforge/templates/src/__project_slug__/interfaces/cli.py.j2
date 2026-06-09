@@ -80,31 +80,49 @@ class CliAsker:
         typer.secho(req.prompt, fg=typer.colors.CYAN, err=True)
         for i, opt in enumerate(req.options, 1):
             typer.secho(f"  [{i}] {opt.label}", err=True)
+        # Cursor-style: when free text is allowed alongside options, the last entry
+        # is an explicit "Other" — picking it asks for a custom answer. (A typed,
+        # non-numeric reply is still accepted directly too.)
+        other_n = len(req.options) + 1 if (req.options and req.allow_text) else None
+        if other_n is not None:
+            typer.secho(f"  [{other_n}] Other (type your own answer)", err=True)
         parts = []
         if req.options:
             parts.append("number" + ("(s, comma-separated)" if req.allow_multiple else ""))
-        if req.allow_text:
-            parts.append(("or " if parts else "") + "type a reply")
-        hint = "Your answer" + (f" ({' '.join(parts)})" if parts else "")
-        try:
-            raw = typer.prompt(hint, default="", show_default=False).strip()
-        except (EOFError, KeyboardInterrupt, typer.Abort):
-            # No input available / Ctrl-C during the ask: degrade instead of crash.
+        if req.allow_text and not req.options:
+            parts.append("type a reply")
+        hint = "Your answer" + (f" ({' / '.join(parts)})" if parts else "")
+        raw = self._read(hint)
+        if raw is None:  # EOF / Ctrl-C during the ask: degrade instead of crash.
             return NonInteractiveAsker().ask(req)
+        raw = raw.strip()
         if not raw:
             return AskResponse()
         tokens = [tok.strip() for tok in raw.split(",")] if req.allow_multiple else [raw]
         if req.options and tokens and all(tok.isdigit() for tok in tokens):
-            ids = [
-                req.options[int(tok) - 1].id
-                for tok in tokens
-                if 0 < int(tok) <= len(req.options)
-            ]
+            ids, wants_other = [], False
+            for tok in tokens:
+                idx = int(tok)
+                if other_n is not None and idx == other_n:
+                    wants_other = True
+                elif 0 < idx <= len(req.options):
+                    ids.append(req.options[idx - 1].id)
+            if wants_other:  # "Other" picked -> ask for the custom text
+                text = self._read("Your answer")
+                return AskResponse(option_ids=ids, text=(text or "").strip() or None)
             if ids:
                 return AskResponse(option_ids=ids)
         if req.allow_text:
             return AskResponse(text=raw)
         return AskResponse()
+
+    @staticmethod
+    def _read(prompt: str) -> str | None:
+        """Read one line; ``None`` on EOF / Ctrl-C so the caller can degrade."""
+        try:
+            return typer.prompt(prompt, default="", show_default=False)
+        except (EOFError, KeyboardInterrupt, typer.Abort):
+            return None
 
 
 def _cli_asker(mock: bool):
