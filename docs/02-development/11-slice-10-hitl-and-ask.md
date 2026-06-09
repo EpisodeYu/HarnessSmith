@@ -56,6 +56,8 @@
 - **stop 联动**:`POST /chat/{run_id}/stop`(`web.py:337`)或断连(`GeneratorExit`,`web.py:252`)置 cancel 时,同时给所有 pending 回传队列投一个"取消"哨兵 → 阻塞中的 ask 立即返回(approval=reject / question=降级),不留挂起线程。
 - **超时 / 公开面默认拒绝**:`WebAsker` 可配可选等待上限,超时按 fail-closed(approval=reject)。公开面隔离沿用 Slice 13+ backlog 的"管理面/公开面隔离"前提。
 
+> **实现说明(2026-06-09)**:pending 表选了"独立平行 map"方案——`app.state.runs` 维持 `run_id -> cancel Event`(stop 端点与既有测试逐字不动),另加 `app.state.pending: run_id -> {request_id -> reply Queue}`,共用 `runs_lock`。`_chat_events` 新增 `pending=None` 形参;worker 线程内 `with using_asker(asker)`(contextvar 不跨线程,故在 worker 内设)。`WebAsker.ask` 投 `("ask", …)` 事件后阻塞在 reply Queue 上,`POST /chat/{run_id}/respond` 投回 `{option_ids,text}` 解除;stop / `GeneratorExit` 给所有 pending Queue 投 `None` 哨兵 fail-closed。`CliAsker` 放在 `interfaces/cli.py`(依赖 typer)、`WebAsker` 放在 `interfaces/web.py`;`Asker` 协议 + `NonInteractiveAsker` + contextvar 注入留在 `harness/interaction.py`(仅 stdlib)。超时等待上限本片未接(留 B / 后续)。
+
 ### 1.4 前端结构化卡片(`web_index.html`,question/approval 共用一个组件)
 
 - 监听 `event: ask` → 在对话流里渲染一张卡片:`prompt` + 选项按钮(单/多选)+(可选)文本框 + 提交。提交 → `POST /chat/{run_id}/respond`。
@@ -65,6 +67,8 @@
 ---
 
 ## 2. 计划 A:ask_question 工具（先做)
+
+> **状态:✅ 已实现(2026-06-09)**。`ask_question` 内置工具在 `tools.py` 始终注册(`risk=safe`),`config.yaml.j2` 在 `spec.tools` 之后**无条件**渲染 `ask_question: enabled: true`(对齐决策①:内置直接生成、不进 spec、要关就运行期移出 allowlist)。CLI(`run`/`chat`)与 Web(`_chat_events` worker)入口已用 `using_asker(...)` 包住 `run_loop`;非交互(CLI 非 TTY / `--mock` / Web 断连)走 `NonInteractiveAsker` 优雅降级。前端 `web_index.html` 监听 `event: ask` 渲染内联卡片(单/多选 + 文本框 + 提交/跳过),提交 `POST /chat/{run_id}/respond`。
 
 - **新增内置工具 `ask_question`**(`harness/tools.py`,`risk=safe`,默认随产物生成 + 默认进 `config.yaml` allowlist):
   - 参数 schema:`question: str`、`options: string[]`(可空 = 纯文本问)、`allow_multiple: bool=false`、`allow_free_text: bool=true`。
@@ -93,15 +97,17 @@
 
 ## 4. 退出门禁（实现后逐项勾;A 先交付可单独绿,B 再补)
 
-- [ ] **黄金路径**:preset/web 生成 → `uv sync && pytest` 绿 → mock 跑通一次工具调用(HITL `confirm: none` 默认不阻断 mock)。
-- [ ] **共享底座**:`interaction.ask()` 经 contextvar 解析;无 asker / 非交互 → 降级(question 不挂死、approval 拒绝)单测绿。
-- [ ] **ask_question(A)**:CLI(`CliAsker`,可注入假 stdin)与 Web(`WebAsker` + `POST /respond`)各跑通一次"模型调 ask_question → 弹 → 回传 → 答案进 `tool_result`";非 TTY/`--mock` 降级绿。
+> **实现进度(2026-06-09)**:**共享底座 + 计划 A(ask_question)已实现并全绿**;计划 B(HITL 工具确认)未做(下次任务)。下方与 A/底座相关的门禁已勾,B 专属门禁留空。
+
+- [x] **黄金路径**:preset/web 生成 → `uv sync && pytest` 绿 → mock 跑通一次工具调用(mock `script=None` 调首个工具 `get_current_time`,ask_question 不会被误触;`--mock` 走 `NonInteractiveAsker`)。
+- [x] **共享底座**:`interaction.ask()` 经 contextvar 解析(`using_asker`);无 asker / 非交互 → 降级(question 返回"无用户、自行判断"不挂死、approval 选 reject)单测绿(`test_ask_resolves_via_contextvar_and_restores` / `test_noninteractive_degrades_question_and_rejects_approval`)。
+- [x] **ask_question(A)**:CLI(`CliAsker`,monkeypatch `typer.prompt` 注入假 stdin:数字→选项 id、文本→自由回答、空→跳过)与 Web(`WebAsker` + `POST /chat/{run_id}/respond`)各跑通一次"模型调 ask_question → 弹 `event: ask` → 回传 → 答案进 `tool_result`"(`test_ask_question_tool_feeds_answer_back_as_tool_result` / `test_ask_question_round_trips_over_web`);非 TTY/`--mock` 降级绿(`test_ask_question_tool_degrades_without_a_user`)。
 - [ ] **HITL(B)四档**:`allow_once`/`reject`/`allow_session`/`allow_always`(mock asker)绿;`reject` 返回 ERROR 且循环不崩;**非交互默认拒绝断言**;`allow_session` 本会话该工具不再问;`allow_always` 写回 `config.yaml`(注释保留)。
 - [ ] **触发口径**:`confirm` = `none`(零问)/ `high`(只高危)/ `all`(含只读)/ 工具名列表 各命中正确;只读默认豁免。
-- [ ] **Web stop 联动**:stop / 断连置 cancel 时,pending ask 立即解除(reject/降级),无挂起线程。
-- [ ] **关闭仍薄**:`confirm: none` 逐字不阻断;ask_question 从 allowlist 移除后不 offer;**无新增运行期依赖**(golden `uv.lock` FORBIDDEN 断言不含 langchain/langgraph/adk)。
-- [ ] **大改动回归**:golden 全量 + Docker build/run mock 全绿。
-- [ ] `ReadLints` clean。
+- [x] **Web stop 联动**:stop / 断连(`GeneratorExit`)置 cancel 时,pending ask 立即解除(投 `None` 哨兵 → question 降级 / approval 拒绝),无挂起线程(`test_stop_unblocks_a_pending_ask_fail_closed`;`/respond` 幂等 `test_respond_endpoint_routes_answer_and_is_idempotent`)。
+- [x] **关闭仍薄(A 部分)**:ask_question 从 allowlist 移除(或 `enabled: false`)后不 offer;**无新增运行期依赖**(底座只用 stdlib `contextvars`;golden `uv.lock` FORBIDDEN 断言不含 langchain/langgraph/adk 全绿)。`confirm: none` 逐字不阻断属 B,随 B 验。
+- [x] **大改动回归**:golden 全量(10 项:preset/web/mcp/multi-paradigm/thin/mcp-baseline/skills/memory/wizard/uvx)+ Docker build/run mock 全绿。
+- [x] `ReadLints` clean。
 
 ---
 

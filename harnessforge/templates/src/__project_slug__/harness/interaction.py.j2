@@ -1,0 +1,143 @@
+"""Human-in-the-loop interaction: a thin "pause the loop and ask the user" channel.
+
+A side extension point next to ``tools`` / ``hooks`` — NOT part of the core loop.
+Two capabilities share this one round-trip (pause -> push a structured prompt ->
+wait for the user -> resume):
+
+- **ask_question** (a built-in tool): the model itself asks the user a clarifying
+  question; the answer comes back as the tool result. See ``tools.ask_question``.
+- **tool confirmation** (HITL approval, opt-in): the framework asks before running
+  a tool. Same channel, ``kind="approval"``.
+
+The asker is injected via a :class:`contextvars.ContextVar` (``using_asker``) so a
+tool function — which only gets its own arguments, not the loop's locals — can
+reach the user with ``from .interaction import ask`` without changing any tool
+signature or ``run()`` parameter. The context manager wraps a whole turn at the
+entry point (CLI / web); a web worker thread sets it itself, since a ContextVar
+does not propagate across ``threading.Thread``.
+
+Zero new runtime dependencies (``contextvars`` is stdlib). When no asker is set,
+or the asker is non-interactive (a pipe / CI / ``--mock``), it degrades safely:
+a question returns a "no user available, use your judgment" note (never hangs the
+run) and an approval is rejected (fail-closed).
+"""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from typing import Iterator, Literal, Protocol, runtime_checkable
+
+# A question with no user to answer it returns this, so the model proceeds on its
+# own best judgment instead of the run hanging on an unanswerable prompt.
+NO_USER_NOTE = "(no interactive user available; proceed using your best judgment)"
+
+
+@dataclass
+class Option:
+    """One offered choice: ``id`` is returned in the response, ``label`` is shown."""
+
+    id: str
+    label: str
+
+
+@dataclass
+class AskRequest:
+    """A structured prompt for the user.
+
+    ``kind`` distinguishes who is asking and what the answer means: ``question``
+    (the model wants clarification — the answer becomes a tool result) vs
+    ``approval`` (the framework wants to run a tool — the answer allows/denies it).
+    ``options`` are the offered choices (the model supplies them for a question;
+    HITL fills fixed ones like allow/reject for an approval). ``allow_text`` lets
+    the user type a free reply; ``allow_multiple`` lets them pick several.
+    ``context`` carries extra display data (e.g. an approval's tool / arguments).
+    """
+
+    kind: Literal["question", "approval"]
+    prompt: str
+    options: list[Option] = field(default_factory=list)
+    allow_text: bool = False
+    allow_multiple: bool = False
+    context: dict = field(default_factory=dict)
+
+
+@dataclass
+class AskResponse:
+    """The user's reply: chosen option ids and/or a free-text answer."""
+
+    option_ids: list[str] = field(default_factory=list)
+    text: str | None = None
+
+    @property
+    def selected(self) -> str | None:
+        """The first chosen option id (the single-select convenience)."""
+        return self.option_ids[0] if self.option_ids else None
+
+
+@runtime_checkable
+class Asker(Protocol):
+    """Anything that can put a request to the user and return their answer.
+
+    Implementations: ``CliAsker`` (terminal), ``WebAsker`` (SSE card + a POST
+    back), and :class:`NonInteractiveAsker` (the safe degrade). The call may block
+    until the user responds.
+    """
+
+    def ask(self, req: AskRequest) -> AskResponse: ...
+
+
+class NonInteractiveAsker:
+    """The fail-safe used when there is no user: a pipe / CI / ``--mock`` / a
+    cancelled web run. A question returns the "use your judgment" note so the
+    model proceeds (never hangs); an approval is rejected (fail-closed)."""
+
+    def ask(self, req: AskRequest) -> AskResponse:
+        if req.kind == "approval":
+            reject = next(
+                (o.id for o in req.options if o.id in {"reject", "deny", "no"}),
+                "reject",
+            )
+            return AskResponse(option_ids=[reject])
+        return AskResponse(text=NO_USER_NOTE)
+
+
+def noninteractive_response(req: AskRequest) -> AskResponse:
+    """The degraded answer for ``req`` — reused when a live asker has to bail out
+    (e.g. a web run is stopped while a question is pending)."""
+    return NonInteractiveAsker().ask(req)
+
+
+# The asker for the current turn. Default ``None`` -> ``ask`` falls back to the
+# non-interactive degrade, so calling ``ask`` outside ``using_asker`` never raises.
+_CURRENT: ContextVar[Asker | None] = ContextVar("current_asker", default=None)
+
+
+@contextmanager
+def using_asker(asker: Asker) -> Iterator[Asker]:
+    """Bind ``asker`` as the current asker for the duration of the ``with`` block.
+
+    Wrap a whole turn at the entry point (CLI ``run``/``chat``, the web worker
+    thread). Restores the previous asker on exit (ContextVar token reset), so
+    nested/sequential turns don't leak into one another.
+    """
+    token = _CURRENT.set(asker)
+    try:
+        yield asker
+    finally:
+        _CURRENT.reset(token)
+
+
+def ask(req: AskRequest) -> AskResponse:
+    """Put ``req`` to the current user and return their answer.
+
+    The single entry every caller (a tool body, an approval boundary) uses. Reads
+    the asker from the ContextVar; with none set it degrades via
+    :class:`NonInteractiveAsker`, so a question never hangs and an approval is
+    rejected.
+    """
+    asker = _CURRENT.get()
+    if asker is None:
+        asker = NonInteractiveAsker()
+    return asker.ask(req)

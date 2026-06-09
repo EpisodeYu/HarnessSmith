@@ -65,6 +65,42 @@ allowlist — it doesn't auto-discover a tool you registered but haven't added t
 `config.yaml`.
 {% endif %}
 
+## Ask the user (ask_question + the interaction channel)
+
+The model can pause the loop and ask the **end user** a clarifying question with
+the built-in `ask_question` tool (on by default — `risk="safe"`). It's the right
+move when a request is ambiguous or a decision is genuinely the user's (which
+option, confirm an assumption). The user's answer comes back as the tool result;
+the model continues from there.
+
+- **CLI**: the terminal prints the question + numbered options and reads a line.
+- **Web**: an inline card appears in the chat; the answer is POSTed to
+  `/chat/{run_id}/respond`, unblocking the loop.
+- **Non-interactive** (a pipe, CI, `--mock`, a disconnected web client): there's no
+  user, so it degrades — the answer is a "no interactive user available, use your
+  best judgment" note and the run never hangs.
+
+Turn it off by removing `ask_question` from `config.yaml`'s `tools:` (or setting
+`enabled: false`); nothing else changes.
+
+The plumbing is `harness/interaction.py` — a thin "pause and ask the user" channel
+next to `tools` / `hooks`, **not** part of the core loop. An asker is injected per
+turn via a `contextvars` ContextVar (`using_asker`), so any tool body can reach the
+user without changing a tool signature or a `run()` parameter:
+
+```python
+from {{ project_slug }}.harness.interaction import AskRequest, Option, ask
+
+answer = ask(AskRequest(
+    kind="question", prompt="Which environment?",
+    options=[Option("0", "staging"), Option("1", "prod")], allow_text=True,
+))
+# answer.selected -> "0"/"1"; answer.text -> a typed reply (when allowed)
+```
+
+The same channel is what tool-execution confirmation (HITL allow/reject, `kind=
+"approval"`) builds on — same pause → structured prompt → wait → resume round-trip.
+
 ## Swap the model / provider
 
 Everything is OpenAI Chat Completions over a `base_url`, so any compatible

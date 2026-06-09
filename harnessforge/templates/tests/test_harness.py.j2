@@ -451,6 +451,121 @@ def test_crash_recovery_via_checkpoint_is_resumable(tmp_path):
     assert any(m.get("content") == "go" for m in resumed.messages)  # prior turn carried
 
 
+# --- Slice 10: interaction channel (ask_question + shared asker) ------------
+
+
+class _FakeAsker:
+    """Records requests and replays a canned response (the test's "user")."""
+
+    def __init__(self, response):
+        self.response = response
+        self.requests = []
+
+    def ask(self, req):
+        self.requests.append(req)
+        return self.response
+
+
+def test_ask_resolves_via_contextvar_and_restores():
+    """ask() routes to the asker bound by using_asker, and restores the prior one
+    (the degrade) when the block exits — the contextvar injection spine."""
+    from {{ project_slug }}.harness.interaction import (
+        AskRequest,
+        AskResponse,
+        ask,
+        using_asker,
+    )
+
+    asker = _FakeAsker(AskResponse(text="bound"))
+    with using_asker(asker):
+        assert ask(AskRequest(kind="question", prompt="x")).text == "bound"
+    assert asker.requests and asker.requests[0].prompt == "x"
+    # outside the block: back to the non-interactive degrade
+    assert "no interactive user" in ask(AskRequest(kind="question", prompt="x")).text
+
+
+def test_noninteractive_degrades_question_and_rejects_approval():
+    """No user available: a question proceeds (use-your-judgment note, never hangs),
+    an approval is rejected (fail-closed)."""
+    from {{ project_slug }}.harness.interaction import (
+        AskRequest,
+        NonInteractiveAsker,
+        Option,
+    )
+
+    asker = NonInteractiveAsker()
+    q = asker.ask(AskRequest(kind="question", prompt="anything?"))
+    assert q.option_ids == [] and "no interactive user" in (q.text or "")
+    approval = asker.ask(
+        AskRequest(
+            kind="approval",
+            prompt="run rm -rf?",
+            options=[Option("allow_once", "Allow"), Option("reject", "Reject")],
+        )
+    )
+    assert approval.selected == "reject"
+
+
+def test_ask_question_tool_feeds_answer_back_as_tool_result(tmp_path):
+    """The model calls ask_question; the user's selection comes back as the tool
+    result the loop appends — exercised end to end through run()."""
+    from {{ project_slug }}.harness.interaction import AskResponse, using_asker
+
+    config = _config(tmp_path, tools=[{"name": "ask_question", "enabled": True}])
+    client = MockLLM(
+        script=[
+            ScriptedCall(
+                "ask_question", {"question": "Pick one", "options": ["Apple", "Banana"]}
+            ),
+            "done",
+        ]
+    )
+    asker = _FakeAsker(AskResponse(option_ids=["1"]))  # option index 1 -> "Banana"
+    with using_asker(asker):
+        result = run("go", client=client, config=config)
+
+    assert result.answer == "done"
+    assert asker.requests[0].prompt == "Pick one"
+    assert [o.label for o in asker.requests[0].options] == ["Apple", "Banana"]
+    tool_msgs = [m for m in result.messages if m.get("role") == "tool"]
+    assert tool_msgs and "User selected: Banana" in tool_msgs[0]["content"]
+
+
+def test_ask_question_tool_degrades_without_a_user(tmp_path):
+    """With no asker bound (a pipe / --mock / CI), ask_question doesn't hang: it
+    returns the use-your-judgment note so the model just proceeds."""
+    config = _config(tmp_path, tools=[{"name": "ask_question", "enabled": True}])
+    client = MockLLM(script=[ScriptedCall("ask_question", {"question": "Anything?"}), "done"])
+    result = run("go", client=client, config=config)  # no using_asker -> degrade
+    tool_msgs = [m for m in result.messages if m.get("role") == "tool"]
+    assert tool_msgs and "no interactive user" in tool_msgs[0]["content"]
+
+
+def test_cli_asker_parses_options_and_free_text(monkeypatch):
+    """CliAsker maps a typed number to the chosen option id, other text to a
+    free-text answer, and a blank line to a skip (injected fake stdin)."""
+    import typer
+
+    from {{ project_slug }}.harness.interaction import AskRequest, Option
+    from {{ project_slug }}.interfaces.cli import CliAsker
+
+    req = AskRequest(
+        kind="question", prompt="Pick",
+        options=[Option("0", "A"), Option("1", "B")], allow_text=True,
+    )
+
+    monkeypatch.setattr(typer, "prompt", lambda *a, **k: "2")
+    assert CliAsker().ask(req).option_ids == ["1"]  # "2" -> the 2nd option's id
+
+    monkeypatch.setattr(typer, "prompt", lambda *a, **k: "a custom answer")
+    typed = CliAsker().ask(req)
+    assert typed.text == "a custom answer" and typed.option_ids == []
+
+    monkeypatch.setattr(typer, "prompt", lambda *a, **k: "")
+    skipped = CliAsker().ask(req)
+    assert skipped.option_ids == [] and skipped.text is None
+
+
 # --- Slice 5: loop paradigms (registry + runtime mode + extension) ---------
 
 

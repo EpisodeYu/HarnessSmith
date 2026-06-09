@@ -154,3 +154,75 @@ def calculator(expression: str) -> str:
         raise ToolError(f"unsupported expression: {expression!r}")
 
     return str(evaluate(ast.parse(expression, mode="eval").body))
+
+
+@registry.tool(
+    name="ask_question",
+    description=(
+        "Pause and ask the END USER a clarifying question, then return their "
+        "answer. Use this when the request is ambiguous or a decision is genuinely "
+        "the user's to make (which option, which file, confirm an assumption) — "
+        "prefer it over guessing on consequential choices. Do NOT use it for things "
+        "you can determine yourself. Offer `options` for a multiple-choice question, "
+        "or omit them for a free-text one. If no interactive user is available the "
+        "answer says so and you should proceed on your best judgment."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "The question to put to the user.",
+            },
+            "options": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional choices to offer. Omit for a free-text question.",
+            },
+            "allow_multiple": {
+                "type": "boolean",
+                "description": "Allow selecting more than one option.",
+            },
+            "allow_free_text": {
+                "type": "boolean",
+                "description": "Allow a typed reply in addition to any options (default true).",
+            },
+        },
+        "required": ["question"],
+        "additionalProperties": False,
+    },
+    risk=SAFE,
+)
+def ask_question(
+    question: str,
+    options: list | None = None,
+    allow_multiple: bool = False,
+    allow_free_text: bool = True,
+) -> str:
+    """Ask the user via the shared interaction channel; format their reply for the
+    model. The actual UI (terminal prompt / web card) is whatever asker the entry
+    point bound for this turn; with none (pipe / CI / --mock) it degrades to a
+    "no user available" answer so the loop never hangs."""
+    from .interaction import AskRequest, Option, ask
+
+    labels = [str(opt) for opt in (options or [])]
+    offered = [Option(id=str(i), label=label) for i, label in enumerate(labels)]
+    response = ask(
+        AskRequest(
+            kind="question",
+            prompt=question,
+            options=offered,
+            allow_text=bool(allow_free_text),
+            allow_multiple=bool(allow_multiple),
+        )
+    )
+    by_id = {opt.id: opt.label for opt in offered}
+    if response.option_ids:
+        chosen = ", ".join(by_id.get(i, i) for i in response.option_ids)
+        result = f"User selected: {chosen}"
+        if response.text:
+            result += f"\nUser also said: {response.text}"
+        return result
+    if response.text:
+        return f"User answered: {response.text}"
+    return "User skipped the question (no answer given)."

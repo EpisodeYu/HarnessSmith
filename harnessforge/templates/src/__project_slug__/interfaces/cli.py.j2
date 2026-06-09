@@ -15,6 +15,7 @@ from pathlib import Path
 import typer
 
 from ..harness.config import LLMProfileConfig, load_config, resolve_env
+from ..harness.interaction import AskRequest, AskResponse, NonInteractiveAsker, using_asker
 from ..harness.llm import ClientRouter
 from ..harness.loop import run as run_loop
 
@@ -61,6 +62,64 @@ def _interruptible():
         yield event.is_set
     finally:
         signal.signal(signal.SIGINT, previous)
+
+
+class CliAsker:
+    """Ask the user on the terminal: print the prompt + numbered options, read one
+    line. This is the CLI side of the shared interaction channel (used by the
+    ``ask_question`` tool, and HITL tool confirmation later).
+
+    A blank reply skips a question; digit(s) pick option(s) (comma-separated when
+    ``allow_multiple``); any other text is taken as a free-text answer when
+    allowed. If stdin is exhausted (EOF) it degrades like a non-interactive run
+    rather than crashing the turn.
+    """
+
+    def ask(self, req: AskRequest) -> AskResponse:
+        typer.echo("")
+        typer.secho(req.prompt, fg=typer.colors.CYAN, err=True)
+        for i, opt in enumerate(req.options, 1):
+            typer.secho(f"  [{i}] {opt.label}", err=True)
+        parts = []
+        if req.options:
+            parts.append("number" + ("(s, comma-separated)" if req.allow_multiple else ""))
+        if req.allow_text:
+            parts.append(("or " if parts else "") + "type a reply")
+        hint = "Your answer" + (f" ({' '.join(parts)})" if parts else "")
+        try:
+            raw = typer.prompt(hint, default="", show_default=False).strip()
+        except (EOFError, KeyboardInterrupt, typer.Abort):
+            # No input available / Ctrl-C during the ask: degrade instead of crash.
+            return NonInteractiveAsker().ask(req)
+        if not raw:
+            return AskResponse()
+        tokens = [tok.strip() for tok in raw.split(",")] if req.allow_multiple else [raw]
+        if req.options and tokens and all(tok.isdigit() for tok in tokens):
+            ids = [
+                req.options[int(tok) - 1].id
+                for tok in tokens
+                if 0 < int(tok) <= len(req.options)
+            ]
+            if ids:
+                return AskResponse(option_ids=ids)
+        if req.allow_text:
+            return AskResponse(text=raw)
+        return AskResponse()
+
+
+def _cli_asker(mock: bool):
+    """Pick the asker for this turn: the interactive terminal asker on a real TTY,
+    else the non-interactive degrade.
+
+    A piped/redirected stdin (CI, ``--mock`` smoke, Docker) has no human to answer,
+    so a question proceeds on the model's best judgment instead of blocking a
+    one-shot ``run``.
+    """
+    import sys
+
+    if mock or not sys.stdin.isatty():
+        return NonInteractiveAsker()
+    return CliAsker()
 
 
 def _profile_preflight(profile: LLMProfileConfig) -> str | None:
@@ -247,7 +306,7 @@ def run(
             )
 
     try:
-        with _interruptible() as cancel:
+        with _interruptible() as cancel, using_asker(_cli_asker(mock)):
             result = run_loop(
                 prompt,
                 mode=mode,
@@ -350,6 +409,7 @@ def chat(
 {% if spec.mcp.enabled %}    mcp_manager = _start_mcp(config)
 {% endif %}{% if spec.memory.enabled %}    _setup_memory(config)
 {% endif %}    router = ClientRouter(config, mock=mock)
+    asker = _cli_asker(mock)
     state = {"printed": False}
 
     def _on_delta(text: str) -> None:
@@ -385,7 +445,7 @@ def chat(
 {% if spec.skills.enabled %}            prompt = _expand_skill(config, prompt)
 {% endif %}            state["printed"] = False
             try:
-                with _interruptible() as cancel:
+                with _interruptible() as cancel, using_asker(asker):
                     result = run_loop(
                         prompt,
                         mode=mode,

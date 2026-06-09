@@ -38,6 +38,12 @@ from ..harness.context import CONDITIONS, STRATEGIES
 {% if spec.memory.enabled %}from ..harness.memory import BACKENDS as _MEMORY_BACKENDS
 {% endif %}from ..harness.extensions import import_extensions, load_hooks
 from ..harness.hooks import Hooks
+from ..harness.interaction import (
+    AskResponse,
+    NonInteractiveAsker,
+    noninteractive_response,
+    using_asker,
+)
 from ..harness.llm import ClientRouter, LLMResponse, OpenAIClient, ToolCall
 from ..harness.loop import run as run_loop
 from ..harness.paradigms import PARADIGMS
@@ -89,6 +95,54 @@ class _StreamHooks(Hooks):
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+class WebAsker:
+    """Ask the user over the open SSE stream + a POST back — the web side of the
+    shared interaction channel (the ``ask_question`` tool, and HITL confirmation
+    later).
+
+    ``ask`` pushes an ``("ask", {...})`` event (the page renders a card), then
+    BLOCKS on a per-request reply queue until ``POST /chat/{run_id}/respond`` (or a
+    cancel/disconnect sentinel) delivers the answer. The loop is serial, so one run
+    has at most one pending ask at a time; a small per-run table maps request id ->
+    reply queue. A ``None`` sentinel (stop / disconnect) degrades fail-closed
+    (a question -> "use your judgment", an approval -> reject).
+    """
+
+    def __init__(self, event_q: queue.Queue, pending: dict, lock) -> None:
+        self._q = event_q
+        self._pending = pending  # this run's {request_id -> reply Queue}
+        self._lock = lock
+
+    def ask(self, req) -> AskResponse:
+        request_id = session_store.new_id()
+        reply_q: queue.Queue = queue.Queue()
+        with self._lock:
+            self._pending[request_id] = reply_q
+        self._q.put((
+            "ask",
+            {
+                "request_id": request_id,
+                "kind": req.kind,
+                "prompt": req.prompt,
+                "options": [{"id": o.id, "label": o.label} for o in req.options],
+                "allow_text": req.allow_text,
+                "allow_multiple": req.allow_multiple,
+                "context": req.context,
+            },
+        ))
+        try:
+            reply = reply_q.get()  # blocks until /respond or a cancel sentinel
+        finally:
+            with self._lock:
+                self._pending.pop(request_id, None)
+        if reply is None:  # stopped / disconnected -> fail-closed degrade
+            return noninteractive_response(req)
+        return AskResponse(
+            option_ids=list(reply.get("option_ids") or []),
+            text=reply.get("text"),
+        )
 
 
 _TITLE_PROMPT = (
@@ -152,6 +206,7 @@ def _chat_events(
     history: list[dict] | None = None,
     auto_title: bool = False,
     runs: dict | None = None,
+    pending: dict | None = None,
     lock=None,
 ):
     """Drive one ``run()`` in a worker thread and yield its events as SSE.
@@ -170,18 +225,35 @@ def _chat_events(
     turn still persists its partial body (``status="interrupted"``) and emits
     ``event: stopped`` instead of ``event: final``, so the chat stays resumable.
     Each completed step is also write-ahead checkpointed for crash safety.
+
+    ``pending`` registers this run's open asks (an ``event: ask`` card waiting for
+    ``POST /chat/{run_id}/respond``) so a reply can reach the blocked worker, and a
+    stop/disconnect can unblock any pending ask (fail-closed) instead of stranding
+    the worker thread.
     """
     q: queue.Queue = queue.Queue()
     hooks = _StreamHooks(q, load_hooks(config))
     on_delta = (lambda text: q.put(("token", {"text": text}))) if stream else None
     router = ClientRouter(config, mock=mock)
 
-    # Register this run's cancel token so /stop (and disconnect) can reach it.
+    # Register this run's cancel token so /stop (and disconnect) can reach it, plus
+    # a per-run pending-ask table so /respond can deliver an answer to the worker.
     run_id = session_store.new_id()
     cancel_event = threading.Event()
+    run_pending: dict = {}
     if runs is not None and lock is not None:
         with lock:
             runs[run_id] = cancel_event
+            if pending is not None:
+                pending[run_id] = run_pending
+
+    # The asker the loop reaches via the interaction contextvar: over the web it's
+    # the SSE-card asker; with no pending table (e.g. a direct unit call) it degrades.
+    asker = (
+        WebAsker(q, run_pending, lock)
+        if pending is not None and lock is not None
+        else NonInteractiveAsker()
+    )
 
     # Auto-title first (best-effort): the sidebar gets a name before the answer.
     new_title = ""
@@ -197,17 +269,21 @@ def _chat_events(
 
     def worker() -> None:
         try:
-            result = run_loop(
-                message,
-                mode=mode,
-                client_for=router.client_for,
-                config=config,
-                hooks=hooks,
-                on_delta=on_delta,
-                history=history,
-                cancel=cancel_event.is_set,
-                checkpoint=_checkpoint,
-            )
+            # Set the asker inside the worker thread: a ContextVar does not
+            # propagate across threads, so the loop must bind it here to reach
+            # the user (ask_question / HITL) from this thread.
+            with using_asker(asker):
+                result = run_loop(
+                    message,
+                    mode=mode,
+                    client_for=router.client_for,
+                    config=config,
+                    hooks=hooks,
+                    on_delta=on_delta,
+                    history=history,
+                    cancel=cancel_event.is_set,
+                    checkpoint=_checkpoint,
+                )
             interrupted = result.stop_reason == "interrupted"
             if session_id is not None and config.sessions.enabled:
                 session_store.save(
@@ -251,13 +327,20 @@ def _chat_events(
             yield _sse(*item)
     except GeneratorExit:
         # Client disconnected (closed tab / dropped network): cancel the run so
-        # the loop stops at the next boundary instead of running on unwatched.
+        # the loop stops at the next boundary instead of running on unwatched, and
+        # unblock any pending ask (fail-closed) so the worker thread isn't stranded.
         cancel_event.set()
+        if lock is not None:
+            with lock:
+                for reply_q in list(run_pending.values()):
+                    reply_q.put(None)
         raise
     finally:
         if runs is not None and lock is not None:
             with lock:
                 runs.pop(run_id, None)
+                if pending is not None:
+                    pending.pop(run_id, None)
 
 
 def create_app(
@@ -284,6 +367,10 @@ def create_app(
     # In-flight chat runs: run_id -> cancel Event, so POST /chat/{run_id}/stop can
     # signal a running loop. The lock guards the dict across worker threads.
     app.state.runs = {}
+    # Open asks per run: run_id -> {request_id -> reply Queue}, so POST
+    # /chat/{run_id}/respond can deliver an answer to a blocked worker (and stop /
+    # disconnect can unblock any pending ask). Guarded by the same lock.
+    app.state.pending = {}
     app.state.runs_lock = threading.Lock()
     # Load config.extensions so custom @register_* (tools / paradigms / conditions /
     # backends) are available to this web process; serve() also runs the full
@@ -329,7 +416,7 @@ def create_app(
             _chat_events(
                 message, cfg, mock=app.state.mock, stream=stream, mode=mode,
                 session_id=session_id, history=history, auto_title=auto_title,
-                runs=app.state.runs, lock=app.state.runs_lock,
+                runs=app.state.runs, pending=app.state.pending, lock=app.state.runs_lock,
             ),
             media_type="text/event-stream",
         )
@@ -338,13 +425,35 @@ def create_app(
     def stop_chat(run_id: str) -> dict:
         """Stop an in-flight chat run: set its cancel token so the loop ends at the
         next boundary (mid-token for a streaming turn; the partial answer is
-        dropped and the conversation saved as resumable). Idempotent — an unknown
-        or already-finished run_id is a no-op 200."""
+        dropped and the conversation saved as resumable). Any pending ask is
+        unblocked fail-closed so a stopped run never strands a worker. Idempotent —
+        an unknown or already-finished run_id is a no-op 200."""
         with app.state.runs_lock:
             event = app.state.runs.get(run_id)
+            replies = list(app.state.pending.get(run_id, {}).values())
         if event is not None:
             event.set()
+        for reply_q in replies:
+            reply_q.put(None)  # unblock a pending ask (question degrades / approval rejects)
         return {"ok": True, "run_id": run_id}
+
+    @app.post("/chat/{run_id}/respond")
+    async def respond_chat(run_id: str, request: Request):
+        """Deliver the user's answer to a pending ask — the card shown for an
+        ``event: ask`` (a model ``ask_question``, or HITL confirmation later).
+
+        Body ``{request_id, option_ids, text}`` is routed to the blocked worker so
+        the loop resumes with the answer. Idempotent — an unknown run/request id is
+        a no-op 200 (e.g. the run already finished or was stopped)."""
+        body = await request.json()
+        request_id = str(body.get("request_id", ""))
+        with app.state.runs_lock:
+            reply_q = app.state.pending.get(run_id, {}).get(request_id)
+        if reply_q is not None:
+            reply_q.put(
+                {"option_ids": body.get("option_ids", []), "text": body.get("text")}
+            )
+        return {"ok": True}
 
     @app.get("/sessions")
     def sessions() -> dict:

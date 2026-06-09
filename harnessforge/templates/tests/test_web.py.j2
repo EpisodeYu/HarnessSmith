@@ -583,6 +583,116 @@ def test_index_has_stop_and_reask_ui():
     assert 'addEventListener("stopped"' in body
     assert "beginReask" in body and "commitReask" in body and "edit_turn" in body
     assert "window.confirm" not in body and "window.prompt" not in body
+
+
+# --- Slice 10: ask_question over the web (shared interaction channel) -------
+
+
+def test_ask_question_round_trips_over_web(tmp_path, monkeypatch):
+    """A model ask_question pauses the run with `event: ask`; delivering the answer
+    (POST /chat/{id}/respond, here straight into the pending reply queue) unblocks
+    the loop, which feeds the chosen label back as the tool result and finishes."""
+    import json
+    import threading
+
+    import {{ project_slug }}.interfaces.web as webmod
+    from {{ project_slug }}.harness.config import Config
+    from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
+    from {{ project_slug }}.interfaces.web import _chat_events
+
+    # Inject a scripted client (the default mock would call the tool with no args):
+    # step 0 asks, step 1 answers.
+    class _Router:
+        def __init__(self, *a, **k):
+            pass
+
+        def client_for(self, role="generation"):
+            return MockLLM(
+                script=[
+                    ScriptedCall(
+                        "ask_question", {"question": "Pick one", "options": ["A", "B"]}
+                    ),
+                    "Done",
+                ]
+            )
+
+    monkeypatch.setattr(webmod, "ClientRouter", _Router)
+
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "ask_question", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+    })
+    runs, pending, lock = {}, {}, threading.Lock()
+    gen = _chat_events(
+        "hi", config, mock=True, stream=False, runs=runs, pending=pending, lock=lock
+    )
+
+    run_id, ask = None, None
+    for frame in gen:
+        if "event: run" in frame and run_id is None:
+            run_id = json.loads(frame.split("data: ", 1)[1])["run_id"]
+        if "event: ask" in frame:
+            ask = json.loads(frame.split("data: ", 1)[1])
+            break
+    assert ask and ask["prompt"] == "Pick one"
+    assert [o["label"] for o in ask["options"]] == ["A", "B"]
+
+    # Simulate POST /respond: deliver the answer to the blocked worker.
+    pending[run_id][ask["request_id"]].put({"option_ids": ["1"], "text": None})
+    rest = "".join(gen)
+    assert "event: final" in rest
+    assert "User selected: B" in rest  # the chosen label fed back as the tool result
+
+
+def test_respond_endpoint_routes_answer_and_is_idempotent():
+    """POST /chat/{id}/respond delivers {option_ids,text} to a pending reply queue;
+    an unknown run/request id is a clean no-op 200."""
+    import queue
+
+    app = create_app(_config(), mock=True)
+    reply_q: queue.Queue = queue.Queue()
+    app.state.pending["live"] = {"req1": reply_q}
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/live/respond", json={"request_id": "req1", "option_ids": ["0"], "text": "hi"}
+    )
+    assert resp.status_code == 200
+    assert reply_q.get_nowait() == {"option_ids": ["0"], "text": "hi"}
+
+    # unknown run / request -> no-op 200 (no crash)
+    assert client.post("/chat/ghost/respond", json={"request_id": "x"}).status_code == 200
+    assert client.post("/chat/live/respond", json={"request_id": "nope"}).status_code == 200
+
+
+def test_stop_unblocks_a_pending_ask_fail_closed():
+    """Stopping a run drains its pending asks with a None sentinel so a blocked
+    worker (waiting on an ask) is released instead of stranded."""
+    import queue
+    import threading
+
+    app = create_app(_config(), mock=True)
+    app.state.runs["live"] = threading.Event()
+    reply_q: queue.Queue = queue.Queue()
+    app.state.pending["live"] = {"req1": reply_q}
+    client = TestClient(app)
+
+    assert client.post("/chat/live/stop").status_code == 200
+    assert app.state.runs["live"].is_set()
+    assert reply_q.get_nowait() is None  # the pending ask was released (fail-closed)
+
+
+def test_index_has_ask_card_ui():
+    """The chat renders an inline ask card (model ask_question / HITL) and posts the
+    answer to /respond — themed, no native prompt/confirm."""
+    body = _client().get("/").text
+    assert "function renderAskCard" in body
+    assert 'addEventListener("ask"' in body
+    assert "/respond" in body
+    assert "window.confirm" not in body and "window.prompt" not in body
 {% if spec.memory.enabled %}
 
 def _memory_client(tmp_path):

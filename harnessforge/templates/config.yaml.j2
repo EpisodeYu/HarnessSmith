@@ -42,7 +42,9 @@ prompts:
 tools:
 {% for tool in tools %}  - name: {{ tool.name }}
     enabled: {{ tool.enabled | tojson }}
-{% endfor %}{% if mcp_tool_allowlist %}  # MCP tools (allowlist): only enabled `<server>__<tool>` entries are offered to
+{% endfor %}  - name: ask_question
+    enabled: true    # built-in: pause and ask the user a clarifying question (safe; off in non-interactive runs)
+{% if mcp_tool_allowlist %}  # MCP tools (allowlist): only enabled `<server>__<tool>` entries are offered to
   # the model. Read tools are on; mutating/shell tools are off — flip to enable.
 {% for entry in mcp_tool_allowlist %}  - name: {{ entry.name }}
     enabled: {{ entry.enabled | tojson }}

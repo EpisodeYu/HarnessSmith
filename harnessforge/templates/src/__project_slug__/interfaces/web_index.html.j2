@@ -187,6 +187,7 @@
         session_rename: "Rename", session_delete: "Delete", session_cancel: "Cancel",
         reask_edit: "Edit this question", reask_send: "Resend",
         reask_warn: "This discards the conversation after this point.", reask_confirm: "Regenerate",
+        ask_submit: "Submit", ask_skip: "Skip", ask_other_ph: "Type a reply…",
         no_llm: "No LLM is configured yet — set a model (and its API key) before you can chat.",
         no_llm_link: "Go to Config → LLM",
         cfg_intro: "Runtime behavioral config (no secrets). Save applies it live and writes it back to config.yaml.",
@@ -259,6 +260,7 @@
         session_rename: "重命名", session_delete: "删除", session_cancel: "取消",
         reask_edit: "编辑此问题", reask_send: "重新发送",
         reask_warn: "这会丢弃此处之后的对话。", reask_confirm: "重新生成",
+        ask_submit: "提交", ask_skip: "跳过", ask_other_ph: "输入回答…",
         no_llm: "尚未配置 LLM —— 请先设置一个 model(及其 API key)才能对话。",
         no_llm_link: "前往 配置 → LLM",
         cfg_intro: "运行期行为性配置(无密钥)。保存即时生效并写回 config.yaml。",
@@ -347,6 +349,100 @@
       log.appendChild(el);
       log.scrollTop = log.scrollHeight;
       return el;
+    }
+
+    // Render the inline interaction card for an `event: ask` (a model
+    // ask_question, or — later — HITL tool confirmation). The answer is POSTed
+    // back to /chat/{run_id}/respond, which unblocks the waiting loop. Themed and
+    // inline (no native browser dialogs).
+    function renderAskCard(data) {
+      const runId = currentRunId;
+      const card = document.createElement("div");
+      card.className = "ask-card rounded-lg border border-indigo-300 bg-indigo-50 p-3 space-y-2";
+      const prompt = document.createElement("div");
+      prompt.className = "font-medium text-slate-800 whitespace-pre-wrap";
+      prompt.textContent = data.prompt;
+      card.appendChild(prompt);
+      if (data.kind === "approval" && data.context && data.context.tool) {
+        const ctx = document.createElement("div");
+        ctx.className = "text-xs text-slate-500 whitespace-pre-wrap";
+        ctx.textContent = data.context.tool + " " + (data.context.arguments || "");
+        card.appendChild(ctx);
+      }
+
+      let answered = false;
+      const submit = (optionIds, text) => {
+        if (answered) return;
+        answered = true;
+        card.querySelectorAll("button, input, textarea").forEach((el) => { el.disabled = true; });
+        fetch("/chat/" + encodeURIComponent(runId) + "/respond", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            request_id: data.request_id, option_ids: optionIds || [],
+            text: (text == null || text === "") ? null : text,
+          }),
+        }).catch(() => {});
+      };
+
+      if (data.kind === "approval") {
+        const bar = document.createElement("div");
+        bar.className = "flex flex-wrap gap-2";
+        (data.options || []).forEach((o) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "rounded bg-slate-800 px-3 py-1 text-xs text-white";
+          b.textContent = o.label;
+          b.addEventListener("click", () => submit([o.id], null));
+          bar.appendChild(b);
+        });
+        card.appendChild(bar);
+      } else {
+        const inputs = [];
+        if (data.options && data.options.length) {
+          const list = document.createElement("div");
+          list.className = "space-y-1";
+          data.options.forEach((o) => {
+            const lbl = document.createElement("label");
+            lbl.className = "flex items-center gap-2 text-sm";
+            const inp = document.createElement("input");
+            inp.type = data.allow_multiple ? "checkbox" : "radio";
+            inp.name = "ask_" + data.request_id;
+            inp.value = o.id;
+            inputs.push(inp);
+            const span = document.createElement("span");
+            span.textContent = o.label;
+            lbl.append(inp, span);
+            list.appendChild(lbl);
+          });
+          card.appendChild(list);
+        }
+        let ta = null;
+        if (data.allow_text) {
+          ta = document.createElement("textarea");
+          ta.className = "w-full rounded border px-2 py-1 text-sm";
+          ta.rows = 2;
+          ta.placeholder = t("ask_other_ph");
+          card.appendChild(ta);
+        }
+        const bar = document.createElement("div");
+        bar.className = "flex items-center gap-2";
+        const send = document.createElement("button");
+        send.type = "button";
+        send.className = "rounded bg-indigo-600 px-3 py-1 text-xs text-white";
+        send.textContent = t("ask_submit");
+        send.addEventListener("click", () => {
+          submit(inputs.filter((i) => i.checked).map((i) => i.value), ta ? ta.value.trim() : null);
+        });
+        const skip = document.createElement("button");
+        skip.type = "button";
+        skip.className = "px-2 py-1 text-xs text-slate-500";
+        skip.textContent = t("ask_skip");
+        skip.addEventListener("click", () => submit([], null));
+        bar.append(send, skip);
+        card.appendChild(bar);
+      }
+      log.appendChild(card);
+      log.scrollTop = log.scrollHeight;
     }
 
     async function loadParadigms() {
@@ -682,6 +778,9 @@
         answer.textContent += JSON.parse(ev.data).text;
         log.scrollTop = log.scrollHeight;
       });
+      es.addEventListener("ask", (ev) => {
+        renderAskCard(JSON.parse(ev.data));  // inline card; answer POSTs to /respond
+      });
       es.addEventListener("tool_call", (ev) => {
         const d = JSON.parse(ev.data);
         line("→ tool " + d.name + " " + d.arguments, "text-amber-700");
@@ -990,7 +1089,7 @@
     // from skills.py when enabled). Any other name without "__" is one YOU
     // registered — those sort to the very top. Only affects grouping, never
     // behavior; keep in sync if you rename a built-in.
-    const BUILTIN_TOOLS = new Set(["get_current_time", "calculator"{% if spec.skills.enabled %}, "read_skill"{% endif %}{% if spec.memory.enabled %}, "memory_read", "memory_append", "memory_write"{% endif %}]);
+    const BUILTIN_TOOLS = new Set(["get_current_time", "calculator", "ask_question"{% if spec.skills.enabled %}, "read_skill"{% endif %}{% if spec.memory.enabled %}, "memory_read", "memory_append", "memory_write"{% endif %}]);
     // Tools discovered from MCP servers (GET /mcp/discover), cached per page load so
     // a server's tools can be offered without hand-writing the allowlist. null =
     // not scanned yet; buildTools then falls back to whatever's already in config.
