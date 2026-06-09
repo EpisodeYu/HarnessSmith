@@ -100,6 +100,15 @@
 
 **端口转发体验(2026-06-06,人定向:不做反代、只加提醒)**:针对"Linux 跑 + 从 Windows 经 SSH 访问要转发两次(wizard + 产物各一次)"的体验问题,调研业界(Jupyter=单端口子路径多路复用 / Streamlit·Gradio=默认让用户 SSH 转发 / Gradio share=公网代理隧道有外部依赖+安全面 / VS Code·Cursor Remote=监听即自动逐端口转发)。**结论(人拍板)**:① **Windows 全程本地无障碍**——wizard+产物同机 `127.0.0.1` 访问、零转发(`start_new_session` 在 Windows 静默忽略,产物作为 wizard 子进程,本地用反而更干净);② 会用 Linux 远程的用户**会自己配端口转发**,故**不做单端口反代**(避免动产物结构 + SSE 反代复杂度),仅在各处**加便利提醒**:`harnessforge wizard`(`cli.py`)与产物 `serve`(`cli.py.j2`)在 **Linux** 下打印 `ssh -L <port>:127.0.0.1:<port> <user>@<host>`;wizard web 在 **Linux**(`/meta.linux` 门控)且产物就绪时,在跳转按钮旁提示先转发产物端口。**单端口反代(Jupyter 模式)**留作 v1+ 备选(若将来要"只转一次"),其前提是产物前端改相对路径 + FastAPI `root_path` + wizard SSE 流式反代——已记录可行性与对产物独立性无损(反代纯生成器侧、产物仍可独立 `serve` 直连)。
 
+### 2.6 一键启动脚本(实现说明,2026-06-09,人定向)
+
+把"敲命令才能起 wizard / 产物"降为**双击即用**。两层各一对脚本(`.bat` Windows / `.sh` macOS·Linux),**零产物新增运行期依赖**(仅 stdlib `webbrowser`)。
+
+- **生成器**:仓库根新增手写 `HarnessForge.bat` / `HarnessForge.sh` → 跑 `uv run --extra wizard harnessforge wizard --open`(`uv` 不在则回落已装的 `harnessforge` 命令),自动开浏览器。
+- **产物**:新增模板 `templates/__launch_name__.{sh,bat}.j2`,渲染成 **`<显示名>.{sh,bat}`**;**文件名按 `display_name` 清洗**(`generator.py launch_script_stem`:保留空格,Windows 非法字符 `< > : " / \ | ? *` + 控制符→`_`,去结尾点/空格,保留名 CON/PRN… 与清洗后为空均回落 `project_slug`)。`generate()` 用新 `__launch_name__` 路径 token 替换文件名、并给生成的 `.sh` 补可执行位;渲染上下文加 `launch_name`(供 README 指名文件)。脚本动作:**启用 web → `serve --open`(开浏览器),否则 → `chat`**(人定向);调用方式 **先探测 `uv`(`uv run`,自动 sync)、无则回落已装命令**(人定向),都没有则给装 uv / `pip install -e .` 提示。
+- **打开网页**:生成器 `wizard` 与产物 `serve` 各加 `--open/--no-open`(默认关,保留现有/无头/SSH 行为;脚本传 `--open`),后台线程**等端口可连再 `webbrowser.open`**——保留自动选端口逻辑,8000 被占即顺延、不崩。
+- **测试**:`test_generator.py` 增 `launch_script_stem` 清洗参数化 + 脚本恒生成/可执行位/无残留 Jinja + web→`serve --open`·非 web→`chat` + 空格/非法名落地;`test_cli.py` 增 `wizard --help` 含 `--open`。回归:golden(thin/web/wizard〔显示名带空格〕/uvx)+ Docker 冒烟全绿。
+
 ## 3. 退出门禁(对应 `01 §8` Non-blocker;✅ 实现并自验证)
 
 - [x] **wizard(结构-only 表单)产合法 spec 并能生成可跑产物**:结构-only `POST /spec`(显示名→slug、`paradigms` 多选、`mcp.enabled`+catalog)→ 后端烤行为性默认 → `HarnessSpec` 校验通过 → 写 spec → `generate()` → `uv lock` → `uv sync`+import+mock 跑一步+`pytest` 全绿(`test_golden.py::test_golden_wizard_spec_generates_and_smoke_passes`,web=true 含 `test_web`)。

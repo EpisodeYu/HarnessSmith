@@ -44,6 +44,13 @@ pip install -r requirements.txt && pip install -e .
 {{ project_slug }} run --mock "hello"
 ```
 
+### One-click launch
+
+Don't want to type a command? Double-click **`{{ launch_name }}.bat`** (Windows)
+or run **`./"{{ launch_name }}.sh"`** (macOS / Linux). It uses `uv` if present
+(auto-syncing deps on first run), otherwise the installed `{{ project_slug }}`
+command, and {% if interfaces.web %}starts the web UI, opening it in your browser{% else %}starts an interactive chat in the terminal{% endif %}.
+
 ## Run in Docker (host-independent)
 
 ```bash

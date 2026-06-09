@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from harnessforge.generator import TargetExistsError, generate
+from harnessforge.generator import TargetExistsError, generate, launch_script_stem
 from harnessforge.presets import preset_mcp_servers, preset_spec_path
 from harnessforge.spec import load_spec
 
@@ -732,3 +732,80 @@ def test_memory_web_footprint_absent_when_disabled(tmp_path, spec):
     assert 'data-cfg="memory"' not in idx and "subtab_memory" not in idx
     assert "memory_read" not in idx and "role_memory" not in idx
     assert "/memory" not in web_py and "memory" not in web_py.lower()
+
+
+# --- One-click launch scripts (HarnessForge / <display name>) ---------------
+
+
+@pytest.mark.parametrize(
+    "display_name, project_slug, expected",
+    [
+        ("My Coding Assistant", "agent_harness", "My Coding Assistant"),  # spaces kept
+        ('Bad:/\\<>|?*"Name', "agent_harness", "Bad_________Name"),  # illegal -> _
+        (None, "agent_harness", "agent_harness"),  # no display name -> slug
+        ("   ", "fallback_slug", "fallback_slug"),  # blank -> slug
+        ("...", "fallback_slug", "fallback_slug"),  # only dots -> slug
+        ("ends with dot.", "fallback_slug", "ends with dot"),  # trailing dot trimmed
+        ("CON", "fallback_slug", "fallback_slug"),  # reserved device name -> slug
+        ("con.bat", "fallback_slug", "fallback_slug"),  # reserved + ext -> slug
+        ("Über Bot", "fallback_slug", "Über Bot"),  # non-ASCII preserved
+    ],
+)
+def test_launch_script_stem_sanitizes(display_name, project_slug, expected):
+    from harnessforge.spec import HarnessSpec
+
+    spec = HarnessSpec(project_slug=project_slug, display_name=display_name)
+    assert launch_script_stem(spec) == expected
+
+
+def test_launch_scripts_generated_with_exec_bit(tmp_path, spec):
+    """Every product ships <name>.sh + <name>.bat; the .sh is executable."""
+    import stat
+
+    out = tmp_path / "launch"
+    generate(spec, out, git_init=False)
+    sh = out / "agent_harness.sh"  # example spec has no display_name -> slug
+    bat = out / "agent_harness.bat"
+    assert sh.is_file() and bat.is_file()
+    assert sh.stat().st_mode & stat.S_IXUSR, "launch .sh must be executable"
+    # no unrendered Jinja survived into the shell scripts
+    for path in (sh, bat):
+        text = path.read_text(encoding="utf-8")
+        assert "{{" not in text and "{%" not in text, path
+    # Windows .bat ships CRLF; .sh stays LF-only (correct on any host).
+    bat_bytes = bat.read_bytes()
+    assert b"\r\n" in bat_bytes and bat_bytes.replace(b"\r\n", b"").count(b"\n") == 0
+    assert b"\r\n" not in sh.read_bytes()
+
+
+def test_launch_script_name_follows_display_name(tmp_path, spec):
+    """A display name with spaces/illegal chars yields a safe matching filename."""
+    spec.display_name = "My: Assistant"
+    out = tmp_path / "named"
+    generate(spec, out, git_init=False)
+    assert (out / "My_ Assistant.sh").is_file()
+    assert (out / "My_ Assistant.bat").is_file()
+
+
+def test_launch_script_no_web_runs_chat(tmp_path, spec):
+    """Without web, the one-click script launches the terminal chat REPL."""
+    out = tmp_path / "chatlaunch"
+    generate(spec, out, git_init=False)
+    sh = (out / "agent_harness.sh").read_text(encoding="utf-8")
+    bat = (out / "agent_harness.bat").read_text(encoding="utf-8")
+    assert "action=(chat)" in sh and "serve --open" not in sh
+    assert 'set "ACTION=chat"' in bat and "serve --open" not in bat
+
+
+def test_launch_script_web_runs_serve_open(tmp_path, spec):
+    """With web on, the one-click script starts serve + opens the browser."""
+    spec.interfaces.web = True
+    out = tmp_path / "weblaunch"
+    generate(spec, out, git_init=False)
+    sh = (out / "agent_harness.sh").read_text(encoding="utf-8")
+    bat = (out / "agent_harness.bat").read_text(encoding="utf-8")
+    assert "action=(serve --open)" in sh
+    assert 'set "ACTION=serve --open"' in bat
+    # the serve command grew an --open flag for the script to use
+    cli = (out / "src" / "agent_harness" / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    assert "--open/--no-open" in cli and "_open_browser_when_ready" in cli

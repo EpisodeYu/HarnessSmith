@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import socket
 import sys
+import threading
+import time
+import webbrowser
 from pathlib import Path
 
 import typer
@@ -170,6 +173,31 @@ def _find_free_port(preferred: int, *, host: str = "127.0.0.1", tries: int = 64)
         return sock.getsockname()[1]
 
 
+def _open_browser_when_ready(url: str, host: str, port: int) -> None:
+    """Open ``url`` in the default browser once the server accepts connections.
+
+    Runs in a background thread so it can wait out uvicorn's startup without
+    blocking the (blocking) ``uvicorn.run`` call. Best-effort: a headless box
+    with no browser simply no-ops.
+    """
+    connect_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+
+    def _wait_and_open() -> None:
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(0.25)
+                if sock.connect_ex((connect_host, port)) == 0:
+                    break
+            time.sleep(0.15)
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+    threading.Thread(target=_wait_and_open, daemon=True).start()
+
+
 def _maybe_print_forward_hint(port: int) -> None:
     """On Linux, print an SSH port-forward command (the wizard may be remote).
 
@@ -191,6 +219,11 @@ def wizard(
     port: int = typer.Option(
         0, "--port", help="Port to bind to; 0 (default) auto-picks a free port from 8000."
     ),
+    open_browser: bool = typer.Option(
+        False,
+        "--open/--no-open",
+        help="Open the wizard in your default browser once it starts.",
+    ),
 ) -> None:
     """Launch the single-page spec wizard (needs the optional `wizard` extra)."""
     try:
@@ -211,6 +244,8 @@ def wizard(
         fg=typer.colors.GREEN,
     )
     _maybe_print_forward_hint(bind_port)
+    if open_browser:
+        _open_browser_when_ready(f"http://{host}:{bind_port}", host, bind_port)
     uvicorn.run(create_app(), host=host, port=bind_port)
 
 

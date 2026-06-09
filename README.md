@@ -65,6 +65,11 @@ uv run harnessforge new my-agent -p coding-assistant --no-verify  # skip the pos
 # uvx harnessforge new my-agent --preset coding-assistant
 ```
 
+**One-click wizard:** prefer not to type? Double-click **`HarnessForge.bat`**
+(Windows) or run **`./HarnessForge.sh`** (macOS / Linux) — it launches the spec
+wizard and opens it in your browser. Each generated repo ships the same kind of
+one-click launcher, named after its display name (e.g. `My Coding Assistant.bat`).
+
 The generated `my-agent/` repo then runs on its own:
 
 ```bash

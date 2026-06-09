@@ -44,3 +44,10 @@ def test_doctor_runs_and_reports_uv():
     result = runner.invoke(app, ["doctor"])
     # uv is installed in this dev environment; doctor should report it.
     assert "uv:" in result.output
+
+
+def test_wizard_exposes_open_flag():
+    """The launch script relies on `wizard --open` to pop the browser."""
+    result = runner.invoke(app, ["wizard", "--help"])
+    assert result.exit_code == 0
+    assert "--open" in result.output

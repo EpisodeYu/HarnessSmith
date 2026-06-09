@@ -10,6 +10,7 @@ a non-empty target is refused (we never overwrite a user's repo).
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 from collections.abc import Callable
@@ -24,9 +25,43 @@ from .spec import HarnessSpec, load_spec
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 PATH_SLUG_TOKEN = "__project_slug__"
+# Path token replaced by the product's launch-script base name (derived from the
+# display name): e.g. ``__launch_name__.sh.j2`` -> ``My Coding Assistant.sh``.
+LAUNCH_NAME_TOKEN = "__launch_name__"
 JINJA_SUFFIX = ".j2"
 SPEC_SNAPSHOT_NAME = "harness.spec.yaml"
 REQUIREMENTS_NAME = "requirements.txt"
+
+# Characters illegal in a Windows filename (the set also covers '/' on POSIX),
+# plus ASCII control chars. Spaces are intentionally KEPT — the launch scripts
+# quote them — so the script name can mirror the display name as closely as
+# possible.
+_ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# Reserved DOS device names: a file named like one (with or without an
+# extension) is unusable on Windows, so we fall back to the slug.
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def launch_script_stem(spec: HarnessSpec) -> str:
+    r"""Filesystem-safe base name for the product's one-click launch script.
+
+    Derived from ``display_name`` (falling back to ``project_slug``): spaces and
+    most characters are kept so the script name matches the display name, but
+    characters illegal on Windows (``< > : " / \ | ? *`` + control chars) become
+    ``_``, trailing dots/spaces are trimmed, and reserved DOS device names are
+    rejected. Falls back to ``project_slug`` when nothing usable remains.
+    """
+    raw = (spec.display_name or spec.project_slug).strip()
+    cleaned = _ILLEGAL_FILENAME_CHARS.sub("_", raw)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    base = cleaned.split(".", 1)[0].strip().upper()
+    if not cleaned or base in _WINDOWS_RESERVED_NAMES:
+        return spec.project_slug
+    return cleaned
 
 # Templates written only when their spec predicate is true. Keys are paths
 # relative to ``templates/`` (posix, keeping the slug token and the .j2 suffix).
@@ -125,6 +160,9 @@ def _build_context(
         "project_slug": spec.project_slug,
         # Human-readable label for UI titles / README; slug is the fallback.
         "display_name": spec.display_name or spec.project_slug,
+        # Filesystem-safe base name of the one-click launch script (so docs can
+        # name the exact file). Mirrors the path-token substitution below.
+        "launch_name": launch_script_stem(spec),
         # Baked-in default UI language for the product web ("en" | "zh").
         "language": spec.language,
         "llms": spec.llms,
@@ -145,15 +183,38 @@ def _iter_template_files(templates_dir: Path) -> list[Path]:
     return sorted(p for p in templates_dir.rglob("*") if p.is_file())
 
 
-def _render_relpath(relpath: Path, project_slug: str) -> Path:
-    parts = [
-        project_slug if part == PATH_SLUG_TOKEN else part
-        for part in relpath.parts
-    ]
+def _render_relpath(relpath: Path, project_slug: str, launch_stem: str) -> Path:
+    parts: list[str] = []
+    for part in relpath.parts:
+        if part == PATH_SLUG_TOKEN:
+            parts.append(project_slug)
+        elif LAUNCH_NAME_TOKEN in part:
+            parts.append(part.replace(LAUNCH_NAME_TOKEN, launch_stem))
+        else:
+            parts.append(part)
     out = Path(*parts)
     if out.name.endswith(JINJA_SUFFIX):
         out = out.with_name(out.name[: -len(JINJA_SUFFIX)])
     return out
+
+
+def _write_rendered(out_path: Path, rendered: str) -> None:
+    """Write a rendered file with the right line endings + bits for its type.
+
+    Windows ``.bat`` launchers ship CRLF (label/``goto`` parsing is happiest with
+    it) regardless of the host the generator runs on; ``.sh`` launchers stay LF
+    and get the executable bit so a double-click / ``./run`` works. Everything
+    else keeps the platform default.
+    """
+    suffix = out_path.suffix
+    if suffix == ".bat":
+        text = rendered.replace("\r\n", "\n").replace("\n", "\r\n")
+        out_path.write_text(text, encoding="utf-8", newline="")
+    elif suffix == ".sh":
+        out_path.write_text(rendered, encoding="utf-8", newline="")  # force LF
+        out_path.chmod(out_path.stat().st_mode | 0o111)
+    else:
+        out_path.write_text(rendered, encoding="utf-8")
 
 
 def _spec_snapshot_yaml(spec: HarnessSpec) -> str:
@@ -201,17 +262,18 @@ def generate(
     )
     context = _build_context(spec, mcp_servers or [], confirm_default=confirm_default)
 
+    launch_stem = launch_script_stem(spec)
     result = GenerationResult(target_dir=target_dir, project_slug=spec.project_slug)
     for template_file in _iter_template_files(templates_dir):
         relpath = template_file.relative_to(templates_dir)
         predicate = CONDITIONAL_TEMPLATES.get(relpath.as_posix())
         if predicate is not None and not predicate(spec):
             continue
-        out_relpath = _render_relpath(relpath, spec.project_slug)
+        out_relpath = _render_relpath(relpath, spec.project_slug, launch_stem)
         rendered = env.get_template(relpath.as_posix()).render(**context)
         out_path = target_dir / out_relpath
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(rendered, encoding="utf-8")
+        _write_rendered(out_path, rendered)
         result.written_files.append(out_path)
 
     snapshot_path = target_dir / SPEC_SNAPSHOT_NAME
