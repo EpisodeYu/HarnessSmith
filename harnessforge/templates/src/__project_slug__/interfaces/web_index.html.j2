@@ -871,6 +871,14 @@
     // Save (POST /config); this flag drives the "unsaved" marker, the leave/reload
     // guards, and stops a tab switch back to Config from reloading over the edits.
     let dirty = false;
+    // Serialized form of everything the config view persists (the config patch +
+    // the rule-file editor contents) as of the last load/Save. "unsaved" means
+    // the view no longer matches this baseline. We compare against it rather than
+    // trust raw input/change events because a programmatic rebuild (renderConfig)
+    // tears down focused fields, and the browser fires DEFERRED blur/change on
+    // them that can land AFTER a Save resets the flag — those events don't change
+    // the serialized form, so a recompare keeps the view correctly "saved".
+    let savedSnapshot = "";
     // Rule files from GET /rules: [{path, content, exists, auto}]. `auto` = an
     // auto-recognized convention file (root CLAUDE.md) shown read-only, editable in
     // place but not added to the explicit rules_files list. Save writes contents
@@ -1390,9 +1398,25 @@
 {% endif %}      return patch;
     }
 
+    // Everything the config view persists, serialized: the config patch plus the
+    // rule-file editor rows (path + body, which Save writes via POST /rules but
+    // collectConfig doesn't carry). Comparing this to `savedSnapshot` is how we
+    // decide "unsaved", so it must be a pure read of the current DOM.
+    function configSnapshot() {
+      const rules = Array.from(document.querySelectorAll("#cfg-rules .rule"))
+        .map((row) => [row.querySelector(".r-path").value, row.querySelector(".r-content").value]);
+      return JSON.stringify([collectConfig(), rules]);
+    }
+    // Recompute "unsaved" from the actual view vs. the last saved snapshot. Driven
+    // by edits (and rule add/remove); using a comparison rather than a sticky flag
+    // means a stray event from a programmatic rebuild can't leave it wrongly set.
+    function refreshDirty() { setDirty(configSnapshot() !== savedSnapshot); }
+    // Capture the current view as the saved baseline (call after load/Save once
+    // the DOM reflects server state), then clear the marker.
+    function markSaved() { savedSnapshot = configSnapshot(); setDirty(false); }
+
     // Flip the unsaved marker + highlight the Save button so a forgotten Save is
-    // visible. Programmatic value-setting (renderConfig) never fires input/change,
-    // so this is only ever set true by real user edits.
+    // visible.
     function setDirty(v) {
       dirty = v;
       $("cfg-unsaved").classList.toggle("hidden", !v);
@@ -1407,7 +1431,7 @@
 {% if spec.memory.enabled %}      await loadMemory();  // the long-term memory note for the Memory tab
 {% endif %}      renderConfig();
       gateChat();
-      setDirty(false);
+      markSaved();  // the freshly rendered view is, by definition, the saved state
       $("cfg-status").textContent = "";
     }
     $("cfg-add-profile").addEventListener("click", () => {
@@ -1462,18 +1486,20 @@
       if (resp.ok) { row.querySelector(sel.val).value = ""; status.textContent = t("key_saved"); }
       else { status.textContent = data.error || t("cfg_invalid"); }
     });
-    // Mark dirty on any real edit in the config view (delegated; programmatic
-    // value-setting during render doesn't bubble input/change, so no false flags).
-    $("view-config").addEventListener("input", () => setDirty(true));
-    $("view-config").addEventListener("change", () => setDirty(true));
+    // Recompute "unsaved" by comparing the live view to the saved snapshot on
+    // every edit (delegated). This is robust to the spurious input/change events a
+    // programmatic rebuild fires while tearing down focused fields: those don't
+    // change the serialized form, so the view still reads as saved.
+    $("view-config").addEventListener("input", refreshDirty);
+    $("view-config").addEventListener("change", refreshDirty);
 
     $("cfg-reload").addEventListener("click", () => {
       if (!dirty || confirm(t("cfg_reload_confirm"))) loadConfig();
     });
-    $("cfg-rule-add").addEventListener("click", () => { $("cfg-rules").appendChild(ruleRow("", "", false)); setDirty(true); });
+    $("cfg-rule-add").addEventListener("click", () => { $("cfg-rules").appendChild(ruleRow("", "", false)); refreshDirty(); });
     $("cfg-rules").addEventListener("click", (e) => {
       const rm = e.target.closest(".r-remove");
-      if (rm) { rm.closest(".rule").remove(); setDirty(true); }  // drops it from the list, not from disk
+      if (rm) { rm.closest(".rule").remove(); refreshDirty(); }  // drops it from the list, not from disk
     });
 
     // Write every rule file's content to disk (POST /rules), then return any error.
@@ -1503,7 +1529,7 @@
       });
       const data = await resp.json();
       if (resp.ok) {
-        cfg = data; await loadRules();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); setDirty(false);
+        cfg = data; await loadRules();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); markSaved();
         $("cfg-status").textContent = ruleErr ? (t("cfg_saved") + " — " + ruleErr) : t("cfg_saved");
       } else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });
