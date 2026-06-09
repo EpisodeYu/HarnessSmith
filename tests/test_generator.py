@@ -803,6 +803,12 @@ def test_launch_scripts_bootstrap_uv_when_missing(tmp_path, spec):
     assert r"%USERPROFILE%\.local\bin\uv.exe" in bat
     # POSIX: the official shell installer
     assert "astral.sh/uv/install.sh" in sh
+    # Guard against the recursion that spammed "maximum setlocal recursion level"
+    # on real cmd.exe: the .bat must stay a flat goto-based script (no setlocal,
+    # no call-based subroutines), ending via the built-in :eof label.
+    low = bat.lower()
+    assert "setlocal" not in low and "call :" not in low
+    assert "goto :eof" in low
 
 
 def test_launch_script_no_web_runs_chat(tmp_path, spec):
