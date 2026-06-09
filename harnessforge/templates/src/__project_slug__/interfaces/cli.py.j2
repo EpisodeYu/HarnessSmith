@@ -888,11 +888,19 @@ def serve(
 {% if spec.memory.enabled %}    _setup_memory(config)
 {% endif %}    # Pass config_path so a /config panel Save persists back to this file.
     application = create_app(config, mock=mock, config_path=config_path)
-{% if spec.mcp.enabled %}    # Connect MCP up front (process lifetime, failures isolated) so the page shows
-    # live status and chat offers MCP tools from the first request.
+{% if spec.mcp.enabled %}    # Warm MCP in the background so the web port binds immediately. The servers'
+    # first launch (uvx/npx cold start) can take a while on a slow network, and
+    # blocking the bind on it makes `serve` look hung. The page polls live status
+    # and chat picks up MCP tools once the manager is ready; the /mcp + chat
+    # handlers also ensure it lazily, and the manager is lock-guarded + idempotent,
+    # so the background warm and any early request converge on a single connect.
+    import threading as _mcp_threading
+
     from .web import _ensure_mcp_manager
 
-    _ensure_mcp_manager(application)
+    _mcp_threading.Thread(
+        target=_ensure_mcp_manager, args=(application,), daemon=True
+    ).start()
 {% endif %}    typer.secho(
         f"Serving on http://{host}:{bind_port}  (open this; Ctrl-C to stop)",
         fg=typer.colors.GREEN,

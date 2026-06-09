@@ -503,6 +503,24 @@ def test_mcp_enabled_generates_files_and_deps(tmp_path, spec):
     py_compile.compile(str(pkg / "harness" / "mcp.py"), doraise=True)
 
 
+def test_serve_warms_mcp_in_background_not_blocking_the_port(tmp_path, spec):
+    """With web + MCP, `serve` must NOT block the web port on MCP warm-up: the
+    servers' first launch (uvx/npx cold start) can be slow, so it runs on a
+    background thread and the port binds immediately. Guard against a regression
+    back to a blocking `_ensure_mcp_manager(application)` call."""
+    spec.interfaces.web = True
+    spec.mcp.enabled = True
+    out = tmp_path / "serve_warm"
+    generate(spec, out, git_init=False)
+    cli = (out / "src" / "agent_harness" / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    serve_body = cli.split("def serve(", 1)[1].split("\ndef ", 1)[0]
+    assert "_ensure_mcp_manager" in serve_body  # still warmed proactively
+    assert "Thread(" in serve_body and "daemon=True" in serve_body  # but off-thread
+    # and the warm is kicked off before uvicorn binds (so it actually starts)
+    assert serve_body.index("Thread(") < serve_body.index("uvicorn.run(")
+    py_compile.compile(str(out / "src" / "agent_harness" / "interfaces" / "cli.py"), doraise=True)
+
+
 # --- Slice 6: MCP capability baseline (catalog prefill into config.yaml) ----
 
 
