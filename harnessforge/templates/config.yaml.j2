@@ -156,7 +156,7 @@ mcp:
 {% if s.get("auth_env") %}      auth_env: {{ s.auth_env }}        # env-var NAME holding a bearer token
 {% endif %}{% endif %}{% if s.get("safe_tools") %}      safe_tools: {{ s.safe_tools | tojson }}
 {% endif %}{% endfor %}{% else %}  servers: []
-{% endif %}  connect_timeout_seconds: 30   # per-server startup timeout; a slow/failing server is skipped, not fatal
+{% endif %}  connect_timeout_seconds: 60   # per-server startup timeout (generous: first uvx/npx launch may cold-download); a slow/failing server is skipped, not fatal
   # Add more from the catalog (`harnessforge new --mcp-server <name>`) or paste any
   # MCP marketplace block here (Smithery / Glama / MCP.so / official Registry).
   # Remote (SaaS, e.g. Composio) servers use `url` + `auth_env` instead of command.

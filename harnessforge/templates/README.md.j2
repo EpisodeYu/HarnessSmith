@@ -141,8 +141,16 @@ it). uvx servers are prewarmed and baked into the Docker image so `docker run`
 works offline. Add more with `harnessforge new --mcp-server <name>` or by pasting
 a marketplace block into `config.yaml`. Allowlist tools as `<server>__<tool>`;
 read-only tools (`safe_tools`) are also offered to `plan`/`ask`. Secrets are
-referenced by env-var name only. On native Windows prefer Docker; see
-[`AGENTS.md`](./AGENTS.md).
+referenced by env-var name only.
+
+**First run / connectivity.** A `uvx`/`npx` server cold-downloads its package the
+first time, so the web **MCP** tab shows each server as **connecting** (amber)
+until it settles — green = connected, red = failed (with the reason). Each server
+has its own **Reconnect** button (retry just that one). Behind the GFW, when PyPI
+or the npm registry is unreachable, `uvx`/`npx` are pointed at a domestic mirror
+automatically (only if you haven't set your own index); Desktop Commander needs
+**Node.js** (`npx`) on the host — a missing Node is reported with an install hint.
+On native Windows prefer Docker; see [`AGENTS.md`](./AGENTS.md).
 {% endif %}{% if spec.skills.enabled %}
 ## Skills
 

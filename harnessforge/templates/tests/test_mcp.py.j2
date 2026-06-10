@@ -11,7 +11,15 @@ from pathlib import Path
 import pytest
 
 from {{ project_slug }}.harness.config import Config, McpConfig, McpServerConfig
-from {{ project_slug }}.harness.mcp import McpManager, _bearer_headers, register_mcp_tools
+from {{ project_slug }}.harness import mcp as mcp_module
+from {{ project_slug }}.harness.mcp import (
+    McpManager,
+    _bearer_headers,
+    _leaf_error,
+    _mirror_env,
+    _open_streams,
+    register_mcp_tools,
+)
 from {{ project_slug }}.harness.prompts import build_system_prompt
 from {{ project_slug }}.harness.tools import HIGH, SAFE, Registry, ToolError
 
@@ -279,3 +287,97 @@ def test_rebuild_manager_reconnects(manager):
         assert "dummy" in new.discovered
     finally:
         new.close()
+
+
+def test_status_reports_connecting_field(manager):
+    """status() carries a per-server `connecting` flag; after start() everything has
+    settled, so a live server is connected (green), not connecting (amber)."""
+    row = {r["name"]: r for r in manager.status()}["dummy"]
+    assert row["connected"] is True
+    assert row["connecting"] is False  # settled, so not amber
+
+
+def test_reconnect_server_restarts_one_in_place():
+    """reconnect_server() restarts ONE server's session without touching the others;
+    both stay discoverable and callable afterwards."""
+    mgr = McpManager(
+        McpConfig(
+            servers=[
+                McpServerConfig(name="a", command=sys.executable, args=[DUMMY]),
+                McpServerConfig(name="b", command=sys.executable, args=[DUMMY]),
+            ]
+        )
+    )
+    mgr.start()
+    try:
+        mgr.reconnect_server("a")  # restart only 'a'
+        mgr.wait_server_ready("a", timeout=30)
+        assert "a" in mgr.discovered and "b" in mgr.discovered, mgr.errors
+        registry = Registry()
+        register_mcp_tools(
+            _config([{"name": "a__echo", "enabled": True}, {"name": "b__add", "enabled": True}]),
+            mgr,
+            registry,
+        )
+        assert "hi" in registry.call("a__echo", json.dumps({"text": "hi"}))
+        assert "5" in registry.call("b__add", json.dumps({"a": 2, "b": 3}))
+    finally:
+        mgr.close()
+
+
+def test_begin_is_non_blocking_then_wait_ready():
+    """begin() returns immediately (connect runs on the bg thread); wait_ready()
+    blocks until the first round settles — the split that lets the UI show amber."""
+    mgr = McpManager(
+        McpConfig(servers=[McpServerConfig(name="dummy", command=sys.executable, args=[DUMMY])])
+    )
+    try:
+        mgr.begin()  # must not raise / not block on connect
+        mgr.wait_ready(timeout=30)
+        assert "dummy" in mgr.discovered, mgr.errors
+    finally:
+        mgr.close()
+
+
+def test_leaf_error_unwraps_taskgroup_group():
+    """_leaf_error drills an ExceptionGroup (the SDK's 'unhandled errors in a
+    TaskGroup' wrapper) down to the actionable leaf message."""
+    leaf = FileNotFoundError(2, "No such file or directory")
+    group = BaseExceptionGroup("unhandled errors in a TaskGroup (1 sub-exception)", [leaf])
+    msg = _leaf_error(group)
+    assert "FileNotFoundError" in msg and "No such file" in msg
+    assert "TaskGroup" not in msg
+
+
+def test_mirror_env_only_injects_when_official_index_unreachable(monkeypatch):
+    """Domestic mirrors are injected for uvx/npx servers ONLY when the official index
+    is unreachable AND the user hasn't set their own — users outside China (probe
+    succeeds) get nothing, so defaults are never wrong for them."""
+    for name in ("UV_DEFAULT_INDEX", "UV_INDEX", "npm_config_registry", "NPM_CONFIG_REGISTRY"):
+        monkeypatch.delenv(name, raising=False)
+    servers = [
+        McpServerConfig(name="u", command="uvx", args=["pkg"]),
+        McpServerConfig(name="n", command="npx", args=["-y", "pkg"]),
+    ]
+
+    monkeypatch.setattr(mcp_module, "_host_reachable", lambda *a, **k: True)
+    assert _mirror_env(servers) == {}  # reachable -> no mirror
+
+    monkeypatch.setattr(mcp_module, "_host_reachable", lambda *a, **k: False)
+    injected = _mirror_env(servers)
+    assert injected["UV_DEFAULT_INDEX"].startswith("https://pypi.tuna.tsinghua")
+    assert injected["npm_config_registry"].startswith("https://registry.npmmirror")
+
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://my.private/index")  # user's setting wins
+    assert "UV_DEFAULT_INDEX" not in _mirror_env(servers)
+
+
+def test_node_missing_raises_actionable_error(monkeypatch):
+    """A node-family stdio command that isn't installed fails with a Node-install
+    hint, not the raw '[WinError 2]'/TaskGroup spawn error."""
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda c: None)
+    server = McpServerConfig(name="dc", command="npx", args=["-y", "some-mcp"])
+    with pytest.raises(RuntimeError, match="Node"):
+        _open_streams(server)

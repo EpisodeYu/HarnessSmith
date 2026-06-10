@@ -215,22 +215,41 @@ def _persist_config_keys(app, keys: list[str]) -> None:
 
 
 def _ensure_mcp_manager(app):
-    """Return the live MCP manager, starting it on first use.
+    """Return the live MCP manager, starting it on first use — NON-blocking.
 
     Connects EVERY configured server (so the management page has live status +
     discovery) but registers only allowlisted tools into the registry. Idempotent
-    and lock-guarded; the blocking connect is held under ``mcp_lock`` (not
-    ``runs_lock``) so it never stalls a chat run's bookkeeping.
+    and lock-guarded. The connect runs on the manager's own thread and a background
+    warmer registers the tools once the first round settles, so ``/mcp/status`` can
+    immediately report a live "connecting" state instead of hanging until every
+    (possibly slow uvx/npx cold-start) server is up.
     """
-    from ..harness.mcp import McpManager, sync_mcp_tools
+    from ..harness.mcp import McpManager
 
     with app.state.mcp_lock:
         if app.state.mcp_manager is None:
             manager = McpManager(app.state.config.mcp)
-            manager.start()
-            sync_mcp_tools(app.state.config, manager)
+            manager.begin()  # start connecting without blocking the request
             app.state.mcp_manager = manager
+            _warm_mcp_tools(app, manager)
         return app.state.mcp_manager
+
+
+def _warm_mcp_tools(app, manager, close_after=None):
+    """Background: wait for the first connect round to settle, then sync the registry
+    (and optionally close a superseded manager). Keeps tool registration off the
+    request path so the UI can show live connecting status."""
+    from ..harness.mcp import sync_mcp_tools
+
+    def run():
+        try:
+            manager.wait_ready()
+            sync_mcp_tools(app.state.config, manager)
+        finally:
+            if close_after is not None:
+                close_after.close()
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def _rebuild_mcp_manager(app):
@@ -633,6 +652,7 @@ def create_app(
                 "name": server.name,
                 "transport": server.kind,
                 "connected": bool(st.get("connected")),
+                "connecting": bool(st.get("connecting")),
                 "error": st.get("error"),
                 "tool_count": tool_count,
                 "enabled_count": enabled_count,
@@ -652,7 +672,13 @@ def create_app(
         config = app.state.config
         if not config.mcp.servers:
             return {"servers": []}
-        manager = await run_in_threadpool(lambda: _ensure_mcp_manager(app))
+
+        def _ready_manager():  # an explicit scan waits for discovery (then caches)
+            mgr = _ensure_mcp_manager(app)
+            mgr.wait_ready(timeout=config.mcp.connect_timeout_seconds + 5)
+            return mgr
+
+        manager = await run_in_threadpool(_ready_manager)
         enabled = config.enabled_tool_names()
         listed = {tool.name for tool in config.tools}
         servers = []
@@ -710,8 +736,34 @@ def create_app(
     @app.post("/mcp/reconnect")
     async def reconnect_mcp() -> dict:
         """Rebuild the manager from the current config (reconnect every server) —
-        the management page's "reconnect" button for a server that dropped."""
+        the management page's "reconnect all" button for a fresh start."""
         await run_in_threadpool(lambda: _rebuild_mcp_manager(app))
+        return await mcp_status()
+
+    @app.post("/mcp/servers/{name}/reconnect")
+    async def reconnect_one_mcp_server(name: str) -> dict:
+        """Reconnect a SINGLE server in place — the per-server "reconnect" button.
+
+        Restarts just this server's session (others keep running), returns
+        immediately while it's connecting (the dot goes amber; the page polls), and
+        re-syncs the registry in the background once it settles.
+        """
+        from ..harness.mcp import sync_mcp_tools
+
+        def _restart_one():
+            manager = _ensure_mcp_manager(app)
+            manager.reconnect_server(name)  # fast: tear down + respawn (now connecting)
+            return manager
+
+        manager = await run_in_threadpool(_restart_one)
+
+        def _resync_when_ready():
+            manager.wait_server_ready(
+                name, timeout=app.state.config.mcp.connect_timeout_seconds + 5
+            )
+            sync_mcp_tools(app.state.config, manager)
+
+        threading.Thread(target=_resync_when_ready, daemon=True).start()
         return await mcp_status()
 {% endif %}
 

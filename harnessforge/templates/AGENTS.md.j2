@@ -500,11 +500,15 @@ server's tools are listed under a collapsed group with a **master checkbox**
 Save.
 
 The **Config → MCP** tab is the management view: each server shows a live
-connection dot (green = connected, red = unreachable, with the error), its
-transport + tool counts, and editable fields. Add / edit / delete a server there
-and it **reconnects immediately** (writing `config.yaml` back, env-var names only).
-This lets the product spawn local commands / reach URLs you configure — a **local,
-trusted control**, so don't expose `/config` or `/mcp` on a public network.
+connection dot — **green** = connected, **amber** = connecting (e.g. a `uvx`/`npx`
+package still cold-downloading; the page re-polls until it settles), **red** =
+unreachable (with the error) — plus its transport + tool counts and editable
+fields. Each server has its own **Reconnect** button (retry just that one without
+disturbing the others); **Reconnect all** rebuilds them together. Add / edit /
+delete a server there and it **reconnects immediately** (writing `config.yaml`
+back, env-var names only). This lets the product spawn local commands / reach URLs
+you configure — a **local, trusted control**, so don't expose `/config` or `/mcp`
+on a public network.
 {% endif %}
 On the CLI, `{{ project_slug }} mcp status` health-checks every configured server
 (connectivity + tool counts; an unreachable server is shown with its error).
@@ -524,7 +528,7 @@ mcp:
       url: https://mcp.example.com/sse
       transport: sse          # legacy HTTP+SSE; omit (or `http`) for Streamable HTTP
       auth_env: EXAMPLE_TOKEN  # env-var NAME holding the bearer token
-  connect_timeout_seconds: 30   # a slow/failing server is skipped, never hangs
+  connect_timeout_seconds: 60   # generous (first uvx/npx launch cold-downloads); a slow/failing server is skipped, never hangs
 tools:
   - name: git__*                 # wildcard: enable EVERY tool of this server
     enabled: true
@@ -548,7 +552,15 @@ uvx-based servers (fetch, ddg-search, git) download on first use, then run from
 cache. The generator prewarms that cache (`harnessforge new` / `--prewarm`), and
 the `Dockerfile` warms it at build time and sets `UV_OFFLINE=1`, so `docker run`
 works with no network. Node-based servers (Desktop Commander) need Node on the
-host and are not baked.
+host and are not baked — a missing `node`/`npx` is reported with an install hint
+instead of a raw spawn error.
+
+If a generated repo's first run *didn't* prewarm and `UV_OFFLINE` isn't set, a
+`uvx`/`npx` server still downloads its package on first use (it just shows
+**connecting** until it lands). Behind the GFW, when `pypi.org` / `registry.npmjs.org`
+is unreachable, the child process is pointed at a domestic mirror automatically
+(Tsinghua PyPI for `uvx`, npmmirror for `npx`) — but **only** if you haven't set
+your own `UV_DEFAULT_INDEX` / `npm_config_registry`, so this is a no-op outside China.
 
 ### Windows
 

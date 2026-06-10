@@ -145,12 +145,32 @@ def _mcp_config():
 
 def test_mcp_status_reports_live_server_health():
     """/mcp/status backs the management page: live connection + tool counts + the
-    editable server config (env-var NAMES only, never secret values)."""
-    data = TestClient(create_app(_mcp_config(), mock=True)).get("/mcp/status").json()
-    s = {x["name"]: x for x in data["servers"]}["dummy"]
-    assert s["connected"] is True and s["transport"] == "stdio" and s["error"] is None
+    editable server config (env-var NAMES only, never secret values). It is
+    NON-blocking — a server may report `connecting` (amber) first, then converge to
+    `connected`, so a slow uvx/npx cold-start never hangs the page."""
+    app = create_app(_mcp_config(), mock=True)
+    client = TestClient(app)
+    first = {x["name"]: x for x in client.get("/mcp/status").json()["servers"]}["dummy"]
+    assert first["transport"] == "stdio"
+    assert first["connected"] or first["connecting"]  # live; may still be in flight
+    app.state.mcp_manager.wait_ready(timeout=30)  # let the dummy finish connecting
+    s = {x["name"]: x for x in client.get("/mcp/status").json()["servers"]}["dummy"]
+    assert s["connected"] is True and s["connecting"] is False and s["error"] is None
     assert s["enabled_count"] == 1 and s["tool_count"] >= 2
     assert s["config"]["command"] == sys.executable  # editable config surfaced
+
+
+def test_mcp_reconnect_single_server():
+    """POST /mcp/servers/{name}/reconnect restarts just that server in place and
+    returns live status immediately (may be connecting), converging to connected."""
+    app = create_app(_mcp_config(), mock=True)
+    client = TestClient(app)
+    client.get("/mcp/discover")  # connect the dummy first (this waits for readiness)
+    resp = client.post("/mcp/servers/dummy/reconnect")
+    assert resp.status_code == 200, resp.text
+    app.state.mcp_manager.wait_server_ready("dummy", timeout=30)
+    s = {x["name"]: x for x in client.get("/mcp/status").json()["servers"]}["dummy"]
+    assert s["connected"] is True and s["error"] is None
 
 
 def test_mcp_add_and_delete_server_persists_and_reconnects(tmp_path):
@@ -209,6 +229,16 @@ def test_index_has_mcp_management_ui():
     assert 'data-cfg="mcp"' in body and 'id="cfg-mcp-list"' in body
     assert "function buildMcp()" in body and "/mcp/status" in body
     assert "mcp-master" in body  # the per-server master checkbox (Tools tab)
+
+
+def test_index_has_per_server_reconnect_and_connecting_dot():
+    """The management tab ships the per-server reconnect button + the amber
+    "connecting" dot + the poll-until-settled loop, so a slow start shows progress
+    rather than looking dead."""
+    body = _client().get("/").text
+    assert "m-reconnect" in body and "/reconnect" in body  # per-server reconnect
+    assert "text-amber-500" in body and "mcp_connecting" in body  # amber connecting dot
+    assert "scheduleMcpPoll" in body  # re-poll while anything is still connecting
 {% endif %}
 
 

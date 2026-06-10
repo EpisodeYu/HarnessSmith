@@ -111,7 +111,7 @@
           <p class="text-xs text-slate-500" data-i18n="mcp_hint">MCP servers this product can connect to; the dot shows live connectivity. Add / edit / remove a server here — it reconnects immediately. Local trusted control — don't expose this panel on a public network.</p>
           <div class="flex items-center gap-2 whitespace-nowrap">
             <span id="cfg-mcp-msg" class="text-xs text-slate-500"></span>
-            <button id="cfg-mcp-reconnect" type="button" class="rounded-lg border px-2 py-1 text-xs" data-i18n="mcp_reconnect">Reconnect</button>
+            <button id="cfg-mcp-reconnect" type="button" class="rounded-lg border px-2 py-1 text-xs" data-i18n="mcp_reconnect_all">Reconnect all</button>
           </div>
         </div>
         <div id="cfg-mcp-list" class="space-y-2"></div>
@@ -251,6 +251,7 @@
         mcp_url: "url", mcp_authenv: "auth env var name", mcp_desc: "description",
         mcp_safe_tools: "read-only tools (comma-separated, unprefixed)",
         mcp_loading: "loading…", mcp_reconnecting: "reconnecting…", mcp_saved: "saved",
+        mcp_reconnect_all: "Reconnect all", mcp_connecting: "connecting…",
         mcp_connected: "connected", mcp_unreachable: "unreachable", mcp_tools_word: "tools",
         mcp_extend_hint: "Turn a server's tools on/off on the Tools tab (each server has a master checkbox). Secrets stay in .env — a server stores only env-var names, never values.",
 {% endif %}        prompts_system: "system", prompts_rules: "Rule files (always-on)",
@@ -334,6 +335,7 @@
         mcp_url: "url", mcp_authenv: "auth 环境变量名", mcp_desc: "描述",
         mcp_safe_tools: "只读工具(逗号分隔,不带前缀)",
         mcp_loading: "加载中…", mcp_reconnecting: "重连中…", mcp_saved: "已保存",
+        mcp_reconnect_all: "全部重连", mcp_connecting: "连接中…",
         mcp_connected: "已连接", mcp_unreachable: "不可达", mcp_tools_word: "工具",
         mcp_extend_hint: "在工具标签里开关某服务器的工具(每个服务器有一个总复选框)。密钥仍放 .env —— 服务器只存环境变量名,不存真值。",
 {% endif %}        prompts_system: "系统提示", prompts_rules: "规则文件(常驻)",
@@ -1335,7 +1337,11 @@
       s = s || {}; const c = s.config || {};
       const sel = c.transport || "";
       const opt = (v, label) => "<option value='" + v + "'" + (sel === v ? " selected" : "") + ">" + label + "</option>";
-      const dot = isNew ? "" : "<span class='" + (s.connected ? "text-emerald-600" : "text-red-600") + "'>\u25cf</span> ";
+      // Three-state dot: green connected / amber connecting (e.g. a uvx/npx
+      // cold-download in flight) / red unreachable — so a slow start never looks dead.
+      const dotColor = s.connecting ? "text-amber-500" : (s.connected ? "text-emerald-600" : "text-red-600");
+      const dotTitle = s.connecting ? t("mcp_connecting") : (s.connected ? t("mcp_connected") : t("mcp_unreachable"));
+      const dot = isNew ? "" : "<span class='" + dotColor + "' title='" + esc(dotTitle) + "'>\u25cf</span> ";
       const meta = isNew ? "" :
         "<span class='text-xs text-slate-500'>[" + esc(s.transport) + "] " + s.enabled_count + "/" + s.tool_count + " " + t("mcp_tools_word") + "</span>" +
         (s.error ? " <span class='text-xs text-red-600'>" + esc(s.error) + "</span>" : "");
@@ -1359,6 +1365,7 @@
           "<label>" + t("mcp_safe_tools") + "<input class='m-safe mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc((c.safe_tools || []).join(", ")) + "'/></label>" +
         "</div>" +
         "<div class='flex items-center gap-2'>" +
+          (isNew ? "" : "<button type='button' class='m-reconnect rounded border px-3 py-1 text-xs'>" + t("mcp_reconnect") + "</button>") +
           "<button type='button' class='m-save rounded border px-3 py-1 text-xs'>" + t("mcp_save") + "</button>" +
           "<button type='button' class='m-remove rounded border px-3 py-1 text-xs text-red-600'>" + t("mcp_remove") + "</button>" +
           "<span class='m-status text-xs'></span>" +
@@ -1390,8 +1397,17 @@
       msg.className = "text-xs text-slate-500"; msg.textContent = t("mcp_loading");
       try {
         mcpServers = await (await fetch("/mcp/status")).json();
-        buildMcp(); msg.textContent = "";
+        buildMcp(); msg.textContent = ""; scheduleMcpPoll();
       } catch (e) { msg.className = "text-xs text-red-600"; msg.textContent = String(e); }
+    }
+    // While any server is still connecting (e.g. a uvx/npx cold-download), re-poll
+    // /mcp/status so the amber dots flip to green/red on their own — but only while
+    // the MCP tab is showing, so we don't poll a hidden panel forever.
+    let mcpPollTimer = null;
+    function scheduleMcpPoll() {
+      if (mcpPollTimer) { clearTimeout(mcpPollTimer); mcpPollTimer = null; }
+      const anyConnecting = ((mcpServers && mcpServers.servers) || []).some((s) => s.connecting);
+      if (anyConnecting && cfgTab === "mcp") mcpPollTimer = setTimeout(loadMcp, 1500);
     }
 {% endif %}
 
@@ -1709,6 +1725,17 @@
       const card = e.target.closest(".mcp-srv");
       if (!card) return;
       const status = card.querySelector(".m-status");
+      if (e.target.closest(".m-reconnect")) {
+        const name = card.querySelector(".m-name").value.trim();
+        if (!name) return;
+        status.className = "m-status text-xs text-slate-500"; status.textContent = t("mcp_reconnecting");
+        try {
+          const resp = await fetch("/mcp/servers/" + encodeURIComponent(name) + "/reconnect", { method: "POST" });
+          if (resp.ok) { mcpServers = await resp.json(); mcpDiscovered = null; buildMcp(); scheduleMcpPoll(); }
+          else { status.className = "m-status text-xs text-red-600"; status.textContent = t("cfg_invalid"); }
+        } catch (err) { status.className = "m-status text-xs text-red-600"; status.textContent = String(err); }
+        return;
+      }
       if (e.target.closest(".m-save")) {
         status.className = "m-status text-xs text-slate-500"; status.textContent = t("mcp_reconnecting");
         const resp = await fetch("/mcp/servers", {

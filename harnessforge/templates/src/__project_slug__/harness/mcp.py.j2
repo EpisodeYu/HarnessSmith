@@ -10,7 +10,11 @@ The MCP SDK is asyncio; all of it hides behind a synchronous ``McpManager.call``
 One background thread owns one event loop; each server gets its OWN task that
 enters and exits that server's session (anyio requires a session be entered and
 exited in the *same* task). Servers connect concurrently, so startup costs
-``max`` per-server connect time, not the sum.
+``max`` per-server connect time, not the sum. ``begin()`` starts that without
+blocking (so a UI can show a live "connecting" state); ``reconnect_server()``
+restarts just one server in place. stdio servers launched via ``uvx``/``npx`` get
+a domestic package mirror injected when the official index is unreachable (GFW),
+and a missing ``node`` is reported as an actionable error rather than raw noise.
 """
 
 from __future__ import annotations
@@ -56,7 +60,49 @@ def _windows_stdio_command(command: str, args: list[str]) -> tuple[str, list[str
     return command, args
 
 
-def _open_streams(server: McpServerConfig):
+_NODE_COMMANDS = {"npx", "npm", "node"}
+_PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
+_NPM_MIRROR = "https://registry.npmmirror.com"
+
+
+def _base_command(command: str | None) -> str:
+    """The bare command name, lower-cased and stripped of a Windows shim suffix."""
+    import os
+
+    return os.path.basename(command or "").lower().removesuffix(".cmd").removesuffix(".exe")
+
+
+def _host_reachable(host: str, port: int = 443, timeout: float = 2.0) -> bool:
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _mirror_env(servers: list[McpServerConfig]) -> dict[str, str]:
+    """Domestic package mirrors to inject into stdio children when the official
+    index is unreachable (GFW). uvx -> Tsinghua PyPI, npx -> npmmirror. Probed once;
+    NEVER overrides a mirror the user already set, so users outside China are
+    unaffected (the probe simply succeeds and nothing is injected)."""
+    import os
+
+    cmds = {_base_command(s.command) for s in servers if s.kind == "stdio"}
+    out: dict[str, str] = {}
+    if {"uvx", "uv"} & cmds and not (os.environ.get("UV_DEFAULT_INDEX") or os.environ.get("UV_INDEX")):
+        if not _host_reachable("pypi.org"):
+            out["UV_DEFAULT_INDEX"] = _PYPI_MIRROR
+    if {"npx", "npm", "node"} & cmds and not (
+        os.environ.get("npm_config_registry") or os.environ.get("NPM_CONFIG_REGISTRY")
+    ):
+        if not _host_reachable("registry.npmjs.org"):
+            out["npm_config_registry"] = _NPM_MIRROR
+    return out
+
+
+def _open_streams(server: McpServerConfig, mirror_env: dict[str, str] | None = None):
     """Return the (read, write) stream context manager for ``server``'s transport.
 
     Transport is ``server.kind`` (explicit ``transport`` or inferred from shape):
@@ -68,15 +114,25 @@ def _open_streams(server: McpServerConfig):
     kind = server.kind
     if kind == "stdio":
         import os
+        import shutil
 
         from mcp import StdioServerParameters
         from mcp.client.stdio import stdio_client
 
+        # A Node-family command that isn't installed: fail with an actionable message
+        # instead of the raw '[WinError 2]' / TaskGroup noise the spawn would emit.
+        if _base_command(server.command) in _NODE_COMMANDS and shutil.which(server.command) is None:
+            raise RuntimeError(
+                f"{server.command!r} not found — this server needs Node.js. "
+                "Install Node (https://nodejs.org or nvm), then reconnect."
+            )
         env = dict(os.environ)
         for name in server.env:  # inject named secrets from .env into the child
             value = resolve_env(name)
             if value is not None:
                 env[name] = value
+        for key, value in (mirror_env or {}).items():  # GFW mirror; user's setting wins
+            env.setdefault(key, value)
         command, args = _windows_stdio_command(server.command, server.args)
         return stdio_client(
             StdioServerParameters(command=command, args=args, env=env)
@@ -104,13 +160,35 @@ def _result_text(result: Any) -> str:
     return f"ERROR: {text}" if getattr(result, "isError", False) else text
 
 
+def _leaf_error(exc: BaseException) -> str:
+    """Drill an ExceptionGroup/TaskGroup error down to its first leaf.
+
+    A stdio spawn failure surfaces from the MCP SDK as 'unhandled errors in a
+    TaskGroup (1 sub-exception)' — noise. The leaf (e.g. ``FileNotFoundError:
+    [WinError 2] ...``) is the actionable part shown in the panel.
+    """
+    seen: BaseException = exc
+    for _ in range(10):
+        subs = getattr(seen, "exceptions", None)
+        if not subs:
+            break
+        seen = subs[0]
+    text = str(seen).strip()
+    return f"{type(seen).__name__}: {text}" if text else type(seen).__name__
+
+
 class McpManager:
     """Owns one background event loop + the full MCP session lifecycle.
 
-    ``start()`` connects every configured server CONCURRENTLY (failures are
-    isolated: a server that won't start is skipped and recorded in ``errors``,
-    not fatal) and lists its tools into ``discovered``. ``call()`` is synchronous
-    and thread-safe; ``close()`` shuts the sessions down cleanly.
+    Each configured server gets its OWN task that connects CONCURRENTLY and then
+    holds its session open until shutdown (anyio requires a session be entered and
+    exited in the *same* task). Per-server failure is isolated into ``errors``
+    (a server that won't start is skipped, not fatal). ``begin()`` starts
+    connecting WITHOUT blocking, so ``status()`` can report a live ``connecting``
+    state; ``start()`` = ``begin()`` + wait for the first round to settle (for a
+    one-shot CLI run that needs tools up front). ``reconnect_server()`` restarts
+    one server in place; ``call()`` is synchronous + thread-safe; ``close()``
+    shuts everything down cleanly.
     """
 
     def __init__(self, config: McpConfig) -> None:
@@ -120,13 +198,18 @@ class McpManager:
         self._ready: concurrent.futures.Future = concurrent.futures.Future()
         self._inbox: asyncio.Queue | None = None
         self._closing: asyncio.Event | None = None
-        self._server_tasks: list[asyncio.Task] = []
+        self._mirror_env: dict[str, str] = {}
+        self._servers: dict[str, McpServerConfig] = {s.name: s for s in config.servers}
+        self._tasks: dict[str, asyncio.Task] = {}
+        self._stop: dict[str, asyncio.Event] = {}
+        self._settled: dict[str, asyncio.Event] = {}
         self._sessions: dict[str, Any] = {}
         self.discovered: dict[str, list] = {}
         self.errors: dict[str, str] = {}
 
     def _thread_main(self) -> None:
         asyncio.set_event_loop(self._loop)
+        self._mirror_env = _mirror_env(list(self._config.servers))  # probe off the loop
         try:
             self._loop.run_until_complete(self._main())
         except Exception as exc:  # surface startup failures to start()
@@ -138,46 +221,58 @@ class McpManager:
     async def _main(self) -> None:
         self._inbox = asyncio.Queue()
         self._closing = asyncio.Event()
-        timeout = self._config.connect_timeout_seconds
-        # One task per server, all started at once: each owns its session for the
-        # whole run and connects in parallel, so startup is max(per-server), not sum.
-        done_events: list[asyncio.Event] = []
         for server in self._config.servers:
-            done = asyncio.Event()
-            done_events.append(done)
-            self._server_tasks.append(asyncio.create_task(self._run_server(server, timeout, done)))
-        for done in done_events:  # ready once every server has connected or failed
-            await done.wait()
+            self._spawn(server)
+        # Ready once every server's first connect attempt has settled (connected or
+        # failed) — start()/wait_ready() block on this; begin() does not.
+        await asyncio.gather(*(ev.wait() for ev in list(self._settled.values())))
         self._ready.set_result(True)
         await self._serve()
-        self._closing.set()  # release each server task to tear down its own session
-        if self._server_tasks:
-            await asyncio.gather(*self._server_tasks, return_exceptions=True)
+        self._closing.set()
+        for ev in self._stop.values():  # release each server task to tear down
+            ev.set()
+        if self._tasks:
+            await asyncio.gather(*self._tasks.values(), return_exceptions=True)
 
-    async def _run_server(self, server: McpServerConfig, timeout: float, done: asyncio.Event) -> None:
+    def _spawn(self, server: McpServerConfig) -> None:
+        """Create one server's stop/settled events + its lifecycle task (on the loop)."""
+        name = server.name
+        self._servers[name] = server
+        self._sessions.pop(name, None)
+        self.errors.pop(name, None)
+        self.discovered.pop(name, None)
+        self._stop[name] = asyncio.Event()
+        self._settled[name] = asyncio.Event()
+        self._tasks[name] = asyncio.create_task(self._run_server(server))
+
+    async def _run_server(self, server: McpServerConfig) -> None:
         """Own ONE server's session for the whole run, inside a single task.
 
-        Connect (open transport + ``initialize`` + ``list_tools``) under ``timeout``,
-        signal ``done`` (so startup can proceed), then hold the session open until
-        ``close()``. Entering and exiting the session in the same task is required by
-        anyio; a connect failure/timeout is isolated into ``errors`` and never aborts
-        the other servers.
+        Connect (open transport + ``initialize`` + ``list_tools``) under the timeout,
+        signal ``settled`` (so startup can proceed), then hold the session open until
+        ``stop`` is set (shutdown or a reconnect). Entering and exiting the session in
+        the same task is required by anyio; a connect failure/timeout is isolated into
+        ``errors`` and never aborts the other servers.
         """
-        assert self._closing is not None
+        name = server.name
+        stop, settled = self._stop[name], self._settled[name]
         try:
             async with AsyncExitStack() as stack:
-                await asyncio.wait_for(self._connect(stack, server), timeout)
-                done.set()
-                await self._closing.wait()  # keep the session alive until shutdown
+                await asyncio.wait_for(
+                    self._connect(stack, server), self._config.connect_timeout_seconds
+                )
+                settled.set()
+                await stop.wait()  # keep the session alive until shutdown/reconnect
         except Exception as exc:  # connect failure/timeout: isolate, never fatal
-            self.errors[server.name] = str(exc)
-            done.set()
+            self.errors[name] = _leaf_error(exc)
+            self._sessions.pop(name, None)
+            settled.set()
 
     async def _connect(self, stack: AsyncExitStack, server: McpServerConfig) -> None:
         """Open one server's session and list its tools (under a startup timeout)."""
         from mcp import ClientSession
 
-        streams = await stack.enter_async_context(_open_streams(server))
+        streams = await stack.enter_async_context(_open_streams(server, self._mirror_env))
         session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
         await session.initialize()
         self._sessions[server.name] = session
@@ -195,9 +290,47 @@ class McpManager:
             except Exception as exc:
                 fut.set_exception(exc)
 
+    async def _restart(self, name: str) -> None:
+        """Tear down one server (in its own task) and spawn a fresh one — in place."""
+        server = self._servers.get(name)
+        if server is None:
+            return
+        task = self._tasks.get(name)
+        if task is not None:
+            self._stop[name].set()
+            await task  # exits this server's session in the task that entered it
+        self._spawn(server)
+
+    def begin(self) -> None:
+        """Start connecting WITHOUT blocking (``status()`` then reports live progress)."""
+        if not self._thread.is_alive():
+            self._thread.start()
+
     def start(self) -> None:
-        self._thread.start()
+        """Start and block until the first connect round settles (CLI one-shot)."""
+        self.begin()
         self._ready.result()  # block until every server is connected (or skipped)
+
+    def wait_ready(self, timeout: float | None = None) -> None:
+        """Block until the initial connect round has settled (connected or failed)."""
+        self._ready.result(timeout)
+
+    def wait_server_ready(self, name: str, timeout: float | None = None) -> None:
+        """Block until ONE server's current attempt settles (after a reconnect)."""
+        ev = self._settled.get(name)
+        if ev is None or self._loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(ev.wait(), self._loop).result(timeout)
+        except (concurrent.futures.TimeoutError, RuntimeError):
+            pass
+
+    def reconnect_server(self, name: str) -> None:
+        """Restart ONE server in place (others untouched); returns once it's been
+        re-spawned and is (re)connecting — poll ``status()`` for the outcome."""
+        if name not in self._servers or self._loop.is_closed():
+            return
+        asyncio.run_coroutine_threadsafe(self._restart(name), self._loop).result()
 
     def call(self, server: str, tool: str, arguments: dict) -> str:
         fut: concurrent.futures.Future = concurrent.futures.Future()
@@ -211,18 +344,24 @@ class McpManager:
         self._thread.join(timeout=10)
 
     def status(self) -> list[dict]:
-        """Per-server health, read after ``start()`` — the source of truth for the
-        management page / ``mcp status``: each configured server's transport, live
-        connection state, discovered tool count, and connect error (if any)."""
+        """Per-server health — the source of truth for the management page /
+        ``mcp status``: each configured server's transport, live connection state
+        (``connected`` / ``connecting`` / errored), discovered tool count, and
+        connect error (if any). ``connecting`` is true while a server's first (or a
+        reconnect's) attempt is still in flight — the UI shows it amber, not red."""
         out: list[dict] = []
         for server in self._config.servers:
-            tools = self.discovered.get(server.name)
+            name = server.name
+            tools = self.discovered.get(name)
+            connected = name in self._sessions
+            error = self.errors.get(name)
             out.append(
                 {
-                    "name": server.name,
+                    "name": name,
                     "transport": server.kind,
-                    "connected": server.name in self._sessions,
-                    "error": self.errors.get(server.name),
+                    "connected": connected,
+                    "connecting": self._thread.is_alive() and not connected and error is None,
+                    "error": error,
                     "tool_count": len(tools) if tools is not None else 0,
                 }
             )
