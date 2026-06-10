@@ -524,7 +524,7 @@ mcp:
       url: https://mcp.example.com/sse
       transport: sse          # legacy HTTP+SSE; omit (or `http`) for Streamable HTTP
       auth_env: EXAMPLE_TOKEN  # env-var NAME holding the bearer token
-  connect_timeout_seconds: 30   # a slow/failing server is skipped, never hangs
+  connect_timeout_seconds: 120  # first uvx/npx cold starts can be slow on Windows
 tools:
   - name: git__*                 # wildcard: enable EVERY tool of this server
     enabled: true

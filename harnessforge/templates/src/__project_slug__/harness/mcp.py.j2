@@ -134,6 +134,25 @@ def _result_text(result: Any) -> str:
     return f"ERROR: {text}" if getattr(result, "isError", False) else text
 
 
+def _format_exception(exc: BaseException) -> str:
+    """Show useful leaves from Python 3.11 ExceptionGroup/anyio TaskGroup errors."""
+    if isinstance(exc, BaseExceptionGroup):
+        leaves: list[str] = []
+
+        def _walk(group: BaseExceptionGroup) -> None:
+            for inner in group.exceptions:
+                if isinstance(inner, BaseExceptionGroup):
+                    _walk(inner)
+                else:
+                    message = str(inner) or type(inner).__name__
+                    leaves.append(f"{type(inner).__name__}: {message}")
+
+        _walk(exc)
+        if leaves:
+            return f"{exc} ({'; '.join(leaves)})"
+    return str(exc) or type(exc).__name__
+
+
 class McpManager:
     """Owns one background event loop + the full MCP session lifecycle.
 
@@ -151,6 +170,7 @@ class McpManager:
         self._inbox: asyncio.Queue | None = None
         self._closing: asyncio.Event | None = None
         self._server_tasks: list[asyncio.Task] = []
+        self._server_inboxes: dict[str, asyncio.Queue] = {}
         self._sessions: dict[str, Any] = {}
         self.discovered: dict[str, list] = {}
         self.errors: dict[str, str] = {}
@@ -181,6 +201,8 @@ class McpManager:
         self._ready.set_result(True)
         await self._serve()
         self._closing.set()  # release each server task to tear down its own session
+        for inbox in self._server_inboxes.values():
+            await inbox.put(None)
         if self._server_tasks:
             await asyncio.gather(*self._server_tasks, return_exceptions=True)
 
@@ -201,11 +223,26 @@ class McpManager:
                 # exited in the SAME task, so use `asyncio.timeout()` instead.
                 async with asyncio.timeout(timeout):
                     await self._connect(stack, server)
+                inbox: asyncio.Queue = asyncio.Queue()
+                self._server_inboxes[server.name] = inbox
                 done.set()
-                await self._closing.wait()  # keep the session alive until shutdown
+                while True:
+                    req = await inbox.get()
+                    if req is None:
+                        return
+                    tool, arguments, fut = req
+                    try:
+                        fut.set_result(
+                            _result_text(
+                                await self._sessions[server.name].call_tool(tool, arguments)
+                            )
+                        )
+                    except Exception as exc:
+                        fut.set_exception(exc)
         except Exception as exc:  # connect failure/timeout: isolate, never fatal
-            self.errors[server.name] = str(exc)
-            done.set()
+            self.errors[server.name] = _format_exception(exc)
+            if not done.is_set():
+                done.set()
 
     async def _connect(self, stack: AsyncExitStack, server: McpServerConfig) -> None:
         """Open one server's session and list its tools (under a startup timeout)."""
@@ -224,10 +261,16 @@ class McpManager:
             if req is None:
                 return
             server, tool, arguments, fut = req
-            try:
-                fut.set_result(_result_text(await self._sessions[server].call_tool(tool, arguments)))
-            except Exception as exc:
-                fut.set_exception(exc)
+            inbox = self._server_inboxes.get(server)
+            if inbox is None:
+                fut.set_exception(
+                    RuntimeError(
+                        f"MCP server {server!r} is not connected: "
+                        f"{self.errors.get(server) or 'not discovered'}"
+                    )
+                )
+                continue
+            await inbox.put((tool, arguments, fut))
 
     def start(self) -> None:
         self._thread.start()

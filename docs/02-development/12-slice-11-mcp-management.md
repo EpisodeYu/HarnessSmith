@@ -12,6 +12,8 @@
 >
 > **2026-06-10 Windows 回归修复**:前两次 MCP 修复后仍有两个 Windows 问题。① `desktop-commander` 的 `npx` 是 `.cmd` shim,且本机可能没有 Node/npx;产物现在在 Windows 下先解析 launcher,`.cmd/.bat` 统一经 `cmd.exe /d /c <resolved.cmd>` 启动,launcher 缺失则在进入 MCP transport 前给出"安装 Node.js/uv 或改 config"的可读错误,避免裸 `[WinError 2] 系统找不到指定的文件`。② 并发连接实现不能用 `asyncio.wait_for(self._connect(...))`:它会把进入 MCP/anyio async context 的连接协程包进子 Task,退出时回到 server owner Task,导致首次进入所有 MCP 工具出现 `Attempted to exit cancel scope in a different task than it was entered in`。已改为同 Task 内的 `asyncio.timeout()` 并补回归测试,保持"每 server 一个长期 Task 持有 session"的设计。
 >
+> **2026-06-10 追加稳定性修复**:真实 Windows 产物首跑仍可能显示 `unhandled errors in a TaskGroup (1 sub-exception)`。复现后确认不是纯网络:网络/冷启动只是在 30s 内拉不完 `uvx`/`npx` server 时触发 `TimeoutError`,而错误被 MCP SDK/anyio 包成 `ExceptionGroup`;并发连接版还把 `ClientSession.call_tool` 放在 dispatcher task 中执行,跨 task 使用 session。修复为**每个 server task 同时拥有连接、session 生命周期和 tool call 执行**,dispatcher 只投递请求;同时展开 `ExceptionGroup` 叶子错误,把默认 `connect_timeout_seconds` 调为 **120s** 以覆盖 Windows 首跑冷启动。
+>
 > **升格来由**:T2-G「MCP 健康自检 / 状态面板」(`03 §4`,缺口 #19)2026-06-07 由 v1+ backlog 升格为 Slice 11(三件套+记忆之后的首要方向)。Slice 3 已落地 **MCP 工具自动发现**(`GET /mcp/discover` + Tools 页扫描,见 `04-slice-3-product-web.md §4`);本片接手其"剩余项":健康/连接状态、面板增删/编辑 server(= `/config` 触安全面)、热重连,并补 SSE 传输与"页面↔server↔LLM"三方一致性。
 
 ---

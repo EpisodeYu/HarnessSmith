@@ -269,7 +269,7 @@ class McpConfig(BaseModel):
     servers: list[McpServerConfig] = Field(default_factory=list)
     # Per-server startup timeout: a server that doesn't connect in time is skipped
     # (failure-isolated), so a slow/missing server never hangs a run.
-    connect_timeout_seconds: float = Field(default=30.0, gt=0)
+    connect_timeout_seconds: float = Field(default=120.0, gt=0)
 
 
 {% endif %}{% if spec.skills.enabled %}class SkillsConfig(BaseModel):

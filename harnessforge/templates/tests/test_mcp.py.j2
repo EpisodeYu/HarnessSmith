@@ -285,11 +285,13 @@ def test_connects_multiple_servers_concurrently():
 
 
 def test_server_contexts_enter_and_exit_in_same_task(monkeypatch):
-    """Regression: do not wrap MCP session setup in `asyncio.wait_for(coro)`.
+    """Regression: keep MCP session setup, calls, and teardown in one server task.
 
     `wait_for` runs the wrapped coroutine in a child Task; anyio cancel scopes used
     by MCP transports then enter in that child and exit in the server owner task,
     raising "Attempted to exit cancel scope in a different task..." on first use.
+    Calling a ClientSession from a separate dispatcher task is also unsafe; the
+    server task must own both the session lifecycle and its tool calls.
     """
     import asyncio
     import mcp
@@ -318,6 +320,13 @@ def test_server_contexts_enter_and_exit_in_same_task(monkeypatch):
         async def list_tools(self):
             return SimpleNamespace(tools=[SimpleNamespace(name="echo", description="", inputSchema={})])
 
+        async def call_tool(self, name, arguments):
+            assert asyncio.current_task() is self.task
+            return SimpleNamespace(
+                content=[SimpleNamespace(text=f"{name}:{arguments.get('text', '')}")],
+                isError=False,
+            )
+
     monkeypatch.setattr(mcp_bridge, "_open_streams", lambda server: SameTaskContext())
     monkeypatch.setattr(mcp, "ClientSession", FakeSession)
 
@@ -325,6 +334,9 @@ def test_server_contexts_enter_and_exit_in_same_task(monkeypatch):
     mgr.start()
     try:
         assert "fake" in mgr.discovered, mgr.errors
+        registry = Registry()
+        register_mcp_tools(_config([{"name": "fake__echo", "enabled": True}]), mgr, registry)
+        assert registry.call("fake__echo", json.dumps({"text": "ok"})) == "echo:ok"
     finally:
         mgr.close()
 
