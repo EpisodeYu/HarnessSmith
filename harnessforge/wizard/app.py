@@ -416,7 +416,11 @@ def _run_launch(job: dict, target_dir: Path, project_slug: str, *, host: str = "
                 _set_step(job, "node", "done")
             else:
                 with node_log.open("w", encoding="utf-8") as nlog:
-                    node_path = ensure_portable_node(project_slug, log=nlog)
+                    # Behind the GFW (PyPI unreachable) nodejs.org is usually
+                    # reachable-but-throttled, so try the domestic mirror first.
+                    node_path = ensure_portable_node(
+                        project_slug, prefer_mirror=not _pypi_reachable(), log=nlog
+                    )
                 _set_step(job, "node", "done")
 
         _set_step(job, "serve", "running")

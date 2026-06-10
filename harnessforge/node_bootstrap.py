@@ -16,13 +16,23 @@ import platform
 import shutil
 import sys
 import tarfile
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
 
 NODE_LTS_VERSION = "v22.11.0"
 _NODE_OFFICIAL = "https://nodejs.org/dist"
-_NODE_MIRROR = "https://npmmirror.com/mirrors/node"  # domestic fallback (GFW)
+_NODE_MIRROR = "https://npmmirror.com/mirrors/node"  # domestic mirror (GFW)
+
+# Download resilience: a stalled connection trips the per-read socket timeout; a
+# slow-but-steady source that hasn't reached _MIN_PCT by _SLOW_AFTER is abandoned
+# for the next source. Together with mirror-first ordering behind the GFW, this
+# stops a throttled nodejs.org from hanging the "Prepare Node" step.
+_READ_TIMEOUT = 30.0
+_SLOW_AFTER = 20.0
+_MIN_PCT = 25
+_CHUNK = 1 << 16
 
 
 def node_on_path() -> bool:
@@ -88,23 +98,71 @@ def _extract(archive: Path, dest: Path, ext: str) -> None:
             tf.extractall(dest)
 
 
-def ensure_portable_node(project_slug: str, *, log=None) -> str | None:
+def _emit(log, msg: str) -> None:
+    if log is not None:
+        log.write(msg + "\n")
+        log.flush()
+
+
+def _sources(prefer_mirror: bool) -> list[str]:
+    """Dist bases to try in order. ``HF_NODE_DIST`` overrides; otherwise mirror-first
+    behind the GFW (``prefer_mirror``), official-first elsewhere — and the OTHER is
+    always kept as a fallback."""
+    forced = os.environ.get("HF_NODE_DIST")
+    if forced:
+        return [forced.rstrip("/")]
+    return [_NODE_MIRROR, _NODE_OFFICIAL] if prefer_mirror else [_NODE_OFFICIAL, _NODE_MIRROR]
+
+
+def _download(url: str, dest: Path, *, log=None) -> bool:
+    """Stream ``url`` -> ``dest`` with a per-read socket timeout (a stalled connection
+    aborts) and a slow-start guard (a source that hasn't passed ``_MIN_PCT`` by
+    ``_SLOW_AFTER`` is abandoned). ``urlopen``'s default opener honors HTTP(S)_PROXY
+    env + the system proxy, so a configured proxy is used automatically. Returns
+    ``True`` on a complete download; the caller falls back to the next source."""
+    start = time.monotonic()
+    bucket = -1
+    try:
+        with urllib.request.urlopen(url, timeout=_READ_TIMEOUT) as resp:  # noqa: S310 — pinned node.js dist URL
+            total = int(resp.headers.get("Content-Length") or 0)
+            got = 0
+            with dest.open("wb") as fh:
+                while True:
+                    chunk = resp.read(_CHUNK)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    got += len(chunk)
+                    if total:
+                        pct = min(100, got * 100 // total)
+                        elapsed = time.monotonic() - start
+                        if elapsed > _SLOW_AFTER and pct < _MIN_PCT:
+                            raise TimeoutError(f"too slow ({pct}% after {int(elapsed)}s)")
+                        if pct // 10 != bucket:  # log roughly every 10%
+                            bucket = pct // 10
+                            _emit(log, f"[harnessforge]   downloading Node ... {pct}%")
+        return True
+    except Exception as exc:  # stall / timeout / HTTP / connection — try the next source
+        _emit(log, f"[harnessforge]   source failed: {exc}")
+        dest.unlink(missing_ok=True)
+        return False
+
+
+def ensure_portable_node(
+    project_slug: str, *, prefer_mirror: bool | None = None, log=None
+) -> str | None:
     """Return a PATH directory that provides ``node``+``npx``, installing a portable
-    Node if needed. Returns ``None`` when Node is already on PATH, or the platform
-    is unsupported, or the download failed (best-effort: the caller proceeds without
-    it). ``log`` (a writable file object) receives progress lines.
+    Node if needed. Tries multiple dist sources (official + domestic mirror) in an
+    order chosen by ``prefer_mirror`` (default: probe ``nodejs.org``), falling back
+    when one stalls / is too slow / fails. Returns ``None`` when Node is already on
+    PATH, the platform is unsupported, or every source failed (best-effort: the
+    caller proceeds without it). ``log`` (a writable file) receives progress lines.
     """
-
-    def _say(msg: str) -> None:
-        if log is not None:
-            log.write(msg + "\n")
-            log.flush()
-
     if node_on_path():
         return None
     tag = _platform_tag()
     if tag is None:
-        _say(f"[harnessforge] portable Node: unsupported platform {platform.platform()!r}; skipping.")
+        _emit(log, f"[harnessforge] portable Node: unsupported platform {platform.platform()!r}; skipping.")
         return None
     nodeos, nodearch, ext = tag
     dirname = f"node-{NODE_LTS_VERSION}-{nodeos}-{nodearch}"
@@ -113,35 +171,30 @@ def ensure_portable_node(project_slug: str, *, log=None) -> str | None:
     bin_dir = extracted if nodeos == "win" else extracted / "bin"
     node_exe = bin_dir / ("node.exe" if nodeos == "win" else "node")
     if node_exe.exists():
-        _say(f"[harnessforge] portable Node already present: {bin_dir}")
+        _emit(log, f"[harnessforge] portable Node already present: {bin_dir}")
         return str(bin_dir)
 
-    base = _NODE_OFFICIAL if _reachable("nodejs.org") else _NODE_MIRROR
+    if prefer_mirror is None:  # default heuristic: official slow/blocked -> mirror first
+        prefer_mirror = not _reachable("nodejs.org")
     archive = f"{dirname}.{ext}"
-    url = f"{base}/{NODE_LTS_VERSION}/{archive}"
     base_dir.mkdir(parents=True, exist_ok=True)
     tmp = base_dir / archive
-    _say(f"[harnessforge] downloading Node {NODE_LTS_VERSION} ({nodeos}-{nodearch}) from {base} ...")
-
-    bucket = [-1]
-
-    def _hook(blocks: int, block_size: int, total: int) -> None:
-        if total > 0:
-            pct = min(100, blocks * block_size * 100 // total)
-            if pct // 10 != bucket[0]:  # log roughly every 10%
-                bucket[0] = pct // 10
-                _say(f"[harnessforge]   downloading Node ... {pct}%")
-
-    try:
-        urllib.request.urlretrieve(url, tmp, _hook)  # noqa: S310 — pinned node.js dist URL
-        _say("[harnessforge] extracting Node ...")
-        _extract(tmp, base_dir, ext)
-        tmp.unlink(missing_ok=True)
-    except Exception as exc:  # offline / mirror down / bad archive — non-fatal
-        _say(f"[harnessforge] portable Node setup failed: {exc}")
+    for base in _sources(prefer_mirror):
+        _emit(log, f"[harnessforge] downloading Node {NODE_LTS_VERSION} ({nodeos}-{nodearch}) from {base} ...")
+        if not _download(f"{base}/{NODE_LTS_VERSION}/{archive}", tmp, log=log):
+            _emit(log, "[harnessforge] trying the next source ...")
+            continue
+        try:
+            _emit(log, "[harnessforge] extracting Node ...")
+            _extract(tmp, base_dir, ext)
+            tmp.unlink(missing_ok=True)
+        except Exception as exc:  # bad archive — non-fatal, stop here
+            _emit(log, f"[harnessforge] portable Node extract failed: {exc}")
+            return None
+        if node_exe.exists():
+            _emit(log, f"[harnessforge] Node is ready: {bin_dir}")
+            return str(bin_dir)
+        _emit(log, "[harnessforge] portable Node: node binary not found after extract.")
         return None
-    if node_exe.exists():
-        _say(f"[harnessforge] Node is ready: {bin_dir}")
-        return str(bin_dir)
-    _say("[harnessforge] portable Node: node binary not found after extract.")
+    _emit(log, "[harnessforge] portable Node: all sources failed (see proxy / network).")
     return None

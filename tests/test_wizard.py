@@ -377,10 +377,16 @@ def test_run_launch_provisions_portable_node_for_node_servers(tmp_path, monkeypa
 
     monkeypatch.setattr(app_mod, "_uv_sync", lambda td: (0, ""))
     monkeypatch.setattr(app_mod, "node_on_path", lambda: False)
-    monkeypatch.setattr(app_mod, "ensure_portable_node", lambda slug, log=None: "/portable/node/bin")
+    monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: True)  # no real network
+    captured = {}
+
+    def fake_ensure(slug, *, prefer_mirror=None, log=None):
+        captured["prefer_mirror"] = prefer_mirror
+        return "/portable/node/bin"
+
+    monkeypatch.setattr(app_mod, "ensure_portable_node", fake_ensure)
     monkeypatch.setattr(app_mod, "_find_free_port", lambda: 8123)
     monkeypatch.setattr(app_mod, "_wait_port", lambda host, port: True)
-    captured = {}
     monkeypatch.setattr(
         app_mod, "_launch_product",
         lambda td, slug, port, *, host="127.0.0.1", extra_path=None: captured.update(extra_path=extra_path),
@@ -394,6 +400,7 @@ def test_run_launch_provisions_portable_node_for_node_servers(tmp_path, monkeypa
     for key in ("sync", "node", "serve"):
         assert next(s for s in job["steps"] if s["key"] == key)["status"] == "done"
     assert captured["extra_path"] == "/portable/node/bin"  # node bin dir reached serve
+    assert captured["prefer_mirror"] is False  # PyPI reachable -> official first
 
 
 def test_run_launch_skips_node_download_when_node_present(tmp_path, monkeypatch):
