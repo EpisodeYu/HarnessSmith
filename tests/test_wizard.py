@@ -101,6 +101,8 @@ def test_wizard_ui_has_two_generate_methods(client):
     html = client.get("/").text
     for needed in ('id="generate"', 'id="produce"', 'id="open-product"', 'id="target_dir"'):
         assert needed in html, needed
+    # An "or" divider makes clear the two methods are alternatives, not sequential steps.
+    assert 'data-i18n="or_divider"' in html
     # 'github'/'time' must not be hard-coded as catalog options in the page.
     assert "github" not in html.lower()
 

@@ -90,7 +90,7 @@
 
 - **默认勾选(开箱即用的"全家桶"默认)**:`paradigms` 全选(`agent` 仍是首项=运行期默认范式);能力 `interfaces.web` / `mcp.enabled` / `skills.enabled` / `memory.enabled`(Slice 8B 新增)默认开;catalog 预选默认 `fetch` / `ddg-search` / `git`。这些只是**表单默认值**,用户可取消。
 - **catalog 在 wizard 的呈现 = 策展子集**(`app.py _WIZARD_CATALOG_ORDER` / `_WIZARD_CATALOG_DEFAULT`,经 `/meta` 的 `default_checked` 下发):显示 `fetch` / `ddg-search` / `git` / `desktop-commander`(默认勾的三项在前、DC 在最后),**隐藏 `github`(需 token + 无可启用工具)与 `time`(冷门)**。**catalog 本体不变**——`github`/`time` 仍在 `mcp_servers.yaml`,CLI `--mcp-server github/time` 照常可用;策展只作用于 wizard 表单(人 2026-06-06 选 wizard-only)。`git` vs `github`:`git`=本地仓库、免 key、读类默认开,做默认;`github`=remote MCP 平台 API、需 `GITHUB_MCP_TOKEN`,从表单隐藏。
-- **「生成产物」分两法**(原"产出"+"一键生成产物(可选)"合并):
+- **「生成产物」分两法**(原"产出"+"一键生成产物(可选)"合并;**两法之间用「或」分隔**(`or_divider` i18n,2026-06-10),强调二选一、不是要顺序跑两步):
   - **一键生成**:目标目录默认 `<HarnessForge 根>/generate/<包名>`(`/meta.generate_base` + 前端按 slug 派生,可手改;`generate/` 已入 `.gitignore`),git init 复选。点击 → `POST /generate {launch:true}` 渲染产物;**当勾了 Web** 则在后台 worker 线程跑 **`uv sync` → `uv run <slug> serve --port <自动空闲端口>`**(**真实模式**,人 2026-06-06 选),回一个 `job_id`。前端轮询 `GET /generate/status/{job_id}` 渲染**分步进度条**(`render → sync → serve`,各步 pending/running/done/error),**全部 done 后才点亮「跳转到 <显示名>」按钮**(在此之前按钮置灰不可点);打开产物 web 后在配置页 / `.env` 填 LLM key 即可对话。任一步 error → 进度条标红 + 显示原因(`.setup.log`/`.serve.log` 可查)。未勾 Web 时保持 render-only、不拉起。
   - **CLI 生成**:校验并产出 spec → spec.yaml 下载 + 完整 `harnessforge new <默认目标目录> --spec spec.yaml [--mcp-server ...]` 命令(目标目录已填入)。
 - **进程语义**:拉起的产物 `serve` 以**独立 session 后台**运行(`start_new_session=True`,输出落 `<target>/.serve.log`),wizard 退出后产物仍在跑(便于已打开的标签继续用);`_LAUNCHED` 持有句柄防 GC,`_JOBS` 持进度记录供轮询。**仅生成器侧便利**,产物本身不依赖 wizard。

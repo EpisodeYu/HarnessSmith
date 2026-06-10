@@ -97,6 +97,13 @@
         <div id="forward-hint" class="hidden text-xs text-slate-500"></div>
       </div>
 
+      <!-- "or": the two methods are alternatives, not sequential steps -->
+      <div class="flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400">
+        <span class="h-px flex-1 bg-slate-200"></span>
+        <span data-i18n="or_divider">或</span>
+        <span class="h-px flex-1 bg-slate-200"></span>
+      </div>
+
       <!-- Method 2: CLI -->
       <div class="space-y-3 rounded-lg border p-4">
         <h3 class="font-medium" data-i18n="cli_heading">CLI 生成</h3>
@@ -138,6 +145,7 @@
         oneclick_heading: "一键生成",
         target_label: "目标目录",
         git_label: "git init", oneclick_btn: "一键生成",
+        or_divider: "或",
         cli_heading: "CLI 生成", produce_btn: "校验并产出 spec", download_btn: "下载 spec.yaml",
         newcmd_label: "下载 spec.yaml 后,在其所在目录运行:",
         ok_produced: "spec 已校验通过。", ok_generated: "已生成", err_fix: "请修正以下字段:",
@@ -167,6 +175,7 @@
         oneclick_heading: "One-click generate",
         target_label: "Target directory",
         git_label: "git init", oneclick_btn: "Generate",
+        or_divider: "or",
         cli_heading: "CLI generate", produce_btn: "Validate & produce spec", download_btn: "Download spec.yaml",
         newcmd_label: "After downloading spec.yaml, run from its directory:",
         ok_produced: "Spec validated.", ok_generated: "Generated at", err_fix: "Please fix these fields:",
