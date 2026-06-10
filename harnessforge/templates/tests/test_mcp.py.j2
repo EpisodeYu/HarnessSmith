@@ -17,7 +17,6 @@ from {{ project_slug }}.harness.mcp import (
     McpManager,
     _bearer_headers,
     _format_exception,
-    _mirror_env,
     register_mcp_tools,
 )
 from {{ project_slug }}.harness.prompts import build_system_prompt
@@ -237,6 +236,9 @@ def test_status_reports_connection_and_tool_count(manager):
     assert rows["dummy"]["transport"] == "stdio"
     assert rows["dummy"]["error"] is None
     assert rows["dummy"]["tool_count"] >= 2
+    # Live-progress fields exist; once connected there's nothing in flight to report.
+    assert rows["dummy"]["connecting_seconds"] is None
+    assert rows["dummy"]["log_tail"] == ""
 
 
 def test_sync_mcp_tools_resyncs_registry(manager):
@@ -421,24 +423,145 @@ def test_format_exception_surfaces_taskgroup_leaves():
     assert "FileNotFoundError" in msg and "No such file" in msg
 
 
-def test_mirror_env_only_injects_when_official_index_unreachable(monkeypatch):
-    """Domestic mirrors are injected for uvx/npx servers ONLY when the official index
-    is unreachable AND the user hasn't set their own — users outside China (probe
-    succeeds) get nothing, so defaults are never wrong for them."""
-    for name in ("UV_DEFAULT_INDEX", "UV_INDEX", "npm_config_registry", "NPM_CONFIG_REGISTRY"):
+def _clear_net_env(monkeypatch):
+    """Forget any registry/proxy env so resolution starts from a clean slate."""
+    for name in (
+        "UV_DEFAULT_INDEX", "UV_INDEX", "npm_config_registry", "NPM_CONFIG_REGISTRY",
+        "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+    ):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("urllib.request.getproxies", lambda: {})  # no system proxy leaks in
+
+
+def _fake_probe(reachable):
+    """A `_url_ok` stand-in: only the listed ``(url, proxy)`` pairs respond."""
+    def probe(url, proxy=None, timeout=3.0):
+        return (url, proxy) in reachable
+    return probe
+
+
+def test_discover_proxy_prefers_config_then_system(monkeypatch):
+    """`_discover_proxy` uses an explicit `mcp.proxy`, else the system proxy."""
+    assert mcp_module._discover_proxy(McpConfig(proxy="http://cfg:1")) == "http://cfg:1"
+    monkeypatch.setattr("urllib.request.getproxies", lambda: {"https": "http://sys:2"})
+    assert mcp_module._discover_proxy(McpConfig()) == "http://sys:2"
+    monkeypatch.setattr("urllib.request.getproxies", lambda: {})
+    assert mcp_module._discover_proxy(McpConfig()) is None
+
+
+def test_stdio_net_env_picks_official_direct_for_foreign_users(monkeypatch):
+    """Direct internet: the official registry/index responds, so it is chosen with
+    no proxy injected."""
+    _clear_net_env(monkeypatch)
+    monkeypatch.setattr(
+        mcp_module, "_url_ok",
+        _fake_probe({(mcp_module._NPM_OFFICIAL, None), (mcp_module._PYPI_OFFICIAL, None)}),
+    )
     servers = [
-        McpServerConfig(name="u", command="uvx", args=["pkg"]),
         McpServerConfig(name="n", command="npx", args=["-y", "pkg"]),
+        McpServerConfig(name="u", command="uvx", args=["pkg"]),
     ]
+    out = mcp_module._stdio_net_env(servers, McpConfig(servers=servers))
+    assert out["npm_config_registry"] == mcp_module._NPM_OFFICIAL
+    assert out["UV_DEFAULT_INDEX"] == mcp_module._PYPI_OFFICIAL
+    assert "HTTP_PROXY" not in out
 
-    monkeypatch.setattr(mcp_module, "_host_reachable", lambda *a, **k: True)
-    assert _mirror_env(servers) == {}  # reachable -> no mirror
 
-    monkeypatch.setattr(mcp_module, "_host_reachable", lambda *a, **k: False)
-    injected = _mirror_env(servers)
-    assert injected["UV_DEFAULT_INDEX"].startswith("https://pypi.tuna.tsinghua")
-    assert injected["npm_config_registry"].startswith("https://registry.npmmirror")
+def test_stdio_net_env_falls_back_to_mirror_behind_gfw(monkeypatch):
+    """No proxy and official blocked: the domestic mirror is chosen (direct)."""
+    _clear_net_env(monkeypatch)
+    monkeypatch.setattr(
+        mcp_module, "_url_ok",
+        _fake_probe({(mcp_module._NPM_MIRROR, None), (mcp_module._PYPI_MIRROR, None)}),
+    )
+    servers = [
+        McpServerConfig(name="n", command="npx", args=["-y", "pkg"]),
+        McpServerConfig(name="u", command="uvx", args=["pkg"]),
+    ]
+    out = mcp_module._stdio_net_env(servers, McpConfig(servers=servers))
+    assert out["npm_config_registry"] == mcp_module._NPM_MIRROR
+    assert out["UV_DEFAULT_INDEX"] == mcp_module._PYPI_MIRROR
+    assert "HTTP_PROXY" not in out
 
-    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://my.private/index")  # user's setting wins
-    assert "UV_DEFAULT_INDEX" not in _mirror_env(servers)
+
+def test_stdio_net_env_uses_proxy_when_direct_is_blocked(monkeypatch):
+    """Corporate network: direct is blocked but the official registry responds via
+    the proxy, so the proxy is injected (as HTTP(S)_PROXY + npm_config_proxy)."""
+    _clear_net_env(monkeypatch)
+    proxy = "http://corp:8080"
+    monkeypatch.setattr(
+        mcp_module, "_url_ok",
+        _fake_probe({(mcp_module._NPM_OFFICIAL, proxy), (mcp_module._PYPI_OFFICIAL, proxy)}),
+    )
+    servers = [
+        McpServerConfig(name="n", command="npx", args=["-y", "pkg"]),
+        McpServerConfig(name="u", command="uvx", args=["pkg"]),
+    ]
+    out = mcp_module._stdio_net_env(servers, McpConfig(servers=servers, proxy=proxy))
+    assert out["npm_config_registry"] == mcp_module._NPM_OFFICIAL
+    assert out["HTTP_PROXY"] == proxy and out["HTTPS_PROXY"] == proxy
+    assert out["npm_config_proxy"] == proxy and out["npm_config_https-proxy"] == proxy
+
+
+def test_stdio_net_env_nothing_reachable_injects_nothing(monkeypatch):
+    """Every candidate fails: inject no registry (so the connect/prewarm can report
+    an unreachable-registry error instead of silently using a dead default)."""
+    _clear_net_env(monkeypatch)
+    monkeypatch.setattr(mcp_module, "_url_ok", _fake_probe(set()))
+    servers = [McpServerConfig(name="n", command="npx", args=["-y", "pkg"])]
+    out = mcp_module._stdio_net_env(servers, McpConfig(servers=servers))
+    assert "npm_config_registry" not in out
+
+
+def test_stdio_net_env_respects_user_set_registry(monkeypatch):
+    """A registry the user already pinned wins — resolution doesn't probe/override."""
+    _clear_net_env(monkeypatch)
+    monkeypatch.setenv("npm_config_registry", "https://my.private/registry")
+    monkeypatch.setattr(mcp_module, "_url_ok", _fake_probe({(mcp_module._NPM_OFFICIAL, None)}))
+    servers = [McpServerConfig(name="n", command="npx", args=["-y", "pkg"])]
+    out = mcp_module._stdio_net_env(servers, McpConfig(servers=servers))
+    assert "npm_config_registry" not in out  # user's env is left untouched
+
+
+def test_warm_argv_builds_fetch_only_commands():
+    """Warming uses a 'install then no-op' command so it exits instead of starting
+    the long-lived server; non-npx/uvx launchers have nothing to fetch."""
+    npx = McpServerConfig(name="dc", command="npx", args=["-y", "@scope/pkg@latest"])
+    assert mcp_module._warm_argv(npx) == (
+        "npx", ["-y", "--package", "@scope/pkg@latest", "--", "node", "-e", "0"]
+    )
+    uvx = McpServerConfig(name="g", command="uvx", args=["mcp-server-git", "--repository", "."])
+    assert mcp_module._warm_argv(uvx) == ("uvx", ["--from", "mcp-server-git", "python", "-c", ""])
+    assert mcp_module._warm_argv(McpServerConfig(name="x", command="mytool")) is None
+
+
+def test_prewarm_reports_unreachable_without_spawning(monkeypatch):
+    """When no registry is reachable, warming reports a readable error and never
+    spawns the launcher (which would just hang)."""
+    _clear_net_env(monkeypatch)
+    monkeypatch.setattr(mcp_module, "_url_ok", _fake_probe(set()))
+
+    def _boom(*a, **k):
+        raise AssertionError("must not spawn the launcher when no registry is reachable")
+
+    monkeypatch.setattr("subprocess.run", _boom)
+    config = McpConfig(servers=[McpServerConfig(name="dc", command="npx", args=["-y", "pkg"])])
+    results = mcp_module.prewarm_stdio_packages(config)
+    assert results == [("dc", False, mcp_module._unreachable_advice("npm"))]
+
+
+def test_connect_error_explains_unreachable_and_cold_start(monkeypatch):
+    """A stdio npx connect failure becomes a readable message: unreachable-registry
+    advice when no source resolved, else a cold-download / `mcp warm` hint."""
+    _clear_net_env(monkeypatch)
+    server = McpServerConfig(name="dc", command="npx", args=["-y", "pkg"])
+    group = BaseExceptionGroup(
+        "unhandled errors in a TaskGroup (1 sub-exception)", [TimeoutError("TimeoutError")]
+    )
+    unreachable = mcp_module._connect_error(server, group, {})
+    assert "couldn't reach an npm registry" in unreachable
+
+    warm_hint = mcp_module._connect_error(
+        server, group, {"npm_config_registry": mcp_module._NPM_OFFICIAL}
+    )
+    assert "mcp warm" in warm_hint

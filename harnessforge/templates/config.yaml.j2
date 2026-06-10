@@ -157,6 +157,13 @@ mcp:
 {% endif %}{% endif %}{% if s.get("safe_tools") %}      safe_tools: {{ s.safe_tools | tojson }}
 {% endif %}{% endfor %}{% else %}  servers: []
 {% endif %}  connect_timeout_seconds: 120  # per-server startup timeout (generous: first uvx/npx launch can cold-download, slow on Windows/behind GFW); a slow/failing server is skipped, not fatal
+  # Package fetch for stdio servers (npx/uvx). Left unset, the harness auto-resolves:
+  # it reuses the system proxy and probes for a reachable registry (official, else a
+  # domestic mirror), directly or via proxy. Override only if needed (values, not
+  # secrets). Tip: pre-download with `{{ project_slug }} mcp warm`.
+  # proxy: "http://host:8080"                       # default: the system proxy
+  # npm_registry: "https://registry.npmmirror.com"  # npx/npm registry (default: auto)
+  # pip_index: "https://pypi.tuna.tsinghua.edu.cn/simple"  # uvx/uv index (default: auto)
   # Add more from the catalog (`harnessforge new --mcp-server <name>`) or paste any
   # MCP marketplace block here (Smithery / Glama / MCP.so / official Registry).
   # Remote (SaaS, e.g. Composio) servers use `url` + `auth_env` instead of command.

@@ -8,6 +8,17 @@ echo [{{ project_slug }}] Folder: %CD%
 set "ACTION={% if interfaces.web %}serve --open{% else %}chat{% endif %}"
 echo [{{ project_slug }}] Action: %ACTION%
 echo.
+REM --- Reuse the system proxy (corporate networks) so uv sync + npx can reach the
+REM net. Only when none is already set; npx/npm don't read the Windows proxy on
+REM their own, so we hand it to the whole session via HTTP(S)_PROXY.
+if defined HTTP_PROXY goto :hf_proxy_done
+if defined HTTPS_PROXY goto :hf_proxy_done
+for /f "usebackq delims=" %%p in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue; if ($s.ProxyEnable -eq 1 -and $s.ProxyServer) { $p=[string]$s.ProxyServer; if ($p -match 'https?=([^;]+)') { $p=$matches[1] }; if ($p -notmatch '://') { $p='http://'+$p }; $p }"`) do set "HTTP_PROXY=%%p"
+if not defined HTTP_PROXY goto :hf_proxy_done
+set "HTTPS_PROXY=%HTTP_PROXY%"
+echo [{{ project_slug }}] Using system proxy: %HTTP_PROXY%
+echo.
+:hf_proxy_done
 {% if spec.mcp.enabled and mcp_needs_node %}
 REM --- Node.js for the Node-based MCP server (e.g. desktop-commander via npx) ---
 REM Windows rarely has Node; offer a user-local portable Node (no admin, not bundled

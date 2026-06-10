@@ -272,6 +272,14 @@ class McpConfig(BaseModel):
     # default because a uvx/npx server's first launch can cold-download its package
     # (slow on Windows / behind the GFW).
     connect_timeout_seconds: float = Field(default=120.0, gt=0)
+    # How stdio servers that fetch their package (npx/uvx) reach the network. Left
+    # empty, the harness auto-resolves: it reuses the system proxy and probes for a
+    # reachable registry (official, else a domestic mirror). Set any of these to
+    # override that choice (e.g. a corporate proxy / an internal registry mirror) —
+    # values only, never secrets.
+    proxy: str | None = None  # e.g. http://host:8080 ; default: the system proxy
+    npm_registry: str | None = None  # npx/npm registry URL (default: auto)
+    pip_index: str | None = None  # uvx/uv index URL, a PEP 503 simple index (default: auto)
 
 
 {% endif %}{% if spec.skills.enabled %}class SkillsConfig(BaseModel):

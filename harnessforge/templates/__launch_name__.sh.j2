@@ -12,6 +12,9 @@ echo "[{{ project_slug }}] Folder: $PWD"
 {% if interfaces.web %}action=(serve --open)   # web UI; opens your browser
 {% else %}action=(chat)            # interactive chat in this terminal
 {% endif %}echo "[{{ project_slug }}] Action: ${action[*]}"
+# Behind a proxy? Export HTTP_PROXY / HTTPS_PROXY before running this and uv sync +
+# npx/uvx servers inherit it. (macOS GUI-only proxy: the product reads it for npx
+# itself; for uv sync set the env vars.)
 {% if spec.mcp.enabled and mcp_needs_node %}
 # A Node-based MCP server (e.g. desktop-commander via npx) needs Node.js. uvx
 # servers ride uv, but Node has no runtime on many machines — offer a user-local

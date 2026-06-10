@@ -154,7 +154,7 @@
         step_render: "生成代码", step_sync: "安装依赖 (uv sync)", step_node: "准备 Node", step_serve: "启动产物 Web",
         sync_hint: "首次安装依赖会下载若干包,慢网络下可能要几分钟,请耐心等待。",
         node_hint: "该产物用到 Node 系 MCP(如 desktop-commander),正在下载便携 Node(约 30MB,一次性),慢网可能要一会。",
-        serve_hint: "正在启动产物 Web 并等待端口就绪(MCP server 在后台连接)。",
+        serve_hint: "正在启动产物 Web 并等待端口就绪(MCP server 在后台连接,首次会自动选源/代理拉包,产物页可看进度)。",
         forward_note: "远程访问产物?先在你的机器转发该端口:",
       },
       en: {
@@ -184,7 +184,7 @@
         step_render: "Generate code", step_sync: "Install deps (uv sync)", step_node: "Prepare Node", step_serve: "Start product web",
         sync_hint: "First install downloads several packages; on a slow network this can take a few minutes.",
         node_hint: "This product uses a Node-based MCP server (e.g. desktop-commander); downloading a portable Node (~30MB, one-time) — may take a moment on a slow network.",
-        serve_hint: "Starting the product web and waiting for its port (MCP servers connect in the background).",
+        serve_hint: "Starting the product web and waiting for its port (MCP servers connect in the background; the first run auto-picks a registry/proxy and fetches the package — watch progress on the product's MCP page).",
         forward_note: "Reaching the product remotely? Forward its port from your machine first:",
       },
     };

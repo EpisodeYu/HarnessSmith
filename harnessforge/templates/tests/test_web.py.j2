@@ -100,13 +100,16 @@ def test_mcp_discover_returns_empty_without_servers():
     servers are configured — the Tools tab's auto-scan is then a no-op."""
     resp = _client().get("/mcp/discover")
     assert resp.status_code == 200
-    assert resp.json() == {"servers": []}
+    assert resp.json() == {"servers": [], "pending": False}
 
 
 def test_mcp_discover_lists_real_server_tools():
     """Against a real stdio server, /mcp/discover lists its full tool set with each
     tool's allowlist state — so the panel can offer them without hand-edited YAML.
-    Here `echo` is allowlisted+enabled; `add` is discovered but unlisted."""
+    Here `echo` is allowlisted+enabled; `add` is discovered but unlisted.
+
+    Discovery is NON-blocking (returns partial + `pending` while servers connect),
+    so the test starts the manager, lets the dummy settle, then reads the result."""
     config = Config.model_validate({
         "llms": [{"name": "default", "model": "mock-model"}],
         "roles": {"generation": "default"},
@@ -114,9 +117,15 @@ def test_mcp_discover_lists_real_server_tools():
         "observability": {"trace": False},
         "mcp": {"servers": [{"name": "dummy", "command": sys.executable, "args": [_DUMMY]}]},
     })
-    data = TestClient(create_app(config, mock=True)).get("/mcp/discover").json()
+    app = create_app(config, mock=True)
+    client = TestClient(app)
+    client.get("/mcp/discover")  # starts the live manager (non-blocking)
+    app.state.mcp_manager.wait_ready(timeout=30)  # let the dummy finish connecting
+    data = client.get("/mcp/discover").json()
+    assert data["pending"] is False
     servers = {s["name"]: s for s in data["servers"]}
     assert "dummy" in servers and servers["dummy"]["error"] is None, data
+    assert servers["dummy"]["connected"] is True and servers["dummy"]["connecting"] is False
     tools = {t["short"]: t for t in servers["dummy"]["tools"]}
     assert {"echo", "add"} <= set(tools)
     assert tools["echo"]["name"] == "dummy__echo"
@@ -130,6 +139,32 @@ def test_index_has_mcp_discovery_ui():
     body = _client().get("/").text
     assert "/mcp/discover" in body and "function discoverMcp()" in body
     assert 'id="cfg-mcp-scan"' in body
+
+
+def test_index_has_incremental_mcp_progress_ui():
+    """The Tools page polls /mcp/discover while servers are still connecting (so each
+    server's tools appear as it settles), and the MCP cards show live connect
+    progress (elapsed + the latest stderr line) instead of looking frozen."""
+    body = _client().get("/").text
+    assert "toolsPollTimer" in body  # Tools page keeps polling while pending
+    assert "mcpDiscovered.pending" in body  # ...until every server settles
+    assert "connecting_seconds" in body  # cards show how long a connect's been trying
+
+
+def test_mcp_discover_reports_pending_and_per_server_state():
+    """/mcp/discover is non-blocking: each server carries its live connect state and
+    a top-level `pending` flag, converging to settled — so one slow/failed server
+    never holds back the others' tools."""
+    app = create_app(_mcp_config(), mock=True)
+    client = TestClient(app)
+    first = client.get("/mcp/discover").json()
+    assert "pending" in first
+    dummy = {s["name"]: s for s in first["servers"]}["dummy"]
+    assert "connecting" in dummy and "connected" in dummy
+    app.state.mcp_manager.wait_ready(timeout=30)
+    settled = client.get("/mcp/discover").json()
+    assert settled["pending"] is False
+    assert {s["name"]: s for s in settled["servers"]}["dummy"]["connected"] is True
 
 
 def _mcp_config():
@@ -165,7 +200,8 @@ def test_mcp_reconnect_single_server():
     returns live status immediately (may be connecting), converging to connected."""
     app = create_app(_mcp_config(), mock=True)
     client = TestClient(app)
-    client.get("/mcp/discover")  # connect the dummy first (this waits for readiness)
+    client.get("/mcp/discover")  # start the manager (non-blocking)
+    app.state.mcp_manager.wait_ready(timeout=30)  # let the dummy connect first
     resp = client.post("/mcp/servers/dummy/reconnect")
     assert resp.status_code == 200, resp.text
     app.state.mcp_manager.wait_server_ready("dummy", timeout=30)
@@ -210,8 +246,10 @@ def test_config_enabling_mcp_tool_registers_it_for_the_model():
     Tools page."""
     from {{ project_slug }}.harness.tools import ToolError, registry
 
-    client = TestClient(create_app(_mcp_config(), mock=True))
-    client.get("/mcp/discover")  # start the live manager (connects the dummy server)
+    app = create_app(_mcp_config(), mock=True)
+    client = TestClient(app)
+    client.get("/mcp/discover")  # start the live manager (non-blocking)
+    app.state.mcp_manager.wait_ready(timeout=30)  # let the dummy connect + discover
     with pytest.raises(ToolError):  # add isn't allowlisted yet -> not offered
         registry.get("dummy__add")
     resp = client.post("/config", json={"tools": [

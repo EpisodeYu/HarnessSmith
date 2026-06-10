@@ -753,6 +753,41 @@ def mcp_status(
             "(uvx) to use it.",
             fg=typer.colors.BRIGHT_BLACK,
         )
+
+
+@mcp_app.command("warm")
+def mcp_warm(
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to config.yaml."
+    ),
+) -> None:
+    """Pre-download Node/uv based MCP server packages (npx/uvx) so the first real
+    connection is fast.
+
+    Picks a reachable registry + the system proxy automatically (the same way a
+    live connect does); an unreachable registry is reported here, up front, instead
+    of surfacing later as a connect timeout. Read-only — it only populates caches.
+    """
+    import sys
+
+    from ..harness.mcp import prewarm_stdio_packages
+
+    config = load_config(config_path)
+    if not any(s.kind == "stdio" for s in config.mcp.servers):
+        typer.secho("no stdio MCP servers to warm.", fg=typer.colors.YELLOW)
+        return
+    typer.echo("Warming MCP server packages (first run can take a minute) ...")
+    results = prewarm_stdio_packages(config.mcp, log=sys.stderr)
+    if not results:
+        typer.secho("nothing to warm (no npx/uvx servers).", fg=typer.colors.YELLOW)
+        return
+    failed = False
+    for name, ok, detail in results:
+        typer.secho("  ● ", fg=typer.colors.GREEN if ok else typer.colors.RED, nl=False)
+        typer.echo(f"{name}: {detail}")
+        failed = failed or not ok
+    if failed:
+        raise typer.Exit(code=1)
 {% endif %}
 
 {% if spec.memory.enabled %}

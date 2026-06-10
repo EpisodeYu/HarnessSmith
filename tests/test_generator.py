@@ -229,7 +229,7 @@ def test_paradigm_registry_and_agent_are_always_generated(tmp_path, preset_spec)
     assert not (pdir / "plan.py").exists()
     assert not (pdir / "ask.py").exists()
 
-    config_py = (out / "src" / "coding_assistant" / "harness" / "config.py").read_text()
+    config_py = (out / "src" / "coding_assistant" / "harness" / "config.py").read_text(encoding="utf-8")
     assert "class ParadigmsConfig" in config_py
     assert "paradigms: ParadigmsConfig" in config_py
 
@@ -273,7 +273,7 @@ def test_loop_is_a_thin_dispatcher(tmp_path, preset_spec):
     """loop.py no longer holds the loop body — it dispatches to a paradigm."""
     out = tmp_path / "ca"
     generate(preset_spec, out, git_init=False)
-    loop = (out / "src" / "coding_assistant" / "harness" / "loop.py").read_text()
+    loop = (out / "src" / "coding_assistant" / "harness" / "loop.py").read_text(encoding="utf-8")
     assert "get_paradigm" in loop
     assert "from .paradigms import RunResult, get_paradigm" in loop
 
@@ -772,6 +772,7 @@ def test_launch_script_stem_sanitizes(display_name, project_slug, expected):
 
 def test_launch_scripts_generated_with_exec_bit(tmp_path, spec):
     """Every product ships <name>.sh + <name>.bat; the .sh is executable."""
+    import os
     import stat
 
     out = tmp_path / "launch"
@@ -779,7 +780,10 @@ def test_launch_scripts_generated_with_exec_bit(tmp_path, spec):
     sh = out / "agent_harness.sh"  # example spec has no display_name -> slug
     bat = out / "agent_harness.bat"
     assert sh.is_file() and bat.is_file()
-    assert sh.stat().st_mode & stat.S_IXUSR, "launch .sh must be executable"
+    # The exec bit only exists on POSIX filesystems (NTFS has none); on Windows the
+    # generator's chmod is a no-op, so only assert it where it's meaningful.
+    if os.name == "posix":
+        assert sh.stat().st_mode & stat.S_IXUSR, "launch .sh must be executable"
     # no unrendered Jinja survived into the shell scripts
     for path in (sh, bat):
         text = path.read_text(encoding="utf-8")
@@ -879,6 +883,37 @@ def test_launch_node_bootstrap_only_when_a_node_server_is_prefilled(tmp_path):
     for ext in ("sh", "bat"):
         text = (uvx_only / f"{stem}.{ext}").read_text(encoding="utf-8")
         assert "ensure_node" not in text and "nodejs.org/dist" not in text
+
+
+def test_mcp_product_has_package_fetch_resolver_and_warm(tmp_path):
+    """An MCP product carries the registry/proxy auto-resolver, the `mcp warm`
+    command + config knobs; a no-MCP product carries none of it (zero footprint)."""
+    spec = load_spec(preset_spec_path("coding-assistant"))
+    out = tmp_path / "mcp_on"
+    generate(spec, out, git_init=False, mcp_servers=preset_mcp_servers("coding-assistant"))
+    pkg = spec.project_slug
+
+    mcp_py = (out / "src" / pkg / "harness" / "mcp.py").read_text(encoding="utf-8")
+    assert "_stdio_net_env" in mcp_py and "prewarm_stdio_packages" in mcp_py
+    assert "_discover_proxy" in mcp_py and "getproxies" in mcp_py
+
+    config_py = (out / "src" / pkg / "harness" / "config.py").read_text(encoding="utf-8")
+    assert "npm_registry" in config_py and "pip_index" in config_py and "proxy:" in config_py
+
+    cli_py = (out / "src" / pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    assert 'mcp_app.command("warm")' in cli_py
+
+    # The launch scripts reuse the system proxy (helps uv sync + npx alike).
+    bat = (out / f"{launch_script_stem(spec)}.bat").read_text(encoding="utf-8")
+    assert "Using system proxy" in bat
+
+    # No-MCP product: none of the MCP machinery is generated.
+    off = tmp_path / "mcp_off"
+    spec.mcp.enabled = False
+    generate(spec, off, git_init=False)
+    assert not (off / "src" / pkg / "harness" / "mcp.py").exists()
+    cli_off = (off / "src" / pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    assert 'mcp_app.command("warm")' not in cli_off
 
 
 def test_launch_bat_echo_safe_for_metachar_display_name(tmp_path):

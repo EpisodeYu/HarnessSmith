@@ -414,12 +414,30 @@ def test_run_launch_skips_node_download_when_node_present(tmp_path, monkeypatch)
         app_mod, "_launch_product",
         lambda td, slug, port, *, host="127.0.0.1", extra_path=None: captured.update(extra_path=extra_path),
     )
-
     job = app_mod._new_job(needs_node=True)
     app_mod._run_launch(job, tmp_path, "demo")
     assert job["done"] is True
     assert next(s for s in job["steps"] if s["key"] == "node")["status"] == "done"
     assert captured["extra_path"] is None
+
+
+def test_ensure_proxy_env_fills_from_system_proxy(monkeypatch):
+    """_product_env fills HTTP(S)_PROXY from the system proxy when unset (so uv sync
+    + the product's npx servers reach the net through a corporate proxy), but never
+    overrides one the user already set."""
+    import harnessforge.wizard.app as app_mod
+
+    monkeypatch.setattr(
+        app_mod.urllib.request, "getproxies", lambda: {"https": "http://corp:8080"}
+    )
+    env = {}
+    app_mod._ensure_proxy_env(env)
+    assert env["HTTP_PROXY"] == "http://corp:8080"
+    assert env["HTTPS_PROXY"] == "http://corp:8080"
+
+    env2 = {"HTTP_PROXY": "http://mine:1"}
+    app_mod._ensure_proxy_env(env2)
+    assert env2["HTTP_PROXY"] == "http://mine:1"  # user's proxy is left untouched
 
 
 def test_generate_does_not_launch_without_web(client, tmp_path, monkeypatch):

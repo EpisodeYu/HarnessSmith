@@ -246,6 +246,22 @@ def _auto_index() -> str | None:
     return None if _index_probe_cached else _CN_PYPI_MIRROR
 
 
+def _ensure_proxy_env(env: dict[str, str]) -> None:
+    """Fill HTTP(S)_PROXY from the system proxy (Windows/macOS settings) when the
+    environment doesn't already set one, so the product's ``uv sync`` and its
+    ``npx``/``uvx`` MCP servers reach the network through a corporate proxy.
+
+    The product's own MCP bridge also auto-detects the proxy, but ``uv sync`` runs
+    here (before the product starts), so it needs the env set too."""
+    if any(env.get(k) for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")):
+        return
+    proxies = urllib.request.getproxies()
+    proxy = proxies.get("https") or proxies.get("http")
+    if proxy:
+        env["HTTP_PROXY"] = env["HTTPS_PROXY"] = proxy
+        env["http_proxy"] = env["https_proxy"] = proxy
+
+
 def _product_env() -> dict[str, str]:
     """Environment for the product's own ``uv`` invocations.
 
@@ -265,6 +281,7 @@ def _product_env() -> dict[str, str]:
     env = dict(os.environ)
     env.pop("VIRTUAL_ENV", None)
     env.pop("UV_PROJECT_ENVIRONMENT", None)
+    _ensure_proxy_env(env)
     if not any(env.get(k) for k in _INDEX_ENV_KEYS):
         mirror = _auto_index()
         if mirror:
@@ -341,7 +358,9 @@ def _launch_product(
 
 def _job_steps(needs_node: bool) -> tuple[str, ...]:
     """Ordered launch steps. ``node`` is inserted only when a Node-based MCP server
-    is prefilled (it provisions a portable Node before serve)."""
+    is prefilled (it provisions a portable Node before serve). The MCP server
+    package itself is fetched lazily on first connect (shown live on the product's
+    MCP page), so the web opens promptly instead of waiting on a cold download."""
     if needs_node:
         return ("render", "sync", "node", "serve")
     return _LAUNCH_STEPS

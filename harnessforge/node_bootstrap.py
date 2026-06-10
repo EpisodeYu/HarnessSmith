@@ -14,7 +14,6 @@ from __future__ import annotations
 import os
 import platform
 import shutil
-import socket
 import sys
 import tarfile
 import urllib.request
@@ -60,11 +59,20 @@ def install_base(project_slug: str) -> Path:
     return Path.home() / ".local" / "share" / project_slug
 
 
-def _reachable(host: str, port: int = 443, timeout: float = 2.0) -> bool:
+def _reachable(host: str, timeout: float = 3.0) -> bool:
+    """True if ``https://<host>/`` answers within ``timeout`` (any HTTP response
+    counts; only a connection failure/timeout means unreachable). Uses urllib so it
+    honors the system/env proxy — matching the proxy-aware download below."""
+    import urllib.error
+
     try:
-        with socket.create_connection((host, port), timeout=timeout):
+        with urllib.request.urlopen(
+            urllib.request.Request(f"https://{host}/", method="HEAD"), timeout=timeout
+        ):
             return True
-    except OSError:
+    except urllib.error.HTTPError:
+        return True
+    except (urllib.error.URLError, OSError):
         return False
 
 

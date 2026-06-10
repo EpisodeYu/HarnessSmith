@@ -14,9 +14,10 @@ in that task, with the dispatcher only routing requests to it). Servers connect
 concurrently, so startup costs ``max`` per-server connect time, not the sum.
 ``begin()`` starts that without blocking (so a UI can show a live "connecting"
 state); ``reconnect_server()`` restarts just one server in place. stdio servers
-launched via ``uvx``/``npx`` get a domestic package mirror injected when the
-official index is unreachable (GFW); a missing launcher fails with an actionable
-message instead of a raw ``WinError 2``.
+launched via ``uvx``/``npx`` fetch their package through a reachable registry +
+the system proxy, auto-resolved by probing (official, else a domestic mirror;
+directly or via proxy) so they work behind the GFW or a corporate proxy; a missing
+launcher fails with an actionable message instead of a raw ``WinError 2``.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import threading
+import time
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
 
@@ -43,7 +45,9 @@ def _bearer_headers(server: McpServerConfig) -> dict[str, str]:
 
 
 _WINDOWS_CMD_SHIMS = {"npx", "npm", "yarn", "pnpm"}
+_PYPI_OFFICIAL = "https://pypi.org/simple"
 _PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
+_NPM_OFFICIAL = "https://registry.npmjs.org"
 _NPM_MIRROR = "https://registry.npmmirror.com"
 
 
@@ -101,42 +105,163 @@ def _base_command(command: str | None) -> str:
     return os.path.basename(command or "").lower().removesuffix(".cmd").removesuffix(".exe")
 
 
-def _host_reachable(host: str, port: int = 443, timeout: float = 2.0) -> bool:
-    import socket
+def _url_ok(url: str, proxy: str | None = None, timeout: float = 3.0) -> bool:
+    """True if a quick HEAD to ``url`` (optionally through ``proxy``) gets ANY HTTP
+    response; only a connection failure / timeout counts as unreachable. Unlike a
+    raw TCP probe this honors the proxy and is bounded by a single timeout."""
+    import urllib.error
+    import urllib.request
 
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": proxy, "https": proxy} if proxy else {})
+    )
     try:
-        with socket.create_connection((host, port), timeout=timeout):
+        with opener.open(urllib.request.Request(url, method="HEAD"), timeout=timeout):
             return True
-    except OSError:
+    except urllib.error.HTTPError:
+        return True
+    except (urllib.error.URLError, OSError):
         return False
 
 
-def _mirror_env(servers: list[McpServerConfig]) -> dict[str, str]:
-    """Domestic package mirrors to inject into stdio children when the official
-    index is unreachable (GFW). uvx -> Tsinghua PyPI, npx -> npmmirror. Probed once;
-    NEVER overrides a mirror the user already set, so users outside China are
-    unaffected (the probe simply succeeds and nothing is injected)."""
+def _discover_proxy(config: "McpConfig | None") -> str | None:
+    """The proxy to try for package fetches: an explicit ``mcp.proxy`` if set, else
+    the system proxy (env vars + Windows/macOS settings, via ``getproxies()``)."""
+    import urllib.request
+
+    if config is not None and getattr(config, "proxy", None):
+        return config.proxy
+    proxies = urllib.request.getproxies()
+    return proxies.get("https") or proxies.get("http")
+
+
+def _pick_source(values, proxy, probe) -> tuple[str, str | None] | None:
+    """First reachable ``(url, proxy_or_none)`` among ``values`` (an ordered list of
+    candidate registry/index URLs: override, official, mirror). Each is tried
+    directly first, then through ``proxy``. ``probe(url, proxy) -> bool`` is the
+    reachability test (injected so tests need no network)."""
+    for url in values:
+        if not url:
+            continue
+        if probe(url, None):
+            return url, None
+        if proxy and probe(url, proxy):
+            return url, proxy
+    return None
+
+
+def _apply_proxy(out: dict[str, str], proxy: str) -> None:
+    out["HTTP_PROXY"] = out["HTTPS_PROXY"] = proxy
+    out["http_proxy"] = out["https_proxy"] = proxy
+    out["npm_config_proxy"] = out["npm_config_https-proxy"] = proxy
+
+
+def _stdio_net_env(servers: list[McpServerConfig], config: "McpConfig | None" = None) -> dict[str, str]:
+    """Network env injected into stdio children so ``npx``/``uvx`` can fetch their
+    package on ANY network: pick a reachable registry/index (an explicit override,
+    else the official source, else a domestic mirror), tried directly or through the
+    system/configured proxy. NEVER overrides a registry/index/proxy the user set.
+    Probes the two package managers concurrently (startup waits on the slower one)."""
+    import concurrent.futures
     import os
 
     cmds = {_base_command(s.command) for s in servers if s.kind == "stdio"}
+    proxy = _discover_proxy(config)
+    npm_override = getattr(config, "npm_registry", None)
+    pip_override = getattr(config, "pip_index", None)
+
+    def _npm():
+        if not ({"npx", "npm", "node"} & cmds):
+            return None
+        if os.environ.get("npm_config_registry") or os.environ.get("NPM_CONFIG_REGISTRY"):
+            return None
+        return _pick_source([npm_override, _NPM_OFFICIAL, _NPM_MIRROR], proxy, _url_ok)
+
+    def _pip():
+        if not ({"uvx", "uv"} & cmds):
+            return None
+        if os.environ.get("UV_DEFAULT_INDEX") or os.environ.get("UV_INDEX"):
+            return None
+        return _pick_source([pip_override, _PYPI_OFFICIAL, _PYPI_MIRROR], proxy, _url_ok)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        npm_fut, pip_fut = pool.submit(_npm), pool.submit(_pip)
+        npm_res, pip_res = npm_fut.result(), pip_fut.result()
+
     out: dict[str, str] = {}
-    if {"uvx", "uv"} & cmds and not (os.environ.get("UV_DEFAULT_INDEX") or os.environ.get("UV_INDEX")):
-        if not _host_reachable("pypi.org"):
-            out["UV_DEFAULT_INDEX"] = _PYPI_MIRROR
-    if {"npx", "npm", "node"} & cmds and not (
-        os.environ.get("npm_config_registry") or os.environ.get("NPM_CONFIG_REGISTRY")
-    ):
-        if not _host_reachable("registry.npmjs.org"):
-            out["npm_config_registry"] = _NPM_MIRROR
+    if npm_res:
+        reg, prox = npm_res
+        out["npm_config_registry"] = reg
+        out["npm_config_fetch_retries"] = "2"
+        if prox:
+            _apply_proxy(out, prox)
+    if pip_res:
+        idx, prox = pip_res
+        out["UV_DEFAULT_INDEX"] = idx
+        if prox:
+            _apply_proxy(out, prox)
     return out
 
 
-def _open_streams(server: McpServerConfig, mirror_env: dict[str, str] | None = None):
+def _source_status(server: McpServerConfig, net_env: dict[str, str]) -> tuple[bool, str]:
+    """``(source_configured, family)`` for a stdio server's package fetch: whether a
+    registry/index is set (user env or the resolved ``net_env``) and which family
+    (``npm``/``uv``); ``("" family)`` for launchers that don't fetch a package."""
+    import os
+
+    cmd = _base_command(server.command)
+    if cmd in {"npx", "npm", "node"}:
+        configured = bool(
+            os.environ.get("npm_config_registry")
+            or os.environ.get("NPM_CONFIG_REGISTRY")
+            or net_env.get("npm_config_registry")
+        )
+        return configured, "npm"
+    if cmd in {"uvx", "uv"}:
+        configured = bool(
+            os.environ.get("UV_DEFAULT_INDEX")
+            or os.environ.get("UV_INDEX")
+            or net_env.get("UV_DEFAULT_INDEX")
+        )
+        return configured, "uv"
+    return True, ""
+
+
+def _unreachable_advice(family: str) -> str:
+    where = "an npm registry" if family == "npm" else "a PyPI index"
+    knob = "mcp.npm_registry" if family == "npm" else "mcp.pip_index"
+    return (
+        f"couldn't reach {where} (official or mirror, directly or via proxy). Set "
+        f"mcp.proxy or {knob} in config.yaml, pre-install the package, or remove "
+        "this server."
+    )
+
+
+def _connect_error(server: McpServerConfig, exc: BaseException, net_env: dict[str, str]) -> str:
+    """A connect failure as a readable message: drill the ExceptionGroup leaf, then
+    for a stdio npx/uvx server add WHY a package fetch likely failed."""
+    msg = _format_exception(exc)
+    if server.kind != "stdio":
+        return msg
+    configured, family = _source_status(server, net_env)
+    if family and not configured:
+        return f"{msg} — {_unreachable_advice(family)}"
+    if family and "timeout" in msg.lower():
+        return (
+            f"{msg} — the package may still be cold-downloading; run `mcp warm` "
+            "first, or raise mcp.connect_timeout_seconds in config.yaml."
+        )
+    return msg
+
+
+def _open_streams(server: McpServerConfig, net_env: dict[str, str] | None = None, errlog=None):
     """Return the (read, write) stream context manager for ``server``'s transport.
 
     Transport is ``server.kind`` (explicit ``transport`` or inferred from shape):
     ``stdio`` launches a subprocess; ``http`` is the modern Streamable HTTP;
-    ``sse`` is the legacy HTTP+SSE transport for older remote servers.
+    ``sse`` is the legacy HTTP+SSE transport for older remote servers. ``errlog``
+    (a writable file) captures the child's stderr — the npx/uvx fetch progress the
+    management page surfaces while a server is connecting.
     """
     from .config import resolve_env
 
@@ -152,12 +277,11 @@ def _open_streams(server: McpServerConfig, mirror_env: dict[str, str] | None = N
             value = resolve_env(name)
             if value is not None:
                 env[name] = value
-        for key, value in (mirror_env or {}).items():  # GFW mirror; user's setting wins
+        for key, value in (net_env or {}).items():  # resolved registry/proxy; user's setting wins
             env.setdefault(key, value)
         command, args = _windows_stdio_command(server.command, server.args)
-        return stdio_client(
-            StdioServerParameters(command=command, args=args, env=env)
-        )
+        params = StdioServerParameters(command=command, args=args, env=env)
+        return stdio_client(params, errlog) if errlog is not None else stdio_client(params)
 
     headers = _bearer_headers(server)
     if kind == "sse":  # legacy HTTP+SSE transport (older servers)
@@ -227,18 +351,20 @@ class McpManager:
         self._ready: concurrent.futures.Future = concurrent.futures.Future()
         self._inbox: asyncio.Queue | None = None
         self._closing: asyncio.Event | None = None
-        self._mirror_env: dict[str, str] = {}
+        self._net_env: dict[str, str] = {}
         self._servers: dict[str, McpServerConfig] = {s.name: s for s in config.servers}
         self._tasks: dict[str, asyncio.Task] = {}
         self._settled: dict[str, asyncio.Event] = {}
         self._server_inboxes: dict[str, asyncio.Queue] = {}
         self._sessions: dict[str, Any] = {}
+        self._connect_started: dict[str, float] = {}  # monotonic start, for live elapsed
+        self._logpaths: dict[str, str] = {}  # per-server stderr capture (npx/uvx fetch log)
         self.discovered: dict[str, list] = {}
         self.errors: dict[str, str] = {}
 
     def _thread_main(self) -> None:
         asyncio.set_event_loop(self._loop)
-        self._mirror_env = _mirror_env(list(self._config.servers))  # probe off the loop
+        self._net_env = _stdio_net_env(list(self._config.servers), self._config)  # probe off the loop
         try:
             self._loop.run_until_complete(self._main())
         except Exception as exc:  # surface startup failures to start()
@@ -271,6 +397,7 @@ class McpManager:
         self.errors.pop(name, None)
         self.discovered.pop(name, None)
         self._server_inboxes.pop(name, None)
+        self._connect_started.pop(name, None)
         self._settled[name] = asyncio.Event()
         self._tasks[name] = asyncio.create_task(self._run_server(server))
 
@@ -287,13 +414,17 @@ class McpManager:
         """
         name = server.name
         settled = self._settled[name]
+        self._connect_started[name] = time.monotonic()
+        errlog = self._open_log(name)
         try:
             async with AsyncExitStack() as stack:
+                if errlog is not None:
+                    stack.callback(self._close_log, name, errlog)
                 # `asyncio.wait_for(coro)` wraps `coro` in another Task; anyio's MCP
                 # transports must be entered and exited in the SAME task, so use
                 # `asyncio.timeout()` here instead.
                 async with asyncio.timeout(self._config.connect_timeout_seconds):
-                    await self._connect(stack, server)
+                    await self._connect(stack, server, errlog)
                 inbox: asyncio.Queue = asyncio.Queue()
                 self._server_inboxes[name] = inbox
                 settled.set()
@@ -309,17 +440,55 @@ class McpManager:
                     except Exception as exc:
                         fut.set_exception(exc)
         except Exception as exc:  # connect failure/timeout: isolate, never fatal
-            self.errors[name] = _format_exception(exc)
+            self.errors[name] = _connect_error(server, exc, self._net_env)
             self._sessions.pop(name, None)
             self._server_inboxes.pop(name, None)
             if not settled.is_set():
                 settled.set()
 
-    async def _connect(self, stack: AsyncExitStack, server: McpServerConfig) -> None:
+    def _open_log(self, name: str):
+        """A per-server file that captures the child's stderr (npx/uvx fetch output);
+        ``status()`` tails it while connecting. Best-effort: ``None`` on failure (the
+        connect then just uses the default stderr — never blocked by logging)."""
+        import os
+        import tempfile
+
+        try:
+            path = os.path.join(tempfile.gettempdir(), f"mcp-{name}-{id(self):x}.log")
+            self._logpaths[name] = path
+            return open(path, "w", encoding="utf-8", buffering=1)
+        except OSError:
+            self._logpaths.pop(name, None)
+            return None
+
+    def _close_log(self, name: str, handle) -> None:
+        import contextlib
+        import os
+
+        with contextlib.suppress(Exception):
+            handle.close()
+        path = self._logpaths.pop(name, None)
+        if path:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+
+    def _log_tail(self, name: str) -> str:
+        """The last meaningful stderr line of ``name`` (npx/uvx progress), or ''."""
+        path = self._logpaths.get(name)
+        if not path:
+            return ""
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                lines = [ln.strip() for ln in fh.read().splitlines() if ln.strip()]
+        except OSError:
+            return ""
+        return lines[-1] if lines else ""
+
+    async def _connect(self, stack: AsyncExitStack, server: McpServerConfig, errlog=None) -> None:
         """Open one server's session and list its tools (under a startup timeout)."""
         from mcp import ClientSession
 
-        streams = await stack.enter_async_context(_open_streams(server, self._mirror_env))
+        streams = await stack.enter_async_context(_open_streams(server, self._net_env, errlog))
         session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
         await session.initialize()
         self._sessions[server.name] = session
@@ -418,12 +587,18 @@ class McpManager:
             tools = self.discovered.get(name)
             connected = name in self._sessions
             error = self.errors.get(name)
+            connecting = self._thread.is_alive() and not connected and error is None
+            started = self._connect_started.get(name)
             out.append(
                 {
                     "name": name,
                     "transport": server.kind,
                     "connected": connected,
-                    "connecting": self._thread.is_alive() and not connected and error is None,
+                    "connecting": connecting,
+                    # Live feedback while a (possibly slow) connect/fetch is in flight:
+                    # how long it's been trying + the latest stderr line (npx/uvx output).
+                    "connecting_seconds": round(time.monotonic() - started, 1) if (connecting and started) else None,
+                    "log_tail": self._log_tail(name) if connecting else "",
                     "error": error,
                     "tool_count": len(tools) if tools is not None else 0,
                 }
@@ -443,6 +618,86 @@ def rebuild_manager(old: "McpManager | None", config: McpConfig) -> McpManager:
     if old is not None:
         old.close()
     return manager
+
+
+def _warm_argv(server: McpServerConfig) -> tuple[str, list[str]] | None:
+    """A 'fetch the package into the cache, then exit' command for an npx/uvx server
+    (so warming doesn't start the long-lived server), or ``None`` when the launcher
+    isn't a package fetch. ``npx`` installs the package then runs a no-op ``node``;
+    ``uvx`` resolves the tool env then runs a no-op ``python``."""
+    pkg = next((a for a in server.args if not a.startswith("-")), None)
+    if pkg is None:
+        return None
+    cmd = _base_command(server.command)
+    if cmd == "npx":
+        return server.command, ["-y", "--package", pkg, "--", "node", "-e", "0"]
+    if cmd == "uvx":
+        return server.command, ["--from", pkg, "python", "-c", ""]
+    return None
+
+
+def prewarm_stdio_packages(
+    config: "McpConfig", *, log=None, timeout: float | None = None
+) -> list[tuple[str, bool, str]]:
+    """Pre-download each npx/uvx server's package (into the launcher's cache) using
+    the resolved registry/proxy, so the FIRST real connect is fast and an
+    unreachable registry surfaces here (a readable error) instead of later as a
+    connect ``TimeoutError``. Fetch-only (a no-op command after install), so it
+    exits promptly without starting the server. Returns ``(name, ok, detail)`` per
+    server; best-effort (never raises).
+    """
+    import os
+    import subprocess
+
+    def _say(msg: str) -> None:
+        if log is not None:
+            log.write(msg + "\n")
+            log.flush()
+
+    net_env = _stdio_net_env(list(config.servers), config)
+    env = dict(os.environ)
+    for key, value in net_env.items():
+        env.setdefault(key, value)
+    warm_timeout = timeout or max(120.0, config.connect_timeout_seconds)
+    results: list[tuple[str, bool, str]] = []
+    for server in config.servers:
+        if server.kind != "stdio":
+            continue
+        warm = _warm_argv(server)
+        if warm is None:  # a local script / non-npx-uvx launcher — nothing to fetch
+            continue
+        configured, family = _source_status(server, net_env)
+        if not configured:  # no reachable registry found — don't hang, report it
+            advice = _unreachable_advice(family)
+            results.append((server.name, False, advice))
+            _say(f"[{server.name}] FAILED: {advice}")
+            continue
+        try:
+            command, args = _windows_stdio_command(warm[0], warm[1])
+        except FileNotFoundError as exc:
+            results.append((server.name, False, str(exc)))
+            _say(f"[{server.name}] FAILED: {exc}")
+            continue
+        _say(f"[{server.name}] warming: {server.command} {' '.join(server.args)} ...")
+        try:
+            proc = subprocess.run(  # noqa: S603 — config-defined launcher, fixed argv
+                [command, *args],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                timeout=warm_timeout,
+                text=True,
+            )
+            ok = proc.returncode == 0
+            detail = "fetched" if ok else f"launcher exited {proc.returncode}: {(proc.stdout or '').strip()[-300:]}"
+        except subprocess.TimeoutExpired:
+            ok, detail = True, f"still fetching after {int(warm_timeout)}s (will finish on first connect)"
+        except Exception as exc:  # spawn failure (missing launcher, etc.)
+            ok, detail = False, _format_exception(exc)
+        results.append((server.name, ok, detail))
+        _say(f"[{server.name}] {'ok' if ok else 'FAILED'}: {detail}")
+    return results
 
 
 def sync_mcp_tools(

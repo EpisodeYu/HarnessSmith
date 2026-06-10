@@ -38,7 +38,10 @@ def test_ensure_skips_when_node_already_on_path(monkeypatch):
 def test_ensure_downloads_extracts_and_returns_bin_dir(tmp_path, monkeypatch):
     """A successful provision extracts the official layout and returns the bin dir
     that holds node/npx — the path the caller prepends to PATH."""
-    monkeypatch.setenv("HOME", str(tmp_path))  # install_base -> tmp on posix
+    # Pin the install root so the test is host-independent: install_base keys off
+    # the real sys.platform (LOCALAPPDATA on Windows, ~/.local/share on POSIX), but
+    # we mock a linux build via _platform_tag, so force a matching tmp base.
+    monkeypatch.setattr(nb, "install_base", lambda slug: tmp_path / slug)
     monkeypatch.setattr(nb.shutil, "which", lambda c: None)  # node NOT on PATH
     monkeypatch.setattr(nb, "_platform_tag", lambda: ("linux", "x64", "tar.gz"))
     monkeypatch.setattr(nb, "_reachable", lambda *a, **k: True)  # use official URL
@@ -58,7 +61,7 @@ def test_ensure_downloads_extracts_and_returns_bin_dir(tmp_path, monkeypatch):
 
     bin_dir = nb.ensure_portable_node("demo")
     assert bin_dir is not None
-    assert bin_dir.endswith(f"{dirname}/bin")
+    assert Path(bin_dir).parts[-2:] == (dirname, "bin")  # separator-agnostic
     assert (Path(bin_dir) / "node").exists()
     # Second call is a no-op reuse (already extracted) -> same dir, no re-download.
     monkeypatch.setattr(
@@ -69,7 +72,7 @@ def test_ensure_downloads_extracts_and_returns_bin_dir(tmp_path, monkeypatch):
 
 
 def test_ensure_uses_mirror_when_official_unreachable(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(nb, "install_base", lambda slug: tmp_path / slug)
     monkeypatch.setattr(nb.shutil, "which", lambda c: None)
     monkeypatch.setattr(nb, "_platform_tag", lambda: ("linux", "x64", "tar.gz"))
     monkeypatch.setattr(nb, "_reachable", lambda *a, **k: False)  # GFW: official down

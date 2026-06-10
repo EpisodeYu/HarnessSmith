@@ -529,6 +529,7 @@ mcp:
       transport: sse          # legacy HTTP+SSE; omit (or `http`) for Streamable HTTP
       auth_env: EXAMPLE_TOKEN  # env-var NAME holding the bearer token
   connect_timeout_seconds: 120  # generous; first uvx/npx cold starts can be slow on Windows / behind the GFW
+  # proxy / npm_registry / pip_index: optional overrides (see "Network" below)
 tools:
   - name: git__*                 # wildcard: enable EVERY tool of this server
     enabled: true
@@ -545,6 +546,30 @@ register as `risk=safe` (offered to plan/ask); the rest are `risk=high`
 (agent-only). To narrow, replace the wildcard with explicit `<server>__<tool>`
 lines (or toggle individual tools on the web Tools panel — a fully-on server
 saves back as the wildcard).
+
+### Network (proxy / registry) for npx & uvx servers
+
+A stdio server launched with `npx`/`uvx` (e.g. desktop-commander) fetches its
+package the first time it connects. The harness makes that work on any network
+automatically: it reuses the **system proxy** and probes for a **reachable
+registry** — the official one, else a domestic mirror — directly or through the
+proxy, and injects the winner into the server's subprocess. Nothing to configure
+for direct-internet, GFW, or corporate-proxy machines.
+
+Pre-download up front so the first connect is instant (and an unreachable registry
+is reported clearly instead of timing out): `{{ project_slug }} mcp warm`.
+
+Override the auto-choice under `mcp:` when needed (values only, never secrets):
+
+```yaml
+mcp:
+  proxy: "http://host:8080"                        # default: the system proxy
+  npm_registry: "https://registry.npmmirror.com"   # npx/npm registry (default: auto)
+  pip_index: "https://pypi.tuna.tsinghua.edu.cn/simple"  # uvx/uv index (default: auto)
+```
+
+(Auto-detection covers env vars + the Windows/macOS system proxy; a PAC-only
+`AutoConfigURL` setup is not parsed — set `mcp.proxy` explicitly there.)
 
 ### Offline & Docker
 

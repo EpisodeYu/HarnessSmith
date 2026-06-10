@@ -241,7 +241,7 @@
         bud_extend_hint: "Add your own: @register_budget_condition in harness/budget.py — it appears here once imported (see AGENTS.md).",
         tools_hint: "Allowlist — only enabled tools are offered to the model.",
         tools_group_custom: "Your tools", tools_group_builtin: "Built-in tools", tools_group_mcp: "MCP",
-        tools_scan: "Scan MCP", tools_scanning: "scanning servers…", tools_scanned: "discovered",
+        tools_scan: "Scan MCP", tools_scanning: "scanning servers…", tools_scanned: "discovered", tools_none: "no tools",
         tools_extend_hint: "Your own tools: register with @registry.tool in harness/tools.py, then list the name under tools: in config.yaml to see it here. MCP tools are discovered from your servers (Scan) — tick one to add it to the allowlist. The checkbox toggles a tool live (no restart). See AGENTS.md.",
         tools_group_mcp_all: "all tools",
 {% if spec.mcp.enabled %}        mcp_hint: "MCP servers this product can connect to; the dot shows live connectivity. Add / edit / remove a server here — it reconnects immediately. Local trusted control — don't expose this panel on a public network.",
@@ -325,7 +325,7 @@
         bud_extend_hint: "可自定义:在 harness/budget.py 用 @register_budget_condition 注册,import 后即在此出现(见 AGENTS.md)。",
         tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
         tools_group_custom: "你的工具", tools_group_builtin: "内置工具", tools_group_mcp: "MCP",
-        tools_scan: "扫描 MCP", tools_scanning: "正在连接服务器…", tools_scanned: "已发现",
+        tools_scan: "扫描 MCP", tools_scanning: "正在连接服务器…", tools_scanned: "已发现", tools_none: "无工具",
         tools_extend_hint: "你自己的工具:在 harness/tools.py 用 @registry.tool 注册,再把名字加进 config.yaml 的 tools: 才会出现在这里。MCP 工具会从你配置的服务器自动发现(扫描)—— 勾上即加入 allowlist。勾选框可实时开关某个工具(免重启)。见 AGENTS.md。",
         tools_group_mcp_all: "全部工具",
 {% if spec.mcp.enabled %}        mcp_hint: "本产物可连接的 MCP 服务器;圆点显示实时连通性。在此添加 / 编辑 / 删除服务器 —— 立即热重连。本地可信控制面 —— 切勿对公网暴露此面板。",
@@ -973,7 +973,7 @@
       document.querySelectorAll("[data-cfg]").forEach((p) => p.classList.toggle("hidden", p.dataset.cfg !== name));
       buildCfgTabs();
 {% if spec.mcp.enabled %}      // Auto-discover MCP tools the first time the Tools tab opens (cached after).
-      if (name === "tools" && mcpDiscovered === null) discoverMcp();
+      if (name === "tools" && (mcpDiscovered === null || mcpDiscovered.pending)) discoverMcp();
       // Refresh live server status every time the MCP tab opens ("refresh promptly").
       if (name === "mcp") loadMcp();
 {% endif %}    }
@@ -1256,11 +1256,13 @@
 
       const groups = new Map();  // server -> [{name, short, enabled, listed}]
       const errors = new Map();
+      const connecting = new Set();  // servers still connecting (tools may arrive later)
       const seen = new Set();
       if (mcpDiscovered) {
         (mcpDiscovered.servers || []).forEach((s) => {
           if (!groups.has(s.name)) groups.set(s.name, []);
           if (s.error) errors.set(s.name, s.error);
+          if (s.connecting) connecting.add(s.name);
           (s.tools || []).forEach((tl) => {
             groups.get(s.name).push({
               name: tl.name, short: tl.short,
@@ -1284,14 +1286,22 @@
       for (const [server, items] of groups) {
         const en = items.filter((e) => e.enabled).length;
         const err = errors.get(server);
+        // A server still connecting shows a live "connecting…" tag; its tools fill in
+        // on the next poll the moment IT settles (not blocked by other servers).
+        const conn = connecting.has(server)
+          ? "<span class='text-xs text-amber-600 animate-pulse'>" + t("mcp_connecting") + "</span>"
+          : "";
+        const body = items.length
+          ? items.map((e) => toolRow(e.name, e.short, e.enabled, e.listed)).join("")
+          : "<p class='text-xs text-slate-400'>" + (connecting.has(server) ? t("mcp_connecting") : t("tools_none")) + "</p>";
         box.insertAdjacentHTML("beforeend",
           "<details class='rounded border'><summary class='flex cursor-pointer items-center gap-2 px-2 py-1 text-sm'>" +
           "<input type='checkbox' class='mcp-master' data-server='" + esc(server) + "' title='" + t("tools_group_mcp_all") + "' onclick='event.stopPropagation()'/>" +
           "<span class='font-medium'>" + t("tools_group_mcp") + " · " + esc(server) + "</span> " +
           "<span class='text-xs text-slate-500'>(" + en + "/" + items.length + ")</span>" +
+          conn +
           (err ? "<span class='text-xs text-red-600'>" + esc(err) + "</span>" : "") +
-          "</summary><div class='space-y-1 px-2 pb-2 pl-4'>" +
-          items.map((e) => toolRow(e.name, e.short, e.enabled, e.listed)).join("") + "</div></details>");
+          "</summary><div class='space-y-1 px-2 pb-2 pl-4'>" + body + "</div></details>");
       }
       // Reflect each group's aggregate on its master checkbox: checked = all on,
       // indeterminate = some on. The master is not a .tool-en, so it never enters
@@ -1307,22 +1317,37 @@
     // Scan configured MCP servers for their tools and re-render (cached per page
     // load). Async: the panel shows the listed tools immediately, then fills in the
     // full discovered set when the scan returns.
+    let toolsPollTimer = null;
+    let mcpDiscSig = "";  // skip rebuilds when nothing changed (don't clobber edits)
     async function discoverMcp() {
       const status = $("cfg-mcp-status");
       const btn = $("cfg-mcp-scan");
       status.className = "text-xs text-slate-500";
-      status.textContent = t("tools_scanning");
+      if (!mcpDiscovered) status.textContent = t("tools_scanning");
       if (btn) btn.disabled = true;
       try {
-        mcpDiscovered = await (await fetch("/mcp/discover")).json();
-        buildTools();
-        const n = (mcpDiscovered.servers || []).reduce((a, s) => a + (s.tools || []).length, 0);
-        status.textContent = t("tools_scanned") + " (" + n + ")";
+        const data = await (await fetch("/mcp/discover")).json();
+        mcpDiscovered = data;
+        // Rebuild only when the discovered/connecting set changed, so a poll while
+        // tools stream in doesn't wipe a checkbox you're mid-toggle on.
+        const sig = JSON.stringify((data.servers || []).map(
+          (s) => [s.name, (s.tools || []).length, !!s.connecting, s.error || ""]));
+        if (sig !== mcpDiscSig) { mcpDiscSig = sig; buildTools(); }
+        const n = (data.servers || []).reduce((a, s) => a + (s.tools || []).length, 0);
+        status.textContent = data.pending
+          ? t("tools_scanning") + " (" + n + ")"
+          : t("tools_scanned") + " (" + n + ")";
       } catch (e) {
         status.className = "text-xs text-red-600";
         status.textContent = String(e);
       } finally {
         if (btn) btn.disabled = false;
+      }
+      // Keep polling while any server is still connecting AND the Tools tab is open,
+      // so each server's tools appear the moment it settles (not blocked by a slow one).
+      if (toolsPollTimer) { clearTimeout(toolsPollTimer); toolsPollTimer = null; }
+      if (mcpDiscovered && mcpDiscovered.pending && cfgTab === "tools") {
+        toolsPollTimer = setTimeout(discoverMcp, 1500);
       }
     }
 
@@ -1343,8 +1368,14 @@
       const dotColor = s.connecting ? "text-amber-500 animate-pulse" : (s.connected ? "text-emerald-600" : "text-red-600");
       const dotTitle = s.connecting ? t("mcp_connecting") : (s.connected ? t("mcp_connected") : t("mcp_unreachable"));
       const dot = isNew ? "" : "<span class='" + dotColor + "' title='" + esc(dotTitle) + "'>\u25cf</span> ";
+      // While connecting (amber), show live progress (elapsed + the latest stderr
+      // line, e.g. the npx/uvx fetch) so a slow first-run download never looks dead.
+      const elapsed = (s.connecting_seconds != null) ? " " + Math.round(s.connecting_seconds) + "s" : "";
+      const connMeta = "<span class='text-xs text-amber-600'>" + t("mcp_connecting") + elapsed + "</span>" +
+        (s.log_tail ? " <span class='text-xs font-mono text-slate-400' title='" + esc(s.log_tail) + "'>" + esc(s.log_tail.slice(-72)) + "</span>" : "");
+      const idleMeta = "<span class='text-xs text-slate-500'>[" + esc(s.transport) + "] " + s.enabled_count + "/" + s.tool_count + " " + t("mcp_tools_word") + "</span>";
       const meta = isNew ? "" :
-        "<span class='text-xs text-slate-500'>[" + esc(s.transport) + "] " + s.enabled_count + "/" + s.tool_count + " " + t("mcp_tools_word") + "</span>" +
+        (s.connecting ? connMeta : idleMeta) +
         (s.error ? " <span class='text-xs text-red-600'>" + esc(s.error) + "</span>" : "");
       const div = document.createElement("div");
       div.className = "mcp-srv rounded-lg border p-3 space-y-2";

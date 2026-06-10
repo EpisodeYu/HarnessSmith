@@ -653,6 +653,8 @@ def create_app(
                 "transport": server.kind,
                 "connected": bool(st.get("connected")),
                 "connecting": bool(st.get("connecting")),
+                "connecting_seconds": st.get("connecting_seconds"),
+                "log_tail": st.get("log_tail") or "",
                 "error": st.get("error"),
                 "tool_count": tool_count,
                 "enabled_count": enabled_count,
@@ -665,24 +667,26 @@ def create_app(
         """List each configured server's tools (from the live manager) so the Tools
         tab can offer them without hand-writing the ``<server>__<tool>`` allowlist.
 
-        Read-only: it reports what each server exposes + which names are already
-        allowlisted/enabled; actually enabling a tool still goes through POST
-        /config. Per-server connect failures surface in ``error`` (never fatal).
+        NON-blocking: it returns whatever each server has discovered SO FAR plus its
+        live connection state, so a server's tools show up the moment IT connects —
+        one slow/failing server never holds back the others. The page polls this
+        while any server is still connecting. Read-only; enabling a tool still goes
+        through POST /config. Per-server connect failures surface in ``error``.
         """
         config = app.state.config
         if not config.mcp.servers:
-            return {"servers": []}
+            return {"servers": [], "pending": False}
 
-        def _ready_manager():  # an explicit scan waits for discovery (then caches)
-            mgr = _ensure_mcp_manager(app)
-            mgr.wait_ready(timeout=config.mcp.connect_timeout_seconds + 5)
-            return mgr
-
-        manager = await run_in_threadpool(_ready_manager)
+        manager = await run_in_threadpool(lambda: _ensure_mcp_manager(app))
         enabled = config.enabled_tool_names()
         listed = {tool.name for tool in config.tools}
+        live = {s["name"]: s for s in manager.status()}
         servers = []
+        pending = False
         for server in config.mcp.servers:
+            st = live.get(server.name, {})
+            connecting = bool(st.get("connecting"))
+            pending = pending or connecting
             wildcard = f"{server.name}__*" in enabled  # enables the whole server
             tools = []
             for tool in manager.discovered.get(server.name, []):
@@ -694,10 +698,17 @@ def create_app(
                     "listed": full in listed,
                     "enabled": full in enabled or wildcard,
                 })
-            servers.append(
-                {"name": server.name, "error": manager.errors.get(server.name), "tools": tools}
-            )
-        return {"servers": servers}
+            servers.append({
+                "name": server.name,
+                "error": manager.errors.get(server.name),
+                "connecting": connecting,
+                "connected": bool(st.get("connected")),
+                "connecting_seconds": st.get("connecting_seconds"),
+                "log_tail": st.get("log_tail") or "",
+                "tools": tools,
+            })
+        # `pending` lets the Tools page know to poll again until every server settles.
+        return {"servers": servers, "pending": pending}
 
     @app.post("/mcp/servers")
     async def upsert_mcp_server(request: Request):
