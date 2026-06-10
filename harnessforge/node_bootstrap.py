@@ -16,7 +16,6 @@ import platform
 import shutil
 import sys
 import tarfile
-import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -25,13 +24,13 @@ NODE_LTS_VERSION = "v22.11.0"
 _NODE_OFFICIAL = "https://nodejs.org/dist"
 _NODE_MIRROR = "https://npmmirror.com/mirrors/node"  # domestic mirror (GFW)
 
-# Download resilience: a stalled connection trips the per-read socket timeout; a
-# slow-but-steady source that hasn't reached _MIN_PCT by _SLOW_AFTER is abandoned
-# for the next source. Together with mirror-first ordering behind the GFW, this
-# stops a throttled nodejs.org from hanging the "Prepare Node" step.
-_READ_TIMEOUT = 30.0
-_SLOW_AFTER = 20.0
-_MIN_PCT = 25
+# Fallback is for a DEAD source, never a slow one: only a stall (no data within the
+# per-read socket timeout) or an outright connection/HTTP failure moves to the next
+# source. A slow-but-steady transfer is ridden to completion — a slow success beats
+# a fast failure (and never strands a user who switched off a working-but-slow
+# source onto a mirror that then can't connect). Source ORDER (mirror-first behind
+# the GFW) is what avoids the slow path up front, not abandoning sources mid-flight.
+_READ_TIMEOUT = 60.0
 _CHUNK = 1 << 16
 
 
@@ -115,12 +114,12 @@ def _sources(prefer_mirror: bool) -> list[str]:
 
 
 def _download(url: str, dest: Path, *, log=None) -> bool:
-    """Stream ``url`` -> ``dest`` with a per-read socket timeout (a stalled connection
-    aborts) and a slow-start guard (a source that hasn't passed ``_MIN_PCT`` by
-    ``_SLOW_AFTER`` is abandoned). ``urlopen``'s default opener honors HTTP(S)_PROXY
-    env + the system proxy, so a configured proxy is used automatically. Returns
-    ``True`` on a complete download; the caller falls back to the next source."""
-    start = time.monotonic()
+    """Stream ``url`` -> ``dest``. ``urlopen``'s socket timeout (``_READ_TIMEOUT``)
+    aborts only a STALLED connection (no data for that long); a slow-but-steady
+    transfer is NOT aborted — it's ridden to completion, because a slow success beats
+    a fast failure. Only a stall / connection error / HTTP error returns ``False`` and
+    falls back to the next source. The default opener honors HTTP(S)_PROXY env + the
+    system proxy, so a configured proxy is used automatically."""
     bucket = -1
     try:
         with urllib.request.urlopen(url, timeout=_READ_TIMEOUT) as resp:  # noqa: S310 — pinned node.js dist URL
@@ -133,14 +132,9 @@ def _download(url: str, dest: Path, *, log=None) -> bool:
                         break
                     fh.write(chunk)
                     got += len(chunk)
-                    if total:
-                        pct = min(100, got * 100 // total)
-                        elapsed = time.monotonic() - start
-                        if elapsed > _SLOW_AFTER and pct < _MIN_PCT:
-                            raise TimeoutError(f"too slow ({pct}% after {int(elapsed)}s)")
-                        if pct // 10 != bucket:  # log roughly every 10%
-                            bucket = pct // 10
-                            _emit(log, f"[harnessforge]   downloading Node ... {pct}%")
+                    if total and got * 10 // total != bucket:  # log roughly every 10%
+                        bucket = got * 10 // total
+                        _emit(log, f"[harnessforge]   downloading Node ... {got * 100 // total}%")
         return True
     except Exception as exc:  # stall / timeout / HTTP / connection — try the next source
         _emit(log, f"[harnessforge]   source failed: {exc}")
