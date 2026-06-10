@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -153,24 +154,40 @@ def test_environment_note_surfaces_disabled_capabilities():
 
 
 def test_windows_wraps_cmd_shim_for_stdio(monkeypatch):
-    """On Windows, .cmd/.bat shims (npx) are launched via `cmd /c`; .exe is direct.
+    """On Windows, .cmd/.bat shims (npx) are launched via `cmd.exe /d /c`; .exe is direct.
 
     Windows CreateProcess cannot exec a .cmd batch shim, so a bare `npx` fails with
-    WinError 2 — wrapping it in `cmd /c` is what makes it spawn.
+    WinError 2 — wrapping it in `cmd.exe /d /c` is what makes it spawn.
     """
     import shutil
 
     from {{ project_slug }}.harness.mcp import _windows_stdio_command
 
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
     monkeypatch.setattr(
         shutil,
         "which",
         lambda c: r"C:\Program Files\nodejs\npx.cmd" if c == "npx" else r"C:\uv\uvx.exe",
     )
 
-    assert _windows_stdio_command("npx", ["-y", "pkg"]) == ("cmd", ["/c", "npx", "-y", "pkg"])
+    assert _windows_stdio_command("npx", ["-y", "pkg"]) == (
+        r"C:\Windows\System32\cmd.exe",
+        ["/d", "/c", r"C:\Program Files\nodejs\npx.cmd", "-y", "pkg"],
+    )
     assert _windows_stdio_command("uvx", ["pkg"]) == ("uvx", ["pkg"])
+
+
+def test_windows_missing_launcher_reports_actionable_error(monkeypatch):
+    import shutil
+
+    from {{ project_slug }}.harness.mcp import _windows_stdio_command
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(shutil, "which", lambda c: None)
+
+    with pytest.raises(FileNotFoundError, match="Install Node.js"):
+        _windows_stdio_command("npx", ["-y", "pkg"])
 
 
 def test_non_windows_leaves_stdio_command_untouched(monkeypatch):
@@ -263,6 +280,51 @@ def test_connects_multiple_servers_concurrently():
         )
         assert "hi" in registry.call("a__echo", json.dumps({"text": "hi"}))
         assert "5" in registry.call("b__add", json.dumps({"a": 2, "b": 3}))
+    finally:
+        mgr.close()
+
+
+def test_server_contexts_enter_and_exit_in_same_task(monkeypatch):
+    """Regression: do not wrap MCP session setup in `asyncio.wait_for(coro)`.
+
+    `wait_for` runs the wrapped coroutine in a child Task; anyio cancel scopes used
+    by MCP transports then enter in that child and exit in the server owner task,
+    raising "Attempted to exit cancel scope in a different task..." on first use.
+    """
+    import asyncio
+    import mcp
+
+    import {{ project_slug }}.harness.mcp as mcp_bridge
+
+    class SameTaskContext:
+        async def __aenter__(self):
+            self.task = asyncio.current_task()
+            return ("read", "write")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            assert asyncio.current_task() is self.task
+
+    class FakeSession(SameTaskContext):
+        def __init__(self, read, write):
+            pass
+
+        async def __aenter__(self):
+            self.task = asyncio.current_task()
+            return self
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self):
+            return SimpleNamespace(tools=[SimpleNamespace(name="echo", description="", inputSchema={})])
+
+    monkeypatch.setattr(mcp_bridge, "_open_streams", lambda server: SameTaskContext())
+    monkeypatch.setattr(mcp, "ClientSession", FakeSession)
+
+    mgr = McpManager(McpConfig(servers=[McpServerConfig(name="fake", command=sys.executable)]))
+    mgr.start()
+    try:
+        assert "fake" in mgr.discovered, mgr.errors
     finally:
         mgr.close()
 

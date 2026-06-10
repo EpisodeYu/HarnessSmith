@@ -36,14 +36,42 @@ def _bearer_headers(server: McpServerConfig) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
+_WINDOWS_CMD_SHIMS = {"npx", "npm", "yarn", "pnpm"}
+
+
+def _missing_launcher_message(command: str) -> str:
+    if command.lower().removesuffix(".cmd").removesuffix(".bat") in _WINDOWS_CMD_SHIMS:
+        return (
+            f"MCP stdio launcher {command!r} was not found on PATH. "
+            "Install Node.js (which provides npx/npm) or edit config.yaml to use "
+            "a launcher that exists on this machine."
+        )
+    if command.lower() == "uvx":
+        return (
+            "MCP stdio launcher 'uvx' was not found on PATH. Install uv or edit "
+            "config.yaml to use a launcher that exists on this machine."
+        )
+    return f"MCP stdio launcher {command!r} was not found on PATH."
+
+
+def _windows_cmd_exe() -> str:
+    import os
+    import shutil
+
+    return os.environ.get("COMSPEC") or shutil.which("cmd.exe") or "cmd.exe"
+
+
 def _windows_stdio_command(command: str, args: list[str]) -> tuple[str, list[str]]:
     """Make a stdio command launchable on Windows.
 
-    ``npx`` (and ``npm``/``yarn``) are ``.cmd`` batch shims; Windows ``CreateProcess``
-    — which the asyncio subprocess used by the MCP SDK calls — cannot execute a
-    ``.cmd``/``.bat`` directly (it fails with ``WinError 2``), even when the file is
-    on PATH. Hand those to ``cmd.exe``, which knows how to run them. Real ``.exe``
-    commands (``uvx``, ``python``, …) are launched directly and left untouched.
+    ``npx`` (and ``npm``/``yarn``/``pnpm``) are usually ``.cmd`` batch shims;
+    Windows ``CreateProcess`` — which the asyncio subprocess used by the MCP SDK
+    calls — cannot execute a ``.cmd``/``.bat`` directly (it fails with
+    ``WinError 2``), even when the file is on PATH. Hand those to ``cmd.exe``,
+    which knows how to run them. Real ``.exe`` commands (``uvx``, ``python``, …)
+    are launched directly and left untouched. If the launcher is missing, fail
+    before entering the MCP transport so status pages show an actionable message
+    instead of a raw ``WinError 2``.
     """
     import shutil
     import sys
@@ -51,8 +79,10 @@ def _windows_stdio_command(command: str, args: list[str]) -> tuple[str, list[str
     if sys.platform != "win32":
         return command, args
     resolved = shutil.which(command)
-    if resolved and resolved.lower().endswith((".cmd", ".bat")):
-        return "cmd", ["/c", command, *args]
+    if not resolved:
+        raise FileNotFoundError(_missing_launcher_message(command))
+    if resolved.lower().endswith((".cmd", ".bat")):
+        return _windows_cmd_exe(), ["/d", "/c", resolved, *args]
     return command, args
 
 
@@ -166,7 +196,11 @@ class McpManager:
         assert self._closing is not None
         try:
             async with AsyncExitStack() as stack:
-                await asyncio.wait_for(self._connect(stack, server), timeout)
+                # `asyncio.wait_for(coro)` wraps `coro` in another Task. Anyio's
+                # MCP transports require async context managers to be entered and
+                # exited in the SAME task, so use `asyncio.timeout()` instead.
+                async with asyncio.timeout(timeout):
+                    await self._connect(stack, server)
                 done.set()
                 await self._closing.wait()  # keep the session alive until shutdown
         except Exception as exc:  # connect failure/timeout: isolate, never fatal
