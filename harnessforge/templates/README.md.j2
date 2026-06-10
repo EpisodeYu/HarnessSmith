@@ -148,9 +148,11 @@ first time, so the web **MCP** tab shows each server as **connecting** (amber)
 until it settles — green = connected, red = failed (with the reason). Each server
 has its own **Reconnect** button (retry just that one). Behind the GFW, when PyPI
 or the npm registry is unreachable, `uvx`/`npx` are pointed at a domestic mirror
-automatically (only if you haven't set your own index); Desktop Commander needs
-**Node.js** (`npx`) on the host — a missing Node is reported with an install hint.
-On native Windows prefer Docker; see [`AGENTS.md`](./AGENTS.md).
+automatically (only if you haven't set your own index). Desktop Commander needs
+**Node.js** (`npx`); since Windows rarely ships it, the one-click launcher offers
+to fetch a **portable Node** into your user folder (no admin, not committed to the
+repo) and adds it to PATH for that run — a missing Node is otherwise reported with
+an install hint. See [`AGENTS.md`](./AGENTS.md).
 {% endif %}{% if spec.skills.enabled %}
 ## Skills
 

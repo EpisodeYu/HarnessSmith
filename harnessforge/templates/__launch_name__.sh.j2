@@ -12,7 +12,43 @@ echo "[{{ project_slug }}] Folder: $PWD"
 {% if interfaces.web %}action=(serve --open)   # web UI; opens your browser
 {% else %}action=(chat)            # interactive chat in this terminal
 {% endif %}echo "[{{ project_slug }}] Action: ${action[*]}"
-
+{% if spec.mcp.enabled and mcp_needs_node %}
+# A Node-based MCP server (e.g. desktop-commander via npx) needs Node.js. uvx
+# servers ride uv, but Node has no runtime on many machines — offer a user-local
+# portable Node (not bundled in the repo) and put it on PATH for this session.
+ensure_node() {
+  command -v node >/dev/null 2>&1 && command -v npx >/dev/null 2>&1 && return 0
+  local osname arch nodeos nodearch base dir url tarball root nc
+  osname="$(uname -s)"; arch="$(uname -m)"
+  case "$osname" in Linux) nodeos=linux;; Darwin) nodeos=darwin;; *) return 0;; esac
+  case "$arch" in x86_64|amd64) nodearch=x64;; arm64|aarch64) nodearch=arm64;; *) return 0;; esac
+  root="$HOME/.local/share/{{ project_slug }}"
+  dir="$root/node-{{ node_version }}-${nodeos}-${nodearch}"
+  if [ -x "$dir/bin/node" ]; then export PATH="$dir/bin:$PATH"; return 0; fi
+  command -v curl >/dev/null 2>&1 || { echo "[{{ project_slug }}] desktop-commander needs Node (and curl to fetch it); skipping." >&2; return 0; }
+  echo "[{{ project_slug }}] A Node-based MCP tool (desktop-commander) needs Node.js, which isn't installed."
+  echo "    [1] Standard - download Node from nodejs.org"
+  echo "    [2] China mirror - download Node from npmmirror.com"
+  echo "    [n] Skip (that tool stays off; everything else still works)"
+  printf "  Choose [1/2/n]: "
+  read -r nc </dev/tty 2>/dev/null || nc=1
+  case "$nc" in n|N) return 0;; esac
+  base="https://nodejs.org/dist"
+  [ "$nc" = "2" ] && base="https://npmmirror.com/mirrors/node"
+  tarball="node-{{ node_version }}-${nodeos}-${nodearch}.tar.gz"
+  url="$base/{{ node_version }}/$tarball"
+  echo "[{{ project_slug }}] Downloading $url (one-time setup) ..."
+  mkdir -p "$root"
+  if curl -fsSL "$url" -o "$root/$tarball" && tar -xzf "$root/$tarball" -C "$root"; then
+    rm -f "$root/$tarball"
+    if [ -x "$dir/bin/node" ]; then export PATH="$dir/bin:$PATH"; echo "[{{ project_slug }}] Node is ready: $(node -v)"; fi
+  else
+    echo "[{{ project_slug }}] Node download failed - desktop-commander stays off. Install Node from https://nodejs.org and re-run." >&2
+  fi
+  return 0
+}
+ensure_node
+{% endif %}
 find_uv() {
   if command -v uv >/dev/null 2>&1; then echo uv; return 0; fi
   [ -x "$HOME/.local/bin/uv" ] && { echo "$HOME/.local/bin/uv"; return 0; }

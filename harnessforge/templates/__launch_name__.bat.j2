@@ -8,7 +8,37 @@ echo [{{ project_slug }}] Folder: %CD%
 set "ACTION={% if interfaces.web %}serve --open{% else %}chat{% endif %}"
 echo [{{ project_slug }}] Action: %ACTION%
 echo.
-
+{% if spec.mcp.enabled and mcp_needs_node %}
+REM --- Node.js for the Node-based MCP server (e.g. desktop-commander via npx) ---
+REM Windows rarely has Node; offer a user-local portable Node (no admin, not bundled
+REM in the repo) and put it on PATH for this session so the product's npx works.
+where node >nul 2>nul && where npx >nul 2>nul && goto :hf_node_ok
+set "HF_NODE_DIR=%LOCALAPPDATA%\{{ project_slug }}\node-{{ node_version }}-win-x64"
+if exist "%HF_NODE_DIR%\node.exe" (
+    set "PATH=%HF_NODE_DIR%;%PATH%"
+    goto :hf_node_ok
+)
+echo [{{ project_slug }}] A Node-based MCP tool (desktop-commander) needs Node.js, which isn't installed.
+echo   Install a portable Node into your user folder? No admin; it only affects this app.
+echo     [1] Standard - download Node from nodejs.org
+echo     [2] China mirror - download Node from npmmirror.com
+echo     [n] Skip (that tool stays off; everything else still works)
+set "NCHOICE=1"
+set /p "NCHOICE=  Choose [1/2/n]: "
+if /i "%NCHOICE%"=="n" goto :hf_node_ok
+set "HF_NODE_BASE=https://nodejs.org/dist"
+if "%NCHOICE%"=="2" set "HF_NODE_BASE=https://npmmirror.com/mirrors/node"
+echo [{{ project_slug }}] Downloading Node {{ node_version }} win-x64 (one-time setup) ...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $u='%HF_NODE_BASE%/{{ node_version }}/node-{{ node_version }}-win-x64.zip'; $z=Join-Path $env:TEMP 'hf-node.zip'; $d=Join-Path $env:LOCALAPPDATA '{{ project_slug }}'; Invoke-WebRequest -Uri $u -OutFile $z; New-Item -ItemType Directory -Force -Path $d | Out-Null; Expand-Archive -Path $z -DestinationPath $d -Force; Remove-Item $z"
+if exist "%HF_NODE_DIR%\node.exe" (
+    set "PATH=%HF_NODE_DIR%;%PATH%"
+    echo [{{ project_slug }}] Node is ready.
+) else (
+    echo [{{ project_slug }}] Node setup failed - desktop-commander stays off. Install Node from https://nodejs.org and re-run.
+)
+:hf_node_ok
+echo.
+{% endif %}
 echo [{{ project_slug }}] Step 1/4: looking for uv on PATH ...
 where uv >nul 2>nul
 if not errorlevel 1 goto :run

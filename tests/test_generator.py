@@ -849,6 +849,38 @@ def test_launch_scripts_auto_pick_china_mirror(tmp_path, spec):
         assert "UV_DEFAULT_INDEX" in text
 
 
+def test_launch_node_bootstrap_only_when_a_node_server_is_prefilled(tmp_path):
+    """The launcher offers a user-local portable Node ONLY when a Node-based MCP
+    server (npx, e.g. desktop-commander) is prefilled — uvx-only prefills ride uv
+    and get no Node logic. Node is fetched on demand, never bundled in the repo."""
+    from harnessforge.catalog import resolve_servers
+
+    spec = load_spec(preset_spec_path("coding-assistant"))
+    stem = launch_script_stem(spec)
+
+    # desktop-commander (npx) prefilled -> Node bootstrap present in both scripts.
+    with_dc = tmp_path / "with_dc"
+    generate(spec, with_dc, git_init=False, mcp_servers=preset_mcp_servers("coding-assistant"))
+    sh = (with_dc / f"{stem}.sh").read_text(encoding="utf-8")
+    bat = (with_dc / f"{stem}.bat").read_text(encoding="utf-8")
+    for text in (sh, bat):
+        assert "Node.js" in text
+        assert "nodejs.org/dist" in text and "npmmirror.com/mirrors/node" in text
+        assert "v22.11.0" in text  # pinned portable LTS
+        assert "Choose [1/2/n]" in text  # official / China mirror / skip menu
+    assert "ensure_node" in sh
+    assert ":hf_node_ok" in bat
+    low = bat.lower()  # must stay a flat goto script (the recursion footgun guard)
+    assert "setlocal" not in low and "call :" not in low
+
+    # uvx-only prefill (fetch) -> no Node logic at all (uv already covers it).
+    uvx_only = tmp_path / "uvx_only"
+    generate(spec, uvx_only, git_init=False, mcp_servers=resolve_servers(["fetch"]))
+    for ext in ("sh", "bat"):
+        text = (uvx_only / f"{stem}.{ext}").read_text(encoding="utf-8")
+        assert "ensure_node" not in text and "nodejs.org/dist" not in text
+
+
 def test_launch_bat_echo_safe_for_metachar_display_name(tmp_path):
     """A display name with cmd metacharacters (& < > |) must never reach an
     `echo` line — it would break batch parsing. The echoes use project_slug

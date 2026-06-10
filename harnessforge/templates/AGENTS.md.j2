@@ -552,8 +552,13 @@ uvx-based servers (fetch, ddg-search, git) download on first use, then run from
 cache. The generator prewarms that cache (`harnessforge new` / `--prewarm`), and
 the `Dockerfile` warms it at build time and sets `UV_OFFLINE=1`, so `docker run`
 works with no network. Node-based servers (Desktop Commander) need Node on the
-host and are not baked — a missing `node`/`npx` is reported with an install hint
-instead of a raw spawn error.
+host and are not baked. Because Windows rarely ships Node, the one-click launcher
+(`{{ launch_name }}.bat` / `.sh`) detects a missing `node`/`npx` and offers to
+fetch a **portable Node** (pinned LTS) into your user folder — `%LOCALAPPDATA%\{{ project_slug }}`
+on Windows, `~/.local/share/{{ project_slug }}` on macOS/Linux — and prepends it to
+PATH for that run (no admin, nothing committed to the repo; an official or
+npmmirror download, or skip). If you launch some other way, a missing Node is
+reported with an install hint instead of a raw spawn error.
 
 If a generated repo's first run *didn't* prewarm and `UV_OFFLINE` isn't set, a
 `uvx`/`npx` server still downloads its package on first use (it just shows

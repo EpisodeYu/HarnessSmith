@@ -119,6 +119,13 @@ class GenerationResult:
     git_initialized: bool = False
 
 
+# Portable Node.js the product launcher offers to fetch when a Node-based MCP
+# server (e.g. Desktop Commander via npx) is prefilled but Node isn't installed —
+# Windows install rate is low, so the launcher bootstraps a user-local Node (not
+# bundled in the repo). A pinned LTS keeps the download URL stable/offline-safe.
+NODE_LTS_VERSION = "v22.11.0"
+
+
 def _build_context(
     spec: HarnessSpec,
     mcp_servers: list[CatalogServer],
@@ -153,6 +160,13 @@ def _build_context(
         pkg = s.uvx_package
         if pkg and pkg not in mcp_uvx_packages:
             mcp_uvx_packages.append(pkg)
+    # Does any prefilled server need Node (npx/node)? If so the launcher offers to
+    # bootstrap a portable Node — uvx servers ride uv (already required), but a
+    # Node server (Desktop Commander) has no runtime on a typical Windows box.
+    mcp_needs_node = any(
+        s.requires == "node" or (s.command or "").lower() in {"npx", "npm", "node"}
+        for s in servers
+    )
 
     return {
         "spec": spec,
@@ -175,6 +189,8 @@ def _build_context(
         "mcp_servers": mcp_server_entries,
         "mcp_tool_allowlist": mcp_tool_allowlist,
         "mcp_uvx_packages": mcp_uvx_packages,
+        "mcp_needs_node": mcp_needs_node,
+        "node_version": NODE_LTS_VERSION,
         "confirm_default": confirm_default,
     }
 
