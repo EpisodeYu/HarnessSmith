@@ -41,6 +41,7 @@ from pydantic import ValidationError
 
 from ..catalog import CatalogError, load_catalog, resolve_servers
 from ..generator import TargetExistsError, generate
+from ..node_bootstrap import ensure_portable_node, node_on_path
 from ..presets import available_presets
 from ..spec import HarnessSpec
 
@@ -308,31 +309,51 @@ def _uv_sync(target_dir: Path) -> tuple[int, str]:
     return code, _log_tail(log_path)
 
 
-def _launch_product(target_dir: Path, project_slug: str, port: int, *, host: str = "127.0.0.1") -> None:
+def _launch_product(
+    target_dir: Path,
+    project_slug: str,
+    port: int,
+    *,
+    host: str = "127.0.0.1",
+    extra_path: str | None = None,
+) -> None:
     """Spawn ``uv run <slug> serve`` in the background (detached, own session).
 
     Output goes to ``<target>/.serve.log`` and the process outlives the wizard on
-    purpose. Set the LLM key in the product's config page / .env to actually chat.
+    purpose. ``extra_path`` (e.g. a provisioned portable Node's bin dir) is prepended
+    to the child's PATH so its ``npx``-based MCP servers can launch. Set the LLM key
+    in the product's config page / .env to actually chat.
     """
+    env = _product_env()
+    if extra_path:
+        env["PATH"] = extra_path + os.pathsep + env.get("PATH", "")
     log = (target_dir / ".serve.log").open("w", encoding="utf-8")
     proc = subprocess.Popen(  # noqa: S603 — local dev convenience, fixed argv
         ["uv", "run", project_slug, "serve", "--host", host, "--port", str(port)],
         cwd=str(target_dir),
         stdout=log,
         stderr=subprocess.STDOUT,
-        env=_product_env(),
+        env=env,
         start_new_session=True,
     )
     _LAUNCHED.append(proc)
 
 
-def _new_job() -> dict:
+def _job_steps(needs_node: bool) -> tuple[str, ...]:
+    """Ordered launch steps. ``node`` is inserted only when a Node-based MCP server
+    is prefilled (it provisions a portable Node before serve)."""
+    if needs_node:
+        return ("render", "sync", "node", "serve")
+    return _LAUNCH_STEPS
+
+
+def _new_job(needs_node: bool = False) -> dict:
     """A fresh launch-progress record (``render`` already done by generate())."""
     return {
         "id": uuid.uuid4().hex,
         "steps": [
             {"key": k, "status": "done" if k == "render" else "pending"}
-            for k in _LAUNCH_STEPS
+            for k in _job_steps(needs_node)
         ],
         "url": None,
         "done": False,
@@ -362,9 +383,27 @@ def _run_launch(job: dict, target_dir: Path, project_slug: str, *, host: str = "
             return
         _set_step(job, "sync", "done")
 
+        # A Node-based MCP server (e.g. Desktop Commander via npx) needs a Node
+        # runtime, which the headless `uv run serve` below won't get from the
+        # launch scripts. Provision a user-local portable Node (best-effort) and
+        # prepend it to the product's PATH so npx works. The step streams its own
+        # log so a slow ~30MB download reads as progressing, not frozen.
+        node_path: str | None = None
+        if any(s["key"] == "node" for s in job["steps"]):
+            _set_step(job, "node", "running")
+            node_log = target_dir / ".node.log"
+            job["setup_log"] = str(node_log)
+            if node_on_path():
+                _set_step(job, "node", "done")
+            else:
+                with node_log.open("w", encoding="utf-8") as nlog:
+                    node_path = ensure_portable_node(project_slug, log=nlog)
+                _set_step(job, "node", "done")
+
         _set_step(job, "serve", "running")
+        job["setup_log"] = str(target_dir / ".serve.log")  # stream serve output too
         port = _find_free_port()
-        _launch_product(target_dir, project_slug, port, host=host)
+        _launch_product(target_dir, project_slug, port, host=host, extra_path=node_path)
         if _wait_port(host, port):
             job["url"] = f"http://{host}:{port}"
             _set_step(job, "serve", "done")
@@ -495,7 +534,11 @@ def create_app() -> FastAPI:
         # bar and only opens the product once the job is done. Only meaningful
         # when the Web interface was generated; render-only otherwise.
         if body.get("launch") and spec.interfaces.web:
-            job = _new_job()
+            needs_node = any(
+                s.requires == "node" or (s.command or "").lower() in {"npx", "npm", "node"}
+                for s in servers
+            )
+            job = _new_job(needs_node)
             _JOBS[job["id"]] = job
             _spawn_launch(job, Path(result.target_dir), result.project_slug)
             resp["job_id"] = job["id"]

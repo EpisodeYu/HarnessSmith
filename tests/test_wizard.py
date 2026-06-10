@@ -367,6 +367,59 @@ def test_run_launch_reports_sync_failure_without_hanging(tmp_path, monkeypatch):
     assert next(s for s in job["steps"] if s["key"] == "serve")["status"] == "pending"
 
 
+def test_run_launch_provisions_portable_node_for_node_servers(tmp_path, monkeypatch):
+    """When a Node-based MCP server is prefilled, the headless launch inserts a
+    'node' step, provisions a portable Node, and prepends its bin dir to the
+    product's PATH (so npx works) — the one-click flow that bypasses <slug>.bat/.sh."""
+    import harnessforge.wizard.app as app_mod
+
+    monkeypatch.setattr(app_mod, "_uv_sync", lambda td: (0, ""))
+    monkeypatch.setattr(app_mod, "node_on_path", lambda: False)
+    monkeypatch.setattr(app_mod, "ensure_portable_node", lambda slug, log=None: "/portable/node/bin")
+    monkeypatch.setattr(app_mod, "_find_free_port", lambda: 8123)
+    monkeypatch.setattr(app_mod, "_wait_port", lambda host, port: True)
+    captured = {}
+    monkeypatch.setattr(
+        app_mod, "_launch_product",
+        lambda td, slug, port, *, host="127.0.0.1", extra_path=None: captured.update(extra_path=extra_path),
+    )
+
+    job = app_mod._new_job(needs_node=True)
+    assert [s["key"] for s in job["steps"]] == ["render", "sync", "node", "serve"]
+    app_mod._run_launch(job, tmp_path, "demo")
+
+    assert job["done"] is True
+    for key in ("sync", "node", "serve"):
+        assert next(s for s in job["steps"] if s["key"] == key)["status"] == "done"
+    assert captured["extra_path"] == "/portable/node/bin"  # node bin dir reached serve
+
+
+def test_run_launch_skips_node_download_when_node_present(tmp_path, monkeypatch):
+    """If Node is already on PATH, the 'node' step is a no-op (no download) and the
+    product launches with the unmodified PATH."""
+    import harnessforge.wizard.app as app_mod
+
+    monkeypatch.setattr(app_mod, "_uv_sync", lambda td: (0, ""))
+    monkeypatch.setattr(app_mod, "node_on_path", lambda: True)
+    monkeypatch.setattr(
+        app_mod, "ensure_portable_node",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not download Node")),
+    )
+    monkeypatch.setattr(app_mod, "_find_free_port", lambda: 8123)
+    monkeypatch.setattr(app_mod, "_wait_port", lambda host, port: True)
+    captured = {}
+    monkeypatch.setattr(
+        app_mod, "_launch_product",
+        lambda td, slug, port, *, host="127.0.0.1", extra_path=None: captured.update(extra_path=extra_path),
+    )
+
+    job = app_mod._new_job(needs_node=True)
+    app_mod._run_launch(job, tmp_path, "demo")
+    assert job["done"] is True
+    assert next(s for s in job["steps"] if s["key"] == "node")["status"] == "done"
+    assert captured["extra_path"] is None
+
+
 def test_generate_does_not_launch_without_web(client, tmp_path, monkeypatch):
     """A CLI-only spec (no Web) is render-only even with ``launch`` requested."""
     import harnessforge.wizard.app as app_mod

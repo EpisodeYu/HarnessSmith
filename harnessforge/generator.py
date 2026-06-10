@@ -21,6 +21,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from .catalog import CatalogServer
+from .node_bootstrap import NODE_LTS_VERSION
 from .spec import HarnessSpec, load_spec
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -117,13 +118,6 @@ class GenerationResult:
     project_slug: str = "agent_harness"
     written_files: list[Path] = field(default_factory=list)
     git_initialized: bool = False
-
-
-# Portable Node.js the product launcher offers to fetch when a Node-based MCP
-# server (e.g. Desktop Commander via npx) is prefilled but Node isn't installed —
-# Windows install rate is low, so the launcher bootstraps a user-local Node (not
-# bundled in the repo). A pinned LTS keeps the download URL stable/offline-safe.
-NODE_LTS_VERSION = "v22.11.0"
 
 
 def _build_context(

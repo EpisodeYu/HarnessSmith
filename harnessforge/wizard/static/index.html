@@ -143,8 +143,10 @@
         ok_produced: "spec 已校验通过。", ok_generated: "已生成", err_fix: "请修正以下字段:",
         open_product: "跳转到", generating: "正在生成…",
         ready: "产物已就绪,点「跳转」打开。", failed: "失败",
-        step_render: "生成代码", step_sync: "安装依赖 (uv sync)", step_serve: "启动产物 Web",
+        step_render: "生成代码", step_sync: "安装依赖 (uv sync)", step_node: "准备 Node", step_serve: "启动产物 Web",
         sync_hint: "首次安装依赖会下载若干包,慢网络下可能要几分钟,请耐心等待。",
+        node_hint: "该产物用到 Node 系 MCP(如 desktop-commander),正在下载便携 Node(约 30MB,一次性),慢网可能要一会。",
+        serve_hint: "正在启动产物 Web 并等待端口就绪(MCP server 在后台连接)。",
         forward_note: "远程访问产物?先在你的机器转发该端口:",
       },
       en: {
@@ -170,8 +172,10 @@
         ok_produced: "Spec validated.", ok_generated: "Generated at", err_fix: "Please fix these fields:",
         open_product: "Open", generating: "Generating…",
         ready: "Product is ready — click Open.", failed: "Failed",
-        step_render: "Generate code", step_sync: "Install deps (uv sync)", step_serve: "Start product web",
+        step_render: "Generate code", step_sync: "Install deps (uv sync)", step_node: "Prepare Node", step_serve: "Start product web",
         sync_hint: "First install downloads several packages; on a slow network this can take a few minutes.",
+        node_hint: "This product uses a Node-based MCP server (e.g. desktop-commander); downloading a portable Node (~30MB, one-time) — may take a moment on a slow network.",
+        serve_hint: "Starting the product web and waiting for its port (MCP servers connect in the background).",
         forward_note: "Reaching the product remotely? Forward its port from your machine first:",
       },
     };
@@ -294,22 +298,26 @@
       done: "text-emerald-700", running: "text-slate-800 font-medium",
       error: "text-red-600", pending: "text-slate-400",
     };
+    // Per-step "what's happening" hint shown while that step runs (keys map to i18n).
+    const STEP_HINT = { sync: "sync_hint", node: "node_hint", serve: "serve_hint" };
 
-    // Render the step list; beneath an actively-running ``sync`` step also show
-    // uv's latest output + elapsed seconds, so a slow install reads as progressing
-    // rather than frozen. ``logTail``/``elapsed`` are only set while sync runs.
+    // Render the step list; beneath ANY actively-running step also show its latest
+    // log output + elapsed seconds, so a slow install / Node download / serve startup
+    // reads as progressing rather than frozen. ``logTail``/``elapsed`` track whichever
+    // step is currently running.
     function renderProgress(steps, logTail, elapsed) {
       const box = $("progress");
       box.classList.remove("hidden");
       box.innerHTML = steps.map((s) => {
+        const running = s.status === "running";
         let row = "<div class='flex items-center gap-2 " + (STEP_CLS[s.status] || "") + "'>" +
           "<span class='w-4 text-center'>" + (STEP_ICON[s.status] || "○") + "</span>" +
           "<span>" + t("step_" + s.key) + "</span>" +
-          (s.status === "running" && s.key === "sync" && elapsed != null
+          (running && elapsed != null
             ? "<span class='text-xs text-slate-400'>" + elapsed + "s</span>" : "") +
           "</div>";
-        if (s.status === "running" && s.key === "sync") {
-          row += "<div class='ml-6 text-xs text-slate-400'>" + t("sync_hint") + "</div>";
+        if (running) {
+          if (STEP_HINT[s.key]) row += "<div class='ml-6 text-xs text-slate-400'>" + t(STEP_HINT[s.key]) + "</div>";
           if (logTail) row += "<div class='ml-6 font-mono text-xs text-slate-500 break-all'>" + esc(logTail) + "</div>";
         }
         return row;
@@ -346,15 +354,17 @@
     // Poll the launch job's step-by-step progress until done or error.
     async function trackJob(jobId) {
       showJumpButton(false);
-      let syncStart = null;
+      let runningKey = null, runningStart = null;
       while (true) {
         let job;
         try { job = await (await fetch("/generate/status/" + jobId)).json(); }
         catch (e) { await sleep(1500); continue; }
-        const syncStep = (job.steps || []).find((s) => s.key === "sync");
-        if (syncStep && syncStep.status === "running" && syncStart === null) syncStart = Date.now();
-        const elapsed = (syncStart !== null && syncStep && syncStep.status === "running")
-          ? Math.round((Date.now() - syncStart) / 1000) : null;
+        // Track elapsed seconds for whichever step is running, resetting the clock
+        // when the running step changes (sync -> node -> serve).
+        const cur = (job.steps || []).find((s) => s.status === "running");
+        const curKey = cur ? cur.key : null;
+        if (curKey !== runningKey) { runningKey = curKey; runningStart = curKey ? Date.now() : null; }
+        const elapsed = runningStart !== null ? Math.round((Date.now() - runningStart) / 1000) : null;
         renderProgress(job.steps || [], job.log_tail, elapsed);
         if (job.done && job.url) {
           showJumpButton(true, job.url);
