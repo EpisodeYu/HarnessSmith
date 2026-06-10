@@ -1339,7 +1339,8 @@
       const opt = (v, label) => "<option value='" + v + "'" + (sel === v ? " selected" : "") + ">" + label + "</option>";
       // Three-state dot: green connected / amber connecting (e.g. a uvx/npx
       // cold-download in flight) / red unreachable — so a slow start never looks dead.
-      const dotColor = s.connecting ? "text-amber-500" : (s.connected ? "text-emerald-600" : "text-red-600");
+      // The amber dot breathes (animate-pulse) so an in-flight connect reads as "working", not frozen.
+      const dotColor = s.connecting ? "text-amber-500 animate-pulse" : (s.connected ? "text-emerald-600" : "text-red-600");
       const dotTitle = s.connecting ? t("mcp_connecting") : (s.connected ? t("mcp_connected") : t("mcp_unreachable"));
       const dot = isNew ? "" : "<span class='" + dotColor + "' title='" + esc(dotTitle) + "'>\u25cf</span> ";
       const meta = isNew ? "" :

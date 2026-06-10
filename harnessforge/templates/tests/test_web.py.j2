@@ -238,6 +238,7 @@ def test_index_has_per_server_reconnect_and_connecting_dot():
     body = _client().get("/").text
     assert "m-reconnect" in body and "/reconnect" in body  # per-server reconnect
     assert "text-amber-500" in body and "mcp_connecting" in body  # amber connecting dot
+    assert "animate-pulse" in body  # the amber dot breathes so a slow connect never looks frozen
     assert "scheduleMcpPoll" in body  # re-poll while anything is still connecting
 {% endif %}
 
