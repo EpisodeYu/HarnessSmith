@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,9 +16,8 @@ from {{ project_slug }}.harness import mcp as mcp_module
 from {{ project_slug }}.harness.mcp import (
     McpManager,
     _bearer_headers,
-    _leaf_error,
+    _format_exception,
     _mirror_env,
-    _open_streams,
     register_mcp_tools,
 )
 from {{ project_slug }}.harness.prompts import build_system_prompt
@@ -161,24 +161,40 @@ def test_environment_note_surfaces_disabled_capabilities():
 
 
 def test_windows_wraps_cmd_shim_for_stdio(monkeypatch):
-    """On Windows, .cmd/.bat shims (npx) are launched via `cmd /c`; .exe is direct.
+    """On Windows, .cmd/.bat shims (npx) are launched via `cmd.exe /d /c`; .exe is direct.
 
     Windows CreateProcess cannot exec a .cmd batch shim, so a bare `npx` fails with
-    WinError 2 — wrapping it in `cmd /c` is what makes it spawn.
+    WinError 2 — wrapping it in `cmd.exe /d /c` is what makes it spawn.
     """
     import shutil
 
     from {{ project_slug }}.harness.mcp import _windows_stdio_command
 
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
     monkeypatch.setattr(
         shutil,
         "which",
         lambda c: r"C:\Program Files\nodejs\npx.cmd" if c == "npx" else r"C:\uv\uvx.exe",
     )
 
-    assert _windows_stdio_command("npx", ["-y", "pkg"]) == ("cmd", ["/c", "npx", "-y", "pkg"])
+    assert _windows_stdio_command("npx", ["-y", "pkg"]) == (
+        r"C:\Windows\System32\cmd.exe",
+        ["/d", "/c", r"C:\Program Files\nodejs\npx.cmd", "-y", "pkg"],
+    )
     assert _windows_stdio_command("uvx", ["pkg"]) == ("uvx", ["pkg"])
+
+
+def test_windows_missing_launcher_reports_actionable_error(monkeypatch):
+    import shutil
+
+    from {{ project_slug }}.harness.mcp import _windows_stdio_command
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(shutil, "which", lambda c: None)
+
+    with pytest.raises(FileNotFoundError, match="Install Node.js"):
+        _windows_stdio_command("npx", ["-y", "pkg"])
 
 
 def test_non_windows_leaves_stdio_command_untouched(monkeypatch):
@@ -275,6 +291,63 @@ def test_connects_multiple_servers_concurrently():
         mgr.close()
 
 
+def test_server_contexts_enter_and_exit_in_same_task(monkeypatch):
+    """Regression: keep MCP session setup, calls, and teardown in one server task.
+
+    `wait_for` runs the wrapped coroutine in a child Task; anyio cancel scopes used
+    by MCP transports then enter in that child and exit in the server owner task,
+    raising "Attempted to exit cancel scope in a different task..." on first use.
+    Calling a ClientSession from a separate dispatcher task is also unsafe; the
+    server task must own both the session lifecycle and its tool calls.
+    """
+    import asyncio
+    import mcp
+
+    import {{ project_slug }}.harness.mcp as mcp_bridge
+
+    class SameTaskContext:
+        async def __aenter__(self):
+            self.task = asyncio.current_task()
+            return ("read", "write")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            assert asyncio.current_task() is self.task
+
+    class FakeSession(SameTaskContext):
+        def __init__(self, read, write):
+            pass
+
+        async def __aenter__(self):
+            self.task = asyncio.current_task()
+            return self
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self):
+            return SimpleNamespace(tools=[SimpleNamespace(name="echo", description="", inputSchema={})])
+
+        async def call_tool(self, name, arguments):
+            assert asyncio.current_task() is self.task
+            return SimpleNamespace(
+                content=[SimpleNamespace(text=f"{name}:{arguments.get('text', '')}")],
+                isError=False,
+            )
+
+    monkeypatch.setattr(mcp_bridge, "_open_streams", lambda server, *a, **k: SameTaskContext())
+    monkeypatch.setattr(mcp, "ClientSession", FakeSession)
+
+    mgr = McpManager(McpConfig(servers=[McpServerConfig(name="fake", command=sys.executable)]))
+    mgr.start()
+    try:
+        assert "fake" in mgr.discovered, mgr.errors
+        registry = Registry()
+        register_mcp_tools(_config([{"name": "fake__echo", "enabled": True}]), mgr, registry)
+        assert registry.call("fake__echo", json.dumps({"text": "ok"})) == "echo:ok"
+    finally:
+        mgr.close()
+
+
 def test_rebuild_manager_reconnects(manager):
     """rebuild_manager starts a fresh manager (and closes the old) for hot-reconnect."""
     from {{ project_slug }}.harness.mcp import rebuild_manager
@@ -339,14 +412,13 @@ def test_begin_is_non_blocking_then_wait_ready():
         mgr.close()
 
 
-def test_leaf_error_unwraps_taskgroup_group():
-    """_leaf_error drills an ExceptionGroup (the SDK's 'unhandled errors in a
-    TaskGroup' wrapper) down to the actionable leaf message."""
+def test_format_exception_surfaces_taskgroup_leaves():
+    """_format_exception drills an ExceptionGroup (the SDK's 'unhandled errors in a
+    TaskGroup' wrapper) down to its actionable leaf message(s)."""
     leaf = FileNotFoundError(2, "No such file or directory")
     group = BaseExceptionGroup("unhandled errors in a TaskGroup (1 sub-exception)", [leaf])
-    msg = _leaf_error(group)
+    msg = _format_exception(group)
     assert "FileNotFoundError" in msg and "No such file" in msg
-    assert "TaskGroup" not in msg
 
 
 def test_mirror_env_only_injects_when_official_index_unreachable(monkeypatch):
@@ -370,14 +442,3 @@ def test_mirror_env_only_injects_when_official_index_unreachable(monkeypatch):
 
     monkeypatch.setenv("UV_DEFAULT_INDEX", "https://my.private/index")  # user's setting wins
     assert "UV_DEFAULT_INDEX" not in _mirror_env(servers)
-
-
-def test_node_missing_raises_actionable_error(monkeypatch):
-    """A node-family stdio command that isn't installed fails with a Node-install
-    hint, not the raw '[WinError 2]'/TaskGroup spawn error."""
-    import shutil
-
-    monkeypatch.setattr(shutil, "which", lambda c: None)
-    server = McpServerConfig(name="dc", command="npx", args=["-y", "some-mcp"])
-    with pytest.raises(RuntimeError, match="Node"):
-        _open_streams(server)

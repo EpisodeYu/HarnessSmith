@@ -8,13 +8,15 @@ stdio subprocess, ``url`` -> remote Streamable HTTP).
 
 The MCP SDK is asyncio; all of it hides behind a synchronous ``McpManager.call``.
 One background thread owns one event loop; each server gets its OWN task that
-enters and exits that server's session (anyio requires a session be entered and
-exited in the *same* task). Servers connect concurrently, so startup costs
-``max`` per-server connect time, not the sum. ``begin()`` starts that without
-blocking (so a UI can show a live "connecting" state); ``reconnect_server()``
-restarts just one server in place. stdio servers launched via ``uvx``/``npx`` get
-a domestic package mirror injected when the official index is unreachable (GFW),
-and a missing ``node`` is reported as an actionable error rather than raw noise.
+enters, USES, and exits that server's session (anyio requires a session be
+entered, used, and exited in the *same* task — so each server's ``call_tool`` runs
+in that task, with the dispatcher only routing requests to it). Servers connect
+concurrently, so startup costs ``max`` per-server connect time, not the sum.
+``begin()`` starts that without blocking (so a UI can show a live "connecting"
+state); ``reconnect_server()`` restarts just one server in place. stdio servers
+launched via ``uvx``/``npx`` get a domestic package mirror injected when the
+official index is unreachable (GFW); a missing launcher fails with an actionable
+message instead of a raw ``WinError 2``.
 """
 
 from __future__ import annotations
@@ -40,14 +42,44 @@ def _bearer_headers(server: McpServerConfig) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
+_WINDOWS_CMD_SHIMS = {"npx", "npm", "yarn", "pnpm"}
+_PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
+_NPM_MIRROR = "https://registry.npmmirror.com"
+
+
+def _missing_launcher_message(command: str) -> str:
+    if command.lower().removesuffix(".cmd").removesuffix(".bat") in _WINDOWS_CMD_SHIMS:
+        return (
+            f"MCP stdio launcher {command!r} was not found on PATH. "
+            "Install Node.js (which provides npx/npm) or edit config.yaml to use "
+            "a launcher that exists on this machine."
+        )
+    if command.lower() == "uvx":
+        return (
+            "MCP stdio launcher 'uvx' was not found on PATH. Install uv or edit "
+            "config.yaml to use a launcher that exists on this machine."
+        )
+    return f"MCP stdio launcher {command!r} was not found on PATH."
+
+
+def _windows_cmd_exe() -> str:
+    import os
+    import shutil
+
+    return os.environ.get("COMSPEC") or shutil.which("cmd.exe") or "cmd.exe"
+
+
 def _windows_stdio_command(command: str, args: list[str]) -> tuple[str, list[str]]:
     """Make a stdio command launchable on Windows.
 
-    ``npx`` (and ``npm``/``yarn``) are ``.cmd`` batch shims; Windows ``CreateProcess``
-    — which the asyncio subprocess used by the MCP SDK calls — cannot execute a
-    ``.cmd``/``.bat`` directly (it fails with ``WinError 2``), even when the file is
-    on PATH. Hand those to ``cmd.exe``, which knows how to run them. Real ``.exe``
-    commands (``uvx``, ``python``, …) are launched directly and left untouched.
+    ``npx`` (and ``npm``/``yarn``/``pnpm``) are usually ``.cmd`` batch shims;
+    Windows ``CreateProcess`` — which the asyncio subprocess used by the MCP SDK
+    calls — cannot execute a ``.cmd``/``.bat`` directly (it fails with
+    ``WinError 2``), even when the file is on PATH. Hand those to ``cmd.exe``,
+    which knows how to run them. Real ``.exe`` commands (``uvx``, ``python``, …)
+    are launched directly and left untouched. If the launcher is missing, fail
+    before entering the MCP transport so status pages show an actionable message
+    instead of a raw ``WinError 2``.
     """
     import shutil
     import sys
@@ -55,14 +87,11 @@ def _windows_stdio_command(command: str, args: list[str]) -> tuple[str, list[str
     if sys.platform != "win32":
         return command, args
     resolved = shutil.which(command)
-    if resolved and resolved.lower().endswith((".cmd", ".bat")):
-        return "cmd", ["/c", command, *args]
+    if not resolved:
+        raise FileNotFoundError(_missing_launcher_message(command))
+    if resolved.lower().endswith((".cmd", ".bat")):
+        return _windows_cmd_exe(), ["/d", "/c", resolved, *args]
     return command, args
-
-
-_NODE_COMMANDS = {"npx", "npm", "node"}
-_PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
-_NPM_MIRROR = "https://registry.npmmirror.com"
 
 
 def _base_command(command: str | None) -> str:
@@ -114,18 +143,10 @@ def _open_streams(server: McpServerConfig, mirror_env: dict[str, str] | None = N
     kind = server.kind
     if kind == "stdio":
         import os
-        import shutil
 
         from mcp import StdioServerParameters
         from mcp.client.stdio import stdio_client
 
-        # A Node-family command that isn't installed: fail with an actionable message
-        # instead of the raw '[WinError 2]' / TaskGroup noise the spawn would emit.
-        if _base_command(server.command) in _NODE_COMMANDS and shutil.which(server.command) is None:
-            raise RuntimeError(
-                f"{server.command!r} not found — this server needs Node.js. "
-                "Install Node (https://nodejs.org or nvm), then reconnect."
-            )
         env = dict(os.environ)
         for name in server.env:  # inject named secrets from .env into the child
             value = resolve_env(name)
@@ -160,35 +181,43 @@ def _result_text(result: Any) -> str:
     return f"ERROR: {text}" if getattr(result, "isError", False) else text
 
 
-def _leaf_error(exc: BaseException) -> str:
-    """Drill an ExceptionGroup/TaskGroup error down to its first leaf.
+def _format_exception(exc: BaseException) -> str:
+    """Show useful leaves from Python 3.11 ExceptionGroup/anyio TaskGroup errors.
 
-    A stdio spawn failure surfaces from the MCP SDK as 'unhandled errors in a
-    TaskGroup (1 sub-exception)' — noise. The leaf (e.g. ``FileNotFoundError:
-    [WinError 2] ...``) is the actionable part shown in the panel.
+    A stdio spawn failure / connect timeout surfaces from the MCP SDK as 'unhandled
+    errors in a TaskGroup' — noise; the leaf (e.g. ``FileNotFoundError: [WinError 2]
+    ...``) is the actionable part shown in the panel.
     """
-    seen: BaseException = exc
-    for _ in range(10):
-        subs = getattr(seen, "exceptions", None)
-        if not subs:
-            break
-        seen = subs[0]
-    text = str(seen).strip()
-    return f"{type(seen).__name__}: {text}" if text else type(seen).__name__
+    if isinstance(exc, BaseExceptionGroup):
+        leaves: list[str] = []
+
+        def _walk(group: BaseExceptionGroup) -> None:
+            for inner in group.exceptions:
+                if isinstance(inner, BaseExceptionGroup):
+                    _walk(inner)
+                else:
+                    message = str(inner) or type(inner).__name__
+                    leaves.append(f"{type(inner).__name__}: {message}")
+
+        _walk(exc)
+        if leaves:
+            return f"{exc} ({'; '.join(leaves)})"
+    return str(exc) or type(exc).__name__
 
 
 class McpManager:
     """Owns one background event loop + the full MCP session lifecycle.
 
     Each configured server gets its OWN task that connects CONCURRENTLY and then
-    holds its session open until shutdown (anyio requires a session be entered and
-    exited in the *same* task). Per-server failure is isolated into ``errors``
-    (a server that won't start is skipped, not fatal). ``begin()`` starts
-    connecting WITHOUT blocking, so ``status()`` can report a live ``connecting``
-    state; ``start()`` = ``begin()`` + wait for the first round to settle (for a
-    one-shot CLI run that needs tools up front). ``reconnect_server()`` restarts
-    one server in place; ``call()`` is synchronous + thread-safe; ``close()``
-    shuts everything down cleanly.
+    owns that server's session AND its tool-call execution for the whole run —
+    anyio requires a session be entered, used, and exited in the SAME task, so the
+    dispatcher only routes a call to the owning task. Per-server failure is isolated
+    into ``errors`` (a server that won't start is skipped, not fatal). ``begin()``
+    starts connecting WITHOUT blocking so ``status()`` can report a live
+    ``connecting`` state; ``start()`` also waits for the first round to settle (for
+    a one-shot CLI run that needs tools up front). ``reconnect_server()`` restarts
+    one server in place; ``call()`` is synchronous + thread-safe; ``close()`` shuts
+    everything down cleanly.
     """
 
     def __init__(self, config: McpConfig) -> None:
@@ -201,8 +230,8 @@ class McpManager:
         self._mirror_env: dict[str, str] = {}
         self._servers: dict[str, McpServerConfig] = {s.name: s for s in config.servers}
         self._tasks: dict[str, asyncio.Task] = {}
-        self._stop: dict[str, asyncio.Event] = {}
         self._settled: dict[str, asyncio.Event] = {}
+        self._server_inboxes: dict[str, asyncio.Queue] = {}
         self._sessions: dict[str, Any] = {}
         self.discovered: dict[str, list] = {}
         self.errors: dict[str, str] = {}
@@ -229,44 +258,62 @@ class McpManager:
         self._ready.set_result(True)
         await self._serve()
         self._closing.set()
-        for ev in self._stop.values():  # release each server task to tear down
-            ev.set()
+        for inbox in list(self._server_inboxes.values()):  # stop each server's loop
+            await inbox.put(None)
         if self._tasks:
             await asyncio.gather(*self._tasks.values(), return_exceptions=True)
 
     def _spawn(self, server: McpServerConfig) -> None:
-        """Create one server's stop/settled events + its lifecycle task (on the loop)."""
+        """Create one server's settled event + its lifecycle task (on the loop)."""
         name = server.name
         self._servers[name] = server
         self._sessions.pop(name, None)
         self.errors.pop(name, None)
         self.discovered.pop(name, None)
-        self._stop[name] = asyncio.Event()
+        self._server_inboxes.pop(name, None)
         self._settled[name] = asyncio.Event()
         self._tasks[name] = asyncio.create_task(self._run_server(server))
 
     async def _run_server(self, server: McpServerConfig) -> None:
-        """Own ONE server's session for the whole run, inside a single task.
+        """Own ONE server's session AND its tool calls for the whole run, in a
+        single task.
 
         Connect (open transport + ``initialize`` + ``list_tools``) under the timeout,
-        signal ``settled`` (so startup can proceed), then hold the session open until
-        ``stop`` is set (shutdown or a reconnect). Entering and exiting the session in
-        the same task is required by anyio; a connect failure/timeout is isolated into
-        ``errors`` and never aborts the other servers.
+        signal ``settled`` (so startup can proceed), then loop on this server's own
+        inbox running each ``call_tool`` HERE — never from the dispatcher task, since
+        anyio requires a session be used in the same task it was entered. A ``None``
+        stops the loop (shutdown or a reconnect); a connect failure/timeout is
+        isolated into ``errors`` and never aborts the other servers.
         """
         name = server.name
-        stop, settled = self._stop[name], self._settled[name]
+        settled = self._settled[name]
         try:
             async with AsyncExitStack() as stack:
-                await asyncio.wait_for(
-                    self._connect(stack, server), self._config.connect_timeout_seconds
-                )
+                # `asyncio.wait_for(coro)` wraps `coro` in another Task; anyio's MCP
+                # transports must be entered and exited in the SAME task, so use
+                # `asyncio.timeout()` here instead.
+                async with asyncio.timeout(self._config.connect_timeout_seconds):
+                    await self._connect(stack, server)
+                inbox: asyncio.Queue = asyncio.Queue()
+                self._server_inboxes[name] = inbox
                 settled.set()
-                await stop.wait()  # keep the session alive until shutdown/reconnect
+                while True:
+                    req = await inbox.get()
+                    if req is None:
+                        return  # shutdown or reconnect: tear the session down in this task
+                    tool, arguments, fut = req
+                    try:
+                        fut.set_result(
+                            _result_text(await self._sessions[name].call_tool(tool, arguments))
+                        )
+                    except Exception as exc:
+                        fut.set_exception(exc)
         except Exception as exc:  # connect failure/timeout: isolate, never fatal
-            self.errors[name] = _leaf_error(exc)
+            self.errors[name] = _format_exception(exc)
             self._sessions.pop(name, None)
-            settled.set()
+            self._server_inboxes.pop(name, None)
+            if not settled.is_set():
+                settled.set()
 
     async def _connect(self, stack: AsyncExitStack, server: McpServerConfig) -> None:
         """Open one server's session and list its tools (under a startup timeout)."""
@@ -279,16 +326,23 @@ class McpManager:
         self.discovered[server.name] = list((await session.list_tools()).tools)
 
     async def _serve(self) -> None:
+        """Dispatcher: route each synchronous ``call()`` to its server's own task."""
         assert self._inbox is not None
         while True:
             req = await self._inbox.get()
             if req is None:
                 return
             server, tool, arguments, fut = req
-            try:
-                fut.set_result(_result_text(await self._sessions[server].call_tool(tool, arguments)))
-            except Exception as exc:
-                fut.set_exception(exc)
+            inbox = self._server_inboxes.get(server)
+            if inbox is None:
+                fut.set_exception(
+                    RuntimeError(
+                        f"MCP server {server!r} is not connected: "
+                        f"{self.errors.get(server) or 'not discovered'}"
+                    )
+                )
+                continue
+            await inbox.put((tool, arguments, fut))
 
     async def _restart(self, name: str) -> None:
         """Tear down one server (in its own task) and spawn a fresh one — in place."""
@@ -296,9 +350,18 @@ class McpManager:
         if server is None:
             return
         task = self._tasks.get(name)
-        if task is not None:
-            self._stop[name].set()
-            await task  # exits this server's session in the task that entered it
+        if task is not None and not task.done():
+            # Drop the inbox first so the dispatcher fails fast (instead of routing
+            # to a loop that's about to exit) for the brief reconnect window.
+            inbox = self._server_inboxes.pop(name, None)
+            if inbox is not None:
+                await inbox.put(None)  # graceful: loop returns, session torn down in its task
+            else:
+                task.cancel()  # still connecting (no inbox yet)
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
         self._spawn(server)
 
     def begin(self) -> None:
