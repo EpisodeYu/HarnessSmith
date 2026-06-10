@@ -1,6 +1,6 @@
-# 05 · 原生 OpenAI+Anthropic 双规范 LLM client + 推理流式 UX（§6.4 待签方案）
+# 05 · 原生 OpenAI+Anthropic 双规范 LLM client + 推理流式 UX（已实现，2026-06-10）
 
-> 本文是一份**面向 Slice 12 的落地方案**，专为 `CLAUDE.md §6.4`（改 LLM API 面需人再签具体方案）写出待签——**未签字前不实现**。
+> 本文原为 `CLAUDE.md §6.4` 待签方案；**人 2026-06-10 签字放行（"开始规划并实现"=批准本文方案及其默认口径），当日按 Phase 1+2 实现完成**（Phase 3 prompt caching 精修仍留待后续，见 §6）。§8 各决策点的落定见文末"实现说明"。
 > 由 `03-feature-landscape-and-proposals.md §3 T1-D` 升格而来（2026-06-07 人定向排为 Slice 12）。
 > 口径基准：`00-overview.md §3` 决策表"LLM API 面"行（**默认 Chat Completions provider-agnostic 不动，双规范是可选第二条而非替换**）、`01-project-plan.md §6`（红线）。
 
@@ -118,15 +118,21 @@ def _client_for_profile(profile):
 - **不让密钥进 git/trace**：Anthropic profile 同样只存 `api_key_env` 名，真值入 `.env`；trace 沿用脱敏纪律。✅
 - **不引 agent 框架**：纯加一个 client 实现 + 映射函数，不引 LangChain/LiteLLM 进默认核心（当下兼容端点路径仍可用 LiteLLM，但那是用户运行期选择，不进产物依赖）。✅
 
-## 8. 留给人的设计决策（签字前确认）
+## 8. 设计决策落定（人 2026-06-10 签字放行；按本文默认口径执行）
 
-1. **是否批准本 §6.4 方案立项为 Slice 12**（改 LLM API 面 + 加 spec `provider` 字段）？
-2. **spec 字段命名/取值**：`provider: openai|anthropic` 是否合适（vs `api: chat_completions|messages`）？默认值确认 `openai`。
-3. **依赖与文件门控**：确认走"任一 profile=anthropic 才加 `anthropic` 可选依赖 + 才渲染 `llm_anthropic.py`"，关闭字节零痕迹。
-4. **思考流通道形态**：Web `event: thinking` 独立事件 vs 复用 `on_delta` 加标记；CLI 提示样式。
-5. **分阶段**：是否先只做 Phase 1（非流式映射）验证价值，再排 Phase 2/3？
-6. **Opus 4.7/4.8 采样约束**：确认按模型族**静默跳过**被禁的 `temperature`/`top_p`/`top_k`（而非报错），与现有 `OpenAIClient` "仅 set 时发"风格一致。
+1. **立项 Slice 12**：✅ 批准（"开始规划并实现"即签字）。
+2. **spec 字段**：✅ `provider: Literal["openai","anthropic"]`，默认 `openai`（`spec.LLMProfile` + 产物 `LLMProfileConfig` 同步）。
+3. **依赖与文件门控**：✅ 任一 profile=anthropic 才渲染 `llm_anthropic.py` + `tests/test_llm_anthropic.py`、才把 `anthropic>=0.92` 加进产物 `dependencies`；默认 spec 的 `pyproject`/`config.yaml`/spec 快照零 anthropic 痕迹（快照序列化时丢弃默认 `provider: openai`，保持旧 spec 字节稳定）。实现说明：依赖进 `dependencies`（沿用 web/mcp 的条件渲染机制）而非字面 `optional-dependencies`——`uv sync` 直接可用，开箱即跑。
+4. **思考流通道**：✅ 独立通道——`LLMClient.stream(on_thinking=...)` 新回调（与 `on_delta` 分离，chunk 可为 `""`=「在思考但内容隐藏」）；Web 推独立 `event: thinking`（前端一条灰色 "thinking …" 行，首个 token/工具/结束事件时移除）；CLI 每轮一行灰色 `· thinking …`（stderr，不污染 stdout 答案流）。OpenAI 兼容端点的 `reasoning_content` 透传进同一通道；MockLLM 流式时发一次 `"(mock thinking)"` 脉冲使通道离线可测。
+5. **分阶段**：✅ Phase 1+2 一次做完（`LLMClient` Protocol 本就要求 `complete`+`stream`，只做 Phase 1 产物 Web 流式即缺口）；Phase 3（`cache_control` 精修 / structured outputs）仍留待后续。
+6. **Opus 4.7/4.8 采样约束**：✅ 按模型族前缀（`claude-opus-4-7` / `claude-opus-4-8` / `claude-fable`）**静默跳过** `temperature`（产物本就不发 `top_p`/`top_k`）。另：`reasoning_effort` 复用为 Anthropic `effort`（`thinking: adaptive` + `output_config.effort`；`none`=不开思考、`minimal` 映射 `low`）；`max_tokens` 必填，未设兜底 16000。
+
+### 实现说明（2026-06-10）
+
+- 映射纯函数（`to_anthropic_messages` / `to_anthropic_tools` / `from_anthropic_content` / `from_anthropic_usage`）+ 流式拼装（含 `input_json_delta` 累积、thinking/text 双通道、cancel 关流）由产物自带 `tests/test_llm_anthropic.py` 覆盖，不需真 key。
+- 分发：`llm._client_for_profile(profile)` 按 `provider` 选实现（`make_client` + `ClientRouter` 共用）；未渲染 anthropic 模块的产物若手改 `provider: anthropic`，报带指引的 `RuntimeError` 而非裸 ImportError。
+- 门禁记录：生成器快测 171 全绿 + golden 13 全绿（含新增 anthropic golden、Docker 2、uvx 冒烟）。wizard 不露出 provider（行为性/llm 配置本就烤默认，沿用 Slice 7 口径）。
 
 ---
 
-> 一句话：双规范不是替换，是给推理模型补上"原生才有"的 thinking/effort/caching——靠 loop 已有的 provider-neutral `LLMClient` 扩展点，加一个映射客户端 + 一个 spec 开关，关掉零痕迹。**改 LLM API 面，签字后实现。**
+> 一句话：双规范不是替换，是给推理模型补上"原生才有"的 thinking/effort——靠 loop 已有的 provider-neutral `LLMClient` 扩展点，加一个映射客户端 + 一个 spec 开关，关掉零痕迹。**已实现并过全部门禁（2026-06-10）。**

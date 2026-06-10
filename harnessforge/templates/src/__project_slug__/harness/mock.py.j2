@@ -78,14 +78,19 @@ class MockLLM:
         tools: list[dict] | None = None,
         *,
         on_delta: Callable[[str], None] | None = None,
+        on_thinking: Callable[[str], None] | None = None,
         cancel: Callable[[], bool] | None = None,
     ) -> LLMResponse:
         """Same result as :meth:`complete`, but emit any text to ``on_delta``
-        token-by-token so streaming UIs can be tested offline.
+        token-by-token so streaming UIs can be tested offline. A single
+        ``on_thinking`` pulse fires first, so the thinking channel (the
+        "model is reasoning" indicator) is testable offline too.
 
         ``cancel`` is honored between tokens (mirroring the real client): once it
         returns ``True`` we stop emitting and return the half-assembled content,
         so a test can simulate "stop at the N-th token"."""
+        if on_thinking is not None:
+            on_thinking("(mock thinking)")
         response = self.complete(messages, tools)
         if on_delta is not None and response.content:
             emitted: list[str] = []

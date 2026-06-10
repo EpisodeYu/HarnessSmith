@@ -309,3 +309,31 @@ def test_docker_mcp_baseline_bakes_and_runs_offline(tmp_path):
         assert "mock" in run.stdout.lower()
     finally:
         subprocess.run(["docker", "rmi", "-f", tag], capture_output=True, text=True)
+
+
+@pytest.mark.golden
+def test_golden_anthropic_profile_generates_locks_and_smoke_passes(tmp_path):
+    """provider=anthropic -> generate -> lock -> sync + import + mock step +
+    pytest (incl. tests/test_llm_anthropic.py: mapping + stream assembly)."""
+    from harnessforge.spec import LLMProfile
+
+    spec = load_spec(preset_spec_path("coding-assistant"))
+    spec.llms.append(
+        LLMProfile(
+            name="claude",
+            model="claude-opus-4-8",
+            provider="anthropic",
+            api_key_env="ANTHROPIC_API_KEY",
+        )
+    )
+    out = tmp_path / "ca_anthropic"
+    result = generate(spec, out, git_init=False)
+
+    lock_dependencies(out)
+    lock_text = (out / "uv.lock").read_text(encoding="utf-8").lower()
+    assert "anthropic" in lock_text  # the SDK is locked in
+    for forbidden in FORBIDDEN:
+        assert forbidden not in lock_text, f"{forbidden} in uv.lock"
+
+    # Runs the generated pytest, which includes tests/test_llm_anthropic.py.
+    smoke_check(out, result.project_slug)

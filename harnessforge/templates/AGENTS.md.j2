@@ -153,7 +153,13 @@ llms:
 Add the matching name(s) to `.env`. To track spend, set
 `input_cost_per_million` / `output_cost_per_million` on the profile (price per
 1M tokens, in your own currency).
-
+{% if anthropic_enabled %}
+A profile with `provider: anthropic` speaks the **native Anthropic Messages
+API** instead (`harness/llm_anthropic.py`) — first-class adaptive thinking
+(`reasoning_effort` maps to the `effort` level) and native tool semantics.
+Everything else (roles, routing, budget, trace) is identical; the loop never
+knows which spec a profile speaks.
+{% endif %}
 ## Project rules (always-apply)
 
 Steer the agent on **every** turn with markdown rule files — the open

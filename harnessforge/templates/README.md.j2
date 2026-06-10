@@ -194,7 +194,8 @@ src/{{ project_slug }}/
   harness/
     config.py               # load config.yaml + .env, validate
     llm.py                  # OpenAI Chat Completions client (+ provider-neutral types)
-    loop.py                 # thin dispatcher: pick a paradigm by mode and run it
+{% if anthropic_enabled %}    llm_anthropic.py        # native Anthropic Messages client (provider: anthropic profiles)
+{% endif %}    loop.py                 # thin dispatcher: pick a paradigm by mode and run it
     paradigms/              # the function-calling loops you own (read these first)
       __init__.py           #   paradigm registry + shared RunResult/plumbing
       agent.py              #   agent (default; ReAct-style tool-calling loop){% for p in paradigms %}{% if p == "plan" %}

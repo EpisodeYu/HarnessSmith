@@ -6,15 +6,23 @@ project_slug: {{ project_slug }}
 llms:
 {% for profile in llms %}  - name: {{ profile.name }}
     model: {{ profile.model | tojson }}   # required: your model id (e.g. gpt-4o); empty = configure before chatting
-    api_key_env: {{ profile.api_key_env }}
+{% if profile.provider != "openai" %}    provider: {{ profile.provider }}   # native Anthropic Messages (default openai = Chat Completions via base_url)
+{% endif %}    api_key_env: {{ profile.api_key_env }}
 {% if profile.base_url_env %}    base_url_env: {{ profile.base_url_env }}
-{% endif %}    # Optional sampling knobs (sent ONLY when set; leave unset to use the model
+{% endif %}{% if profile.provider == "anthropic" %}    # Optional knobs (sent ONLY when set). On this native Anthropic profile,
+    # `reasoning_effort` maps to adaptive thinking + `effort` (low/medium/high/
+    # xhigh/max; model-dependent). Recent Opus/Fable models reject `temperature`
+    # — it is skipped automatically for them.
+    # temperature: 0.7
+    # max_tokens: 16000           # Anthropic requires it; unset = a 16000 default
+    # reasoning_effort: high
+{% else %}    # Optional sampling knobs (sent ONLY when set; leave unset to use the model
     # default). Reasoning models (GPT-5.x / o-series) reject `temperature` and want
     # it omitted; non-reasoning models reject `reasoning_effort`.
     # temperature: 0.7          # unset = provider default (~1.0 for chat models)
     # max_tokens: 1024
     # reasoning_effort: medium  # reasoning models only: none/minimal/low/medium/high/xhigh
-    # Optional cost accounting. Required if you use the budget max_cost condition —
+{% endif %}    # Optional cost accounting. Required if you use the budget max_cost condition —
     # otherwise cost stays 0 and the cost limit never triggers. Price per 1,000,000 tokens,
     # in your own currency (fill in your local price).
     # input_cost_per_million: 0.0

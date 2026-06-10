@@ -45,6 +45,15 @@ class LLMClient(Protocol):
     ``stream`` does the same thing but also forwards text tokens to ``on_delta``
     as they arrive (for live UIs); it still returns the fully assembled response.
 
+    ``on_thinking`` is the *thinking* channel, separate from ``on_delta`` (which
+    only ever carries final-answer text): reasoning models can sit silent for
+    seconds before the first token, so a client forwards any reasoning increments
+    here and the UI shows "thinking …" instead of a dead wait. The chunk may be
+    ``""`` (the model is reasoning but its content is hidden). Provider-neutral:
+    native Anthropic thinking blocks and a compatible endpoint's
+    ``reasoning_content`` both land on this one callback; models without a
+    visible thinking phase simply never call it.
+
     ``cancel`` is an optional cooperative cancel predicate: ``stream`` checks it
     each chunk and stops (closing the stream) the moment it returns ``True``, so a
     Stop button / Ctrl-C can cut model generation mid-token. ``complete`` can't
@@ -67,6 +76,7 @@ class LLMClient(Protocol):
         tools: list[dict] | None,
         *,
         on_delta: Callable[[str], None] | None = None,
+        on_thinking: Callable[[str], None] | None = None,
         cancel: Callable[[], bool] | None = None,
     ) -> LLMResponse:
         ...
@@ -147,11 +157,15 @@ class OpenAIClient:
         tools: list[dict] | None = None,
         *,
         on_delta: Callable[[str], None] | None = None,
+        on_thinking: Callable[[str], None] | None = None,
         cancel: Callable[[], bool] | None = None,
     ) -> LLMResponse:
         """Stream a Chat Completions response, assembling the same LLMResponse.
 
-        Text deltas are pushed to ``on_delta`` as they arrive. Tool-call and
+        Text deltas are pushed to ``on_delta`` as they arrive; reasoning deltas
+        (the ``reasoning_content`` field some compatible endpoints emit for
+        thinking models) go to ``on_thinking`` — they are progress, not answer
+        text, and never enter the assembled response. Tool-call and
         usage deltas are accumulated across chunks. ``include_usage`` asks for a
         final usage chunk; providers that ignore it leave usage at 0 (so a
         cost/token budget can't trigger — same caveat as a profile without prices).
@@ -194,6 +208,12 @@ class OpenAIClient:
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
+            # Non-standard but common on OpenAI-compatible reasoning endpoints
+            # (DeepSeek-R1 style): the model's reasoning streams here before any
+            # content. Not part of the SDK's typed delta, hence getattr.
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning and on_thinking is not None:
+                on_thinking(reasoning)
             if delta.content:
                 content.append(delta.content)
                 if on_delta is not None:
@@ -217,13 +237,34 @@ class OpenAIClient:
         return LLMResponse(content="".join(content) or None, tool_calls=tool_calls, usage=usage)
 
 
+def _client_for_profile(profile: LLMProfileConfig) -> LLMClient:
+    """Pick the client implementation for a profile by its ``provider``.
+
+    The anthropic module is imported lazily and only exists in repos generated
+    with an anthropic profile — a repo generated without one fails here with a
+    pointer instead of a bare ImportError.
+    """
+    if profile.provider == "anthropic":
+        try:
+            from .llm_anthropic import AnthropicClient
+        except ImportError as exc:
+            raise RuntimeError(
+                f"profile {profile.name!r} sets provider: anthropic, but this repo "
+                "was generated without the native Anthropic client. Regenerate with "
+                "an anthropic profile in the spec, or add harness/llm_anthropic.py "
+                "and the `anthropic` dependency yourself."
+            ) from exc
+        return AnthropicClient(profile)
+    return OpenAIClient(profile)
+
+
 def make_client(config: Config, role: str = "generation", *, mock: bool = False) -> LLMClient:
     """Build a single LLM client for ``role``; ``mock=True`` returns an offline one."""
     if mock:
         from .mock import MockLLM
 
         return MockLLM()
-    return OpenAIClient(config.profile_for(role))
+    return _client_for_profile(config.profile_for(role))
 
 
 class ClientRouter:
@@ -248,5 +289,5 @@ class ClientRouter:
             return self._cache[key]
         profile = self._config.profile_for(role)
         if profile.name not in self._cache:
-            self._cache[profile.name] = OpenAIClient(profile)
+            self._cache[profile.name] = _client_for_profile(profile)
         return self._cache[profile.name]

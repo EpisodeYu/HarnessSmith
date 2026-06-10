@@ -308,6 +308,10 @@ def _chat_events(
     q: queue.Queue = queue.Queue()
     hooks = _StreamHooks(q, load_hooks(config))
     on_delta = (lambda text: q.put(("token", {"text": text}))) if stream else None
+    # Thinking channel: reasoning models sit silent for seconds before the first
+    # token; `event: thinking` lets the UI show "thinking …" instead of nothing.
+    # `text` may be "" (reasoning started but its content is hidden).
+    on_thinking = (lambda text: q.put(("thinking", {"text": text}))) if stream else None
     router = ClientRouter(config, mock=mock)
 
     # Register this run's cancel token so /stop (and disconnect) can reach it, plus
@@ -380,6 +384,7 @@ def _chat_events(
                     config=config,
                     hooks=hooks,
                     on_delta=on_delta,
+                    on_thinking=on_thinking,
                     history=history,
                     cancel=cancel_event.is_set,
                     checkpoint=_checkpoint,

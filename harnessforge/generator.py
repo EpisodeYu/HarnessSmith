@@ -91,6 +91,15 @@ CONDITIONAL_TEMPLATES: dict[str, Callable[[HarnessSpec], bool]] = {
     # rendered only when opted in; disabled leaves zero memory footprint.
     "src/__project_slug__/harness/memory.py.j2": lambda spec: spec.memory.enabled,
     "tests/test_memory.py.j2": lambda spec: spec.memory.enabled,
+    # Native Anthropic Messages client (Slice 12): the second-spec client + its
+    # tests exist only when an LLM profile opts in (provider: anthropic);
+    # all-default specs keep zero anthropic footprint.
+    "src/__project_slug__/harness/llm_anthropic.py.j2": lambda spec: any(
+        p.provider == "anthropic" for p in spec.llms
+    ),
+    "tests/test_llm_anthropic.py.j2": lambda spec: any(
+        p.provider == "anthropic" for p in spec.llms
+    ),
     # Paradigms (Slice 5): the registry + agent are always rendered; the other
     # built-in paradigm files appear only when selected in spec.paradigms.
     "src/__project_slug__/harness/paradigms/plan.py.j2": lambda spec: "plan" in spec.paradigms,
@@ -176,6 +185,9 @@ def _build_context(
         # Baked-in default UI language for the product web ("en" | "zh").
         "language": spec.language,
         "llms": spec.llms,
+        # Any profile speaking native Anthropic Messages? Gates the `anthropic`
+        # dependency (pyproject) — the module itself is gated in CONDITIONAL_TEMPLATES.
+        "anthropic_enabled": any(p.provider == "anthropic" for p in spec.llms),
         "roles": spec.roles,
         "interfaces": spec.interfaces,
         "tools": spec.tools,
@@ -236,6 +248,11 @@ def _spec_snapshot_yaml(spec: HarnessSpec) -> str:
     ``exclude_none`` keeps unused reserved fields out of the snapshot.
     """
     data = spec.model_dump(mode="json", exclude_none=True)
+    # `provider: openai` is the default — dropping it keeps snapshots of specs
+    # that never mention it byte-stable (zero anthropic footprint when off).
+    for profile in data.get("llms", []):
+        if profile.get("provider") == "openai":
+            profile.pop("provider")
     return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 
 

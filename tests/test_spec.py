@@ -188,3 +188,27 @@ def test_api_key_is_a_name_not_a_value():
     dumped = yaml.safe_dump(spec.model_dump(mode="json"))
     assert "OPENAI_API_KEY" in dumped  # the name is present...
     assert "sk-" not in dumped  # ...but no secret-looking value
+
+
+def test_llm_provider_defaults_to_openai():
+    spec = HarnessSpec(llms=[{"name": "d", "model": "gpt-4o-mini"}])
+    assert spec.llms[0].provider == "openai"
+
+
+def test_llm_provider_anthropic_is_accepted():
+    spec = HarnessSpec(
+        llms=[
+            {
+                "name": "claude",
+                "model": "claude-opus-4-8",
+                "provider": "anthropic",
+                "api_key_env": "ANTHROPIC_API_KEY",
+            }
+        ]
+    )
+    assert spec.llms[0].provider == "anthropic"
+
+
+def test_llm_provider_unknown_is_rejected():
+    with pytest.raises(ValidationError):
+        HarnessSpec(llms=[{"name": "d", "model": "m", "provider": "gemini"}])

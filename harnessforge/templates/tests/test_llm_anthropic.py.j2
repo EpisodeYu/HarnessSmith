@@ -1,0 +1,216 @@
+"""Native Anthropic Messages client tests: the two-way mapping (pure functions,
+no key / no network) plus stream assembly against a faked SDK stream."""
+
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+
+from {{ project_slug }}.harness.config import LLMProfileConfig
+from {{ project_slug }}.harness.llm_anthropic import (
+    DEFAULT_MAX_TOKENS,
+    AnthropicClient,
+    from_anthropic_content,
+    from_anthropic_usage,
+    supports_sampling,
+    to_anthropic_messages,
+    to_anthropic_tools,
+)
+
+
+# ---- request mapping (OpenAI shape -> Anthropic Messages) -------------------
+
+
+def test_system_message_becomes_top_level_param():
+    system, messages = to_anthropic_messages(
+        [
+            {"role": "system", "content": "be terse"},
+            {"role": "user", "content": "hi"},
+        ]
+    )
+    assert system == "be terse"
+    assert messages == [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
+
+
+def test_assistant_tool_calls_become_tool_use_blocks():
+    _, messages = to_anthropic_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "let me check",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": '{"text": "hi"}'},
+                    }
+                ],
+            }
+        ]
+    )
+    blocks = messages[0]["content"]
+    assert blocks[0] == {"type": "text", "text": "let me check"}
+    assert blocks[1] == {
+        "type": "tool_use",
+        "id": "call_1",
+        "name": "echo",
+        "input": {"text": "hi"},
+    }
+
+
+def test_consecutive_tool_results_fold_into_one_user_turn():
+    _, messages = to_anthropic_messages(
+        [
+            {"role": "tool", "tool_call_id": "call_1", "content": "one"},
+            {"role": "tool", "tool_call_id": "call_2", "content": "two"},
+            {"role": "user", "content": "next"},
+        ]
+    )
+    assert len(messages) == 2  # one folded tool-result turn + the user turn
+    results = messages[0]["content"]
+    assert [b["type"] for b in results] == ["tool_result", "tool_result"]
+    assert [b["tool_use_id"] for b in results] == ["call_1", "call_2"]
+    assert messages[1]["role"] == "user"
+
+
+def test_tools_flatten_to_name_and_input_schema():
+    schema = {"type": "object", "properties": {"text": {"type": "string"}}}
+    tools = to_anthropic_tools(
+        [
+            {
+                "type": "function",
+                "function": {"name": "echo", "description": "Echo.", "parameters": schema},
+            }
+        ]
+    )
+    assert tools == [{"name": "echo", "description": "Echo.", "input_schema": schema}]
+
+
+# ---- response mapping (Anthropic -> neutral LLMResponse) --------------------
+
+
+def test_response_blocks_map_back_to_text_and_tool_calls():
+    content, calls = from_anthropic_content(
+        [
+            {"type": "text", "text": "Hello"},
+            {"type": "tool_use", "id": "tu_1", "name": "echo", "input": {"text": "hi"}},
+        ]
+    )
+    assert content == "Hello"
+    assert len(calls) == 1
+    assert calls[0].id == "tu_1" and calls[0].name == "echo"
+    assert json.loads(calls[0].arguments) == {"text": "hi"}
+
+
+def test_usage_maps_input_output_to_prompt_completion_total():
+    usage = from_anthropic_usage({"input_tokens": 7, "output_tokens": 5})
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (7, 5, 12)
+    assert from_anthropic_usage(None).total_tokens == 0
+
+
+# ---- per-model request rules -------------------------------------------------
+
+
+def _client(**overrides) -> AnthropicClient:
+    profile = LLMProfileConfig(
+        name="claude", model="claude-sonnet-4-6", provider="anthropic", **overrides
+    )
+    return AnthropicClient(profile)
+
+
+def test_max_tokens_is_required_and_defaulted():
+    kwargs = _client()._request_kwargs([{"role": "user", "content": "hi"}], None)
+    assert kwargs["max_tokens"] == DEFAULT_MAX_TOKENS
+
+
+def test_temperature_skipped_for_models_that_reject_it():
+    assert supports_sampling("claude-sonnet-4-6")
+    assert not supports_sampling("claude-opus-4-8")
+
+    client = _client(temperature=0.2)
+    assert "temperature" in client._request_kwargs([{"role": "user", "content": "x"}], None)
+    client.model = "claude-opus-4-8"
+    assert "temperature" not in client._request_kwargs([{"role": "user", "content": "x"}], None)
+
+
+def test_reasoning_effort_maps_to_adaptive_thinking_plus_effort():
+    kwargs = _client(reasoning_effort="high")._request_kwargs(
+        [{"role": "user", "content": "x"}], None
+    )
+    assert kwargs["thinking"] == {"type": "adaptive"}
+    assert kwargs["output_config"] == {"effort": "high"}
+    # "minimal" has no Anthropic level -> lowest; "none" -> thinking off (omitted)
+    kwargs = _client(reasoning_effort="minimal")._request_kwargs(
+        [{"role": "user", "content": "x"}], None
+    )
+    assert kwargs["output_config"] == {"effort": "low"}
+    kwargs = _client(reasoning_effort="none")._request_kwargs(
+        [{"role": "user", "content": "x"}], None
+    )
+    assert "thinking" not in kwargs and "output_config" not in kwargs
+
+
+# ---- stream assembly ---------------------------------------------------------
+
+
+class _FakeStream:
+    def __init__(self, events):
+        self._events = events
+        self.closed = False
+
+    def __iter__(self):
+        return iter(self._events)
+
+    def close(self):
+        self.closed = True
+
+
+def _fake_events():
+    ns = SimpleNamespace
+    return [
+        ns(type="message_start", message=ns(usage=ns(input_tokens=7))),
+        ns(type="content_block_start", index=0, content_block=ns(type="thinking")),
+        ns(type="content_block_delta", index=0, delta=ns(type="thinking_delta", thinking="hmm")),
+        ns(type="content_block_start", index=1, content_block=ns(type="text")),
+        ns(type="content_block_delta", index=1, delta=ns(type="text_delta", text="Hel")),
+        ns(type="content_block_delta", index=1, delta=ns(type="text_delta", text="lo")),
+        ns(type="content_block_start", index=2, content_block=ns(type="tool_use", id="tu_1", name="echo")),
+        ns(type="content_block_delta", index=2, delta=ns(type="input_json_delta", partial_json='{"text": ')),
+        ns(type="content_block_delta", index=2, delta=ns(type="input_json_delta", partial_json='"hi"}')),
+        ns(type="message_delta", usage=ns(output_tokens=5)),
+    ]
+
+
+def test_stream_assembles_text_tools_usage_and_routes_channels():
+    client = _client()
+    fake = _FakeStream(_fake_events())
+    client._client = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: fake))
+
+    deltas: list[str] = []
+    thinking: list[str] = []
+    response = client.stream(
+        [{"role": "user", "content": "hi"}],
+        None,
+        on_delta=deltas.append,
+        on_thinking=thinking.append,
+    )
+
+    assert response.content == "Hello"
+    assert deltas == ["Hel", "lo"]
+    # the block-start pulse ("") plus the visible thinking delta — and the
+    # thinking text never leaks into the answer content
+    assert thinking == ["", "hmm"]
+    assert len(response.tool_calls) == 1
+    assert response.tool_calls[0].name == "echo"
+    assert json.loads(response.tool_calls[0].arguments) == {"text": "hi"}
+    assert (response.usage.prompt_tokens, response.usage.completion_tokens) == (7, 5)
+
+
+def test_stream_cancel_closes_the_stream():
+    client = _client()
+    fake = _FakeStream(_fake_events())
+    client._client = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: fake))
+
+    response = client.stream([{"role": "user", "content": "hi"}], None, cancel=lambda: True)
+    assert fake.closed
+    assert response.content is None  # cancelled before any text arrived

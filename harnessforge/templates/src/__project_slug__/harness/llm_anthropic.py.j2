@@ -1,0 +1,325 @@
+"""Native Anthropic Messages client (the opt-in second spec, Slice 12).
+
+The loop keeps speaking the OpenAI Chat Completions shape; this module is a
+two-way translation behind the same provider-neutral ``LLMClient`` protocol:
+OpenAI-shaped ``messages``/``tools`` are mapped into an Anthropic Messages
+request, and the response is mapped back into the neutral ``LLMResponse``.
+Going native (instead of an OpenAI-compatible shim) keeps the first-class
+Anthropic capabilities: adaptive thinking + ``effort``, native ``tool_use`` /
+``tool_result`` semantics, and exact sampling rules per model family.
+
+The mapping functions are pure and unit-tested without a key or network
+(see tests/test_llm_anthropic.py). Only profiles with ``provider: anthropic``
+route here (see ``llm._client_for_profile``).
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from collections.abc import Callable
+from typing import Any
+
+from .config import LLMProfileConfig, resolve_env
+from .debuglog import log
+from .llm import LLMResponse, ToolCall, Usage
+
+# Anthropic requires max_tokens on every request; used when the profile leaves
+# it unset. Generous on purpose: hitting the cap truncates an answer mid-thought.
+DEFAULT_MAX_TOKENS = 16000
+
+# Model families that REJECT classic sampling knobs: Opus 4.7+ and Fable 5
+# return 400 for temperature/top_p/top_k. Skipped silently for them — the same
+# spirit as OpenAIClient's "send only when set".
+_NO_SAMPLING_PREFIXES = ("claude-opus-4-7", "claude-opus-4-8", "claude-fable")
+
+# The profile's `reasoning_effort` doubles as the Anthropic `effort` level.
+# "none" disables thinking (omit the param); "minimal" has no Anthropic
+# equivalent and maps to the lowest level.
+_EFFORT_ALIASES = {"minimal": "low"}
+
+
+def supports_sampling(model: str) -> bool:
+    """Whether ``model`` still accepts temperature (recent Opus/Fable do not)."""
+    return not model.startswith(_NO_SAMPLING_PREFIXES)
+
+
+def to_anthropic_messages(messages: list[dict]) -> tuple[str | None, list[dict]]:
+    """Split OpenAI-shaped messages into (top-level system, Anthropic messages).
+
+    - the system message becomes the top-level ``system`` parameter
+    - plain string content becomes a single text block
+    - an assistant message with tool_calls becomes text + ``tool_use`` blocks
+      (arguments JSON string -> ``input`` dict)
+    - a tool message becomes a ``tool_result`` block inside a user turn;
+      consecutive tool messages fold into ONE user turn (one batch of results
+      answers one assistant turn's calls)
+    """
+    system: str | None = None
+    out: list[dict] = []
+    for msg in messages:
+        role = msg.get("role")
+        if role == "system":
+            system = msg.get("content") or ""
+            continue
+        if role == "tool":
+            block = {
+                "type": "tool_result",
+                "tool_use_id": msg.get("tool_call_id", ""),
+                "content": msg.get("content") or "",
+            }
+            last = out[-1] if out else None
+            if (
+                last is not None
+                and last["role"] == "user"
+                and last["content"]
+                and last["content"][0].get("type") == "tool_result"
+            ):
+                last["content"].append(block)
+            else:
+                out.append({"role": "user", "content": [block]})
+            continue
+        if role == "assistant" and msg.get("tool_calls"):
+            blocks: list[dict] = []
+            if msg.get("content"):
+                blocks.append({"type": "text", "text": msg["content"]})
+            for call in msg["tool_calls"]:
+                fn = call.get("function", {})
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": call.get("id", ""),
+                        "name": fn.get("name", ""),
+                        "input": args if isinstance(args, dict) else {},
+                    }
+                )
+            out.append({"role": "assistant", "content": blocks})
+            continue
+        out.append(
+            {"role": role, "content": [{"type": "text", "text": msg.get("content") or ""}]}
+        )
+    return system, out
+
+
+def to_anthropic_tools(tools: list[dict] | None) -> list[dict]:
+    """Flatten OpenAI function-tool wrappers into Anthropic tool entries.
+
+    ``{"type": "function", "function": {name, description, parameters}}``
+    -> ``{name, description, input_schema}``.
+    """
+    result: list[dict] = []
+    for tool in tools or []:
+        fn = tool.get("function", tool)
+        entry: dict[str, Any] = {
+            "name": fn.get("name", ""),
+            "input_schema": fn.get("parameters")
+            or {"type": "object", "properties": {}},
+        }
+        if fn.get("description"):
+            entry["description"] = fn["description"]
+        result.append(entry)
+    return result
+
+
+def _field(block: Any, name: str, default: Any = None) -> Any:
+    """Read ``name`` off an SDK block object or a plain dict (tests use dicts)."""
+    if isinstance(block, dict):
+        return block.get(name, default)
+    return getattr(block, name, default)
+
+
+def from_anthropic_content(content: list[Any]) -> tuple[str | None, list[ToolCall]]:
+    """Map response content blocks back to neutral (text, tool_calls).
+
+    ``tool_use.input`` (a dict) is re-serialized to the raw-JSON-string shape the
+    loop's ``ToolCall.arguments`` expects. Thinking blocks carry no answer text
+    and are dropped here (the streaming path surfaces them via ``on_thinking``).
+    """
+    texts: list[str] = []
+    calls: list[ToolCall] = []
+    for block in content or []:
+        btype = _field(block, "type")
+        if btype == "text":
+            texts.append(_field(block, "text") or "")
+        elif btype == "tool_use":
+            calls.append(
+                ToolCall(
+                    id=_field(block, "id") or "",
+                    name=_field(block, "name") or "",
+                    arguments=json.dumps(_field(block, "input") or {}),
+                )
+            )
+    return ("".join(texts) or None), calls
+
+
+def from_anthropic_usage(raw: Any) -> Usage:
+    """Map Anthropic ``usage`` (input/output tokens) onto the neutral Usage."""
+    if raw is None:
+        return Usage()
+    prompt = int(_field(raw, "input_tokens", 0) or 0)
+    completion = int(_field(raw, "output_tokens", 0) or 0)
+    return Usage(prompt, completion, prompt + completion)
+
+
+class AnthropicClient:
+    """Thin adapter over the Anthropic SDK's native Messages endpoint."""
+
+    def __init__(self, profile: LLMProfileConfig) -> None:
+        from anthropic import Anthropic
+
+        api_key = resolve_env(profile.api_key_env) or "missing-api-key"
+        base_url = resolve_env(profile.base_url_env)
+        self._client = Anthropic(api_key=api_key, base_url=base_url)
+        self.model = profile.model
+        self.temperature = profile.temperature
+        self.max_tokens = profile.max_tokens
+        self.reasoning_effort = profile.reasoning_effort
+
+    def _request_kwargs(self, messages: list[dict], tools: list[dict] | None) -> dict[str, Any]:
+        system, anthropic_messages = to_anthropic_messages(messages)
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": anthropic_messages,
+            "max_tokens": self.max_tokens or DEFAULT_MAX_TOKENS,  # required field
+        }
+        if system:
+            kwargs["system"] = system
+        if tools:
+            kwargs["tools"] = to_anthropic_tools(tools)
+        if self.temperature is not None and supports_sampling(self.model):
+            kwargs["temperature"] = self.temperature
+        if self.reasoning_effort and self.reasoning_effort != "none":
+            # Adaptive thinking + effort: the native form of "reasoning depth".
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {
+                "effort": _EFFORT_ALIASES.get(self.reasoning_effort, self.reasoning_effort)
+            }
+        return kwargs
+
+    def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        *,
+        cancel: Callable[[], bool] | None = None,
+    ) -> LLMResponse:
+        # Like OpenAIClient.complete: a single blocking call can't be interrupted;
+        # ``cancel`` takes effect at the loop's next step boundary.
+        log.debug(
+            "llm complete (anthropic): model=%s messages=%d tools=%d",
+            self.model, len(messages), len(tools or []),
+        )
+        started = time.monotonic()
+        try:
+            resp = self._client.messages.create(**self._request_kwargs(messages, tools))
+        except Exception as exc:
+            log.debug(
+                "llm complete (anthropic) FAILED after %.1fs: %s: %s",
+                time.monotonic() - started, type(exc).__name__, exc,
+            )
+            raise
+        log.debug("llm complete (anthropic): response in %.1fs", time.monotonic() - started)
+        content, calls = from_anthropic_content(resp.content)
+        return LLMResponse(
+            content=content, tool_calls=calls, usage=from_anthropic_usage(resp.usage)
+        )
+
+    def stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        *,
+        on_delta: Callable[[str], None] | None = None,
+        on_thinking: Callable[[str], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
+    ) -> LLMResponse:
+        """Stream a native Messages response, assembling the same LLMResponse.
+
+        Answer text goes to ``on_delta``; thinking activity goes to
+        ``on_thinking`` (an empty chunk when a thinking block starts — recent
+        models hide the text by default, but the *signal* still ends the "dead
+        wait" in the UI). Tool-use input arrives as partial JSON deltas and is
+        accumulated into the raw-JSON-string ``ToolCall.arguments``. ``cancel``
+        is checked per event; closing the HTTP stream cuts generation mid-token.
+        """
+        kwargs = self._request_kwargs(messages, tools)
+        kwargs["stream"] = True
+        log.debug(
+            "llm stream (anthropic): model=%s messages=%d tools=%d",
+            self.model, len(messages), len(tools or []),
+        )
+        started = time.monotonic()
+        content: list[str] = []
+        calls: dict[int, dict[str, str]] = {}
+        prompt_tokens = 0
+        completion_tokens = 0
+        try:
+            stream_obj = self._client.messages.create(**kwargs)
+        except Exception as exc:
+            log.debug(
+                "llm stream (anthropic) FAILED after %.1fs: %s: %s",
+                time.monotonic() - started, type(exc).__name__, exc,
+            )
+            raise
+        for event in stream_obj:
+            if cancel is not None and cancel():
+                stream_obj.close()  # stop the model: close the HTTP stream and bail
+                break
+            etype = getattr(event, "type", "")
+            if etype == "message_start":
+                usage = getattr(event.message, "usage", None)
+                prompt_tokens = int(_field(usage, "input_tokens", 0) or 0)
+            elif etype == "content_block_start":
+                block = event.content_block
+                if _field(block, "type") == "tool_use":
+                    calls[event.index] = {
+                        "id": _field(block, "id") or "",
+                        "name": _field(block, "name") or "",
+                        "arguments": "",
+                    }
+                elif _field(block, "type") == "thinking" and on_thinking is not None:
+                    on_thinking("")  # reasoning started (text may stay hidden)
+            elif etype == "content_block_delta":
+                delta = event.delta
+                dtype = _field(delta, "type")
+                if dtype == "text_delta":
+                    text = _field(delta, "text") or ""
+                    if text:
+                        content.append(text)
+                        if on_delta is not None:
+                            on_delta(text)
+                elif dtype == "thinking_delta":
+                    if on_thinking is not None and _field(delta, "thinking"):
+                        on_thinking(_field(delta, "thinking"))
+                elif dtype == "input_json_delta":
+                    slot = calls.get(event.index)
+                    if slot is not None:
+                        slot["arguments"] += _field(delta, "partial_json") or ""
+            elif etype == "message_delta":
+                usage = getattr(event, "usage", None)
+                completion_tokens = int(
+                    _field(usage, "output_tokens", 0) or completion_tokens
+                )
+        tool_calls = [
+            ToolCall(
+                id=calls[i]["id"],
+                name=calls[i]["name"],
+                arguments=calls[i]["arguments"] or "{}",
+            )
+            for i in sorted(calls)
+        ]
+        log.debug(
+            "llm stream (anthropic): done in %.1fs (tool_calls=%d)",
+            time.monotonic() - started, len(tool_calls),
+        )
+        return LLMResponse(
+            content="".join(content) or None,
+            tool_calls=tool_calls,
+            usage=Usage(
+                prompt_tokens, completion_tokens, prompt_tokens + completion_tokens
+            ),
+        )

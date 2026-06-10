@@ -25,6 +25,10 @@ dependencies = [
 {% endif %}{% if spec.mcp.enabled %}    # MCP tools (mcp.enabled): the official Model Context Protocol SDK — a
     # protocol client, NOT an agent framework. Absent when MCP is disabled.
     "mcp>=1.16,<2",
+{% endif %}{% if anthropic_enabled %}    # Native Anthropic Messages (llms[].provider: anthropic): the official
+    # Anthropic SDK — an API client, NOT an agent framework. Absent when no
+    # profile opts in.
+    "anthropic>=0.92",
 {% endif %}]
 
 # Test dependencies, installed by `uv sync` (uv-native dependency group). They

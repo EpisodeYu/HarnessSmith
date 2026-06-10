@@ -201,6 +201,7 @@
         chat_session_new_opt: "— new session —",
         chat_untitled: "New chat", chat_sessions_empty: "No conversations yet",
         chat_stopped: "stopped — send again to continue",
+        chat_thinking: "thinking …",
         session_rename: "Rename", session_delete: "Delete", session_cancel: "Cancel",
         reask_edit: "Edit this question", reask_send: "Resend",
         reask_warn: "This discards the conversation after this point.", reask_confirm: "Regenerate",
@@ -287,6 +288,7 @@
         chat_session_new_opt: "— 新会话 —",
         chat_untitled: "新会话", chat_sessions_empty: "还没有会话",
         chat_stopped: "已停止 —— 再次发送即可继续",
+        chat_thinking: "思考中 …",
         session_rename: "重命名", session_delete: "删除", session_cancel: "取消",
         reask_edit: "编辑此问题", reask_send: "重新发送",
         reask_warn: "这会丢弃此处之后的对话。", reask_confirm: "重新生成",
@@ -887,16 +889,32 @@
         const meta = sessionsCache.find((s) => s.id === d.id);
         if (meta) { meta.title = currentTitle; renderSessionList(); }
       });
+      // The thinking channel: a reasoning model can sit silent before the first
+      // token — one dim "thinking …" line per turn shows it's alive. The line is
+      // removed once real output (or the final/stopped event) arrives.
+      let thinkingLine = null;
+      function clearThinking() {
+        if (thinkingLine) { thinkingLine.remove(); thinkingLine = null; }
+      }
+      es.addEventListener("thinking", () => {
+        if (!thinkingLine) {
+          thinkingLine = line(t("chat_thinking"), "text-xs text-slate-400 italic animate-pulse");
+          log.scrollTop = log.scrollHeight;
+        }
+      });
       es.addEventListener("token", (ev) => {
+        clearThinking();
         if (answer === null) answer = line("", "text-slate-900 whitespace-pre-wrap");
         answer.textContent += JSON.parse(ev.data).text;
         log.scrollTop = log.scrollHeight;
       });
       es.addEventListener("ask", (ev) => {
+        clearThinking();
         answer = null;  // a later text run starts a NEW line BELOW the card
         renderAskCard(JSON.parse(ev.data));  // inline card; answer POSTs to /respond
       });
       es.addEventListener("tool_call", (ev) => {
+        clearThinking();
         const d = JSON.parse(ev.data);
         answer = null;  // close the current text run so the next one lands below this
         if (d.name === "ask_question") return;  // shown as the ask card instead
@@ -909,16 +927,19 @@
         line("← " + d.name + ": " + d.result, "text-emerald-700");
       });
       es.addEventListener("error", (ev) => {
+        clearThinking();
         if (ev.data) line("error: " + ev.data, "text-red-600");
         endStream(es);
       });
       es.addEventListener("stopped", (ev) => {
+        clearThinking();
         const d = JSON.parse(ev.data);
         line(t("chat_stopped") + " · steps=" + d.steps, "text-xs text-amber-600");
         endStream(es);
         loadSessions();  // the partial turn is saved — refresh the picker
       });
       es.addEventListener("final", (ev) => {
+        clearThinking();
         const d = JSON.parse(ev.data);
         if (answer === null) line(d.answer, "text-slate-900 whitespace-pre-wrap");
         line("[" + d.mode + "] [" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=" + d.cost_usd, "text-xs text-slate-400");

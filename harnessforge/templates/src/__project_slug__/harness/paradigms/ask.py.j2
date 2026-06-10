@@ -52,6 +52,7 @@ def run(
     hooks: Hooks | None = None,
     trace: Trace | None = None,
     on_delta: Callable[[str], None] | None = None,
+    on_thinking: Callable[[str], None] | None = None,
     history: list[dict] | None = None,
     cancel: Callable[[], bool] | None = None,
     checkpoint: Callable[[list[dict]], None] | None = None,
@@ -113,8 +114,11 @@ def run(
         messages = fit_context(messages, context_cfg, summarizer=summarizer{% if spec.memory.enabled %}, config=config{% endif %})
         hooks.before_step(step, messages)
         try:
-            if on_delta is not None:
-                response = client.stream(messages, tool_schemas or None, on_delta=on_delta, cancel=cancel)
+            if on_delta is not None or on_thinking is not None:
+                response = client.stream(
+                    messages, tool_schemas or None,
+                    on_delta=on_delta, on_thinking=on_thinking, cancel=cancel,
+                )
             else:
                 response = client.complete(messages, tool_schemas or None, cancel=cancel)
         except Exception as exc:

@@ -996,3 +996,63 @@ def test_launch_script_web_runs_serve_open(tmp_path, spec):
     # the serve command grew an --open flag for the script to use
     cli = (out / "src" / "agent_harness" / "interfaces" / "cli.py").read_text(encoding="utf-8")
     assert "--open/--no-open" in cli and "_open_browser_when_ready" in cli
+
+
+# --- Slice 12: native Anthropic dual-spec (conditional generation) ----------
+
+
+def test_default_provider_has_zero_anthropic_footprint(tmp_path, spec):
+    """All-default specs (provider: openai) keep zero anthropic footprint."""
+    out = tmp_path / "noanthropic"
+    generate(spec, out, git_init=False)
+    pkg = out / "src" / "agent_harness"
+
+    assert not (pkg / "harness" / "llm_anthropic.py").exists()
+    assert not (out / "tests" / "test_llm_anthropic.py").exists()
+    assert "anthropic" not in (out / "pyproject.toml").read_text(encoding="utf-8").lower()
+    # config.yaml and the spec snapshot never mention the default provider
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "provider:" not in config_yaml and "anthropic" not in config_yaml
+    assert "provider" not in (out / "harness.spec.yaml").read_text(encoding="utf-8")
+
+
+def test_anthropic_profile_generates_client_dep_and_config(tmp_path, spec):
+    from harnessforge.spec import LLMProfile
+
+    spec.llms.append(
+        LLMProfile(
+            name="claude",
+            model="claude-opus-4-8",
+            provider="anthropic",
+            api_key_env="ANTHROPIC_API_KEY",
+        )
+    )
+    out = tmp_path / "anthropic"
+    generate(spec, out, git_init=False)
+    pkg = out / "src" / "agent_harness"
+
+    module = pkg / "harness" / "llm_anthropic.py"
+    assert module.is_file()
+    assert (out / "tests" / "test_llm_anthropic.py").is_file()
+    py_compile.compile(str(module), doraise=True)
+    py_compile.compile(str(out / "tests" / "test_llm_anthropic.py"), doraise=True)
+
+    pyproject = (out / "pyproject.toml").read_text(encoding="utf-8")
+    assert "anthropic" in pyproject
+    lowered = pyproject.lower()
+    for forbidden in ("langchain", "langgraph", "adk"):
+        assert forbidden not in lowered  # the SDK is an API client, not a framework
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "provider: anthropic" in config_yaml
+    assert (
+        "ANTHROPIC_API_KEY=" in (out / ".env.example").read_text(encoding="utf-8")
+    )  # env NAME only
+
+    # the snapshot records the opt-in and round-trips back into a valid spec
+    snapshot = (out / "harness.spec.yaml").read_text(encoding="utf-8")
+    assert "provider: anthropic" in snapshot
+    reloaded = load_spec(out / "harness.spec.yaml")
+    assert reloaded.llms[-1].provider == "anthropic"
+    # the default profile stays implicit (openai is never written out)
+    assert "provider: openai" not in snapshot

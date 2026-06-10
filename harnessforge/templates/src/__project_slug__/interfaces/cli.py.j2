@@ -352,11 +352,21 @@ def run(
     router = ClientRouter(config, mock=mock)
 
     printed = False
+    thinking_shown = False
 
     def _on_delta(text: str) -> None:
         nonlocal printed
         printed = True
         typer.echo(text, nl=False)
+
+    def _on_thinking(_text: str) -> None:
+        # One dim pulse per turn: reasoning models sit silent before the first
+        # token — show life instead of a dead wait. Goes to stderr so the answer
+        # on stdout stays pipe-clean. The thinking text itself is not printed.
+        nonlocal thinking_shown
+        if not thinking_shown:
+            thinking_shown = True
+            typer.secho("· thinking …", fg=typer.colors.BRIGHT_BLACK, err=True)
 
     def _checkpoint(body: list[dict]) -> None:
         # Write-ahead each completed step so a crash mid-turn still leaves a
@@ -378,6 +388,7 @@ def run(
                 role=role,
                 hooks=hooks,
                 on_delta=_on_delta if stream else None,
+                on_thinking=_on_thinking if stream else None,
                 history=history,
                 cancel=cancel,
                 checkpoint=_checkpoint,
@@ -478,11 +489,18 @@ def chat(
     asker = _cli_asker(mock)
     # One confirmer for the whole REPL so an "allow for session" sticks across turns.
     confirmer = _build_confirmer(config, config_path)
-    state = {"printed": False}
+    state = {"printed": False, "thinking_shown": False}
 
     def _on_delta(text: str) -> None:
         state["printed"] = True
         typer.echo(text, nl=False)
+
+    def _on_thinking(_text: str) -> None:
+        # One dim pulse per turn (see `run`): life sign during the silent
+        # reasoning phase; the thinking text itself is not printed.
+        if not state["thinking_shown"]:
+            state["thinking_shown"] = True
+            typer.secho("· thinking …", fg=typer.colors.BRIGHT_BLACK, err=True)
 
     def _checkpoint(body: list[dict]) -> None:
         # Write-ahead each completed step (crash safety): the chat session is
@@ -512,6 +530,7 @@ def chat(
                 continue
 {% if spec.skills.enabled %}            prompt = _expand_skill(config, prompt)
 {% endif %}            state["printed"] = False
+            state["thinking_shown"] = False
             try:
                 with _interruptible() as cancel, using_asker(asker), using_confirmer(confirmer):
                     result = run_loop(
@@ -522,6 +541,7 @@ def chat(
                         role=role,
                         hooks=hooks,
                         on_delta=_on_delta if stream else None,
+                        on_thinking=_on_thinking if stream else None,
                         history=history,
                         cancel=cancel,
                         checkpoint=_checkpoint,

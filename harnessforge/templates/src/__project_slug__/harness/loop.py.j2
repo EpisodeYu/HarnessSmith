@@ -39,6 +39,7 @@ def run(
     hooks: Hooks | None = None,
     trace: Trace | None = None,
     on_delta: Callable[[str], None] | None = None,
+    on_thinking: Callable[[str], None] | None = None,
     history: list[dict] | None = None,
     cancel: Callable[[], bool] | None = None,
     checkpoint: Callable[[list[dict]], None] | None = None,
@@ -48,6 +49,8 @@ def run(
     Raises ``ValueError`` if ``mode`` is not in ``config.paradigms.enabled`` or is
     not a registered paradigm. Every other argument is forwarded unchanged to the
     selected paradigm, so the call site is identical to the old single loop.
+    ``on_thinking`` receives reasoning-phase increments while streaming (a "the
+    model is thinking" pulse for the UI — see ``llm.LLMClient``).
     ``history`` is prior conversation messages (no system prompt) to resume from.
     ``cancel`` is a cooperative stop predicate (checked at each step boundary and
     forwarded to the LLM stream so Stop / Ctrl-C cut generation mid-token);
@@ -71,6 +74,7 @@ def run(
         hooks=hooks,
         trace=trace,
         on_delta=on_delta,
+        on_thinking=on_thinking,
         history=history,
         cancel=cancel,
         checkpoint=checkpoint,

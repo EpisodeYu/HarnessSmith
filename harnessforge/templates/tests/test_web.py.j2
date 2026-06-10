@@ -296,11 +296,13 @@ def test_chat_streams_tool_call_and_final_over_sse():
 def test_chat_streams_answer_tokens_by_default():
     body = _client().get("/chat", params={"message": "hi"}).text
     assert "event: token" in body  # token-level streaming is on by default
+    assert "event: thinking" in body  # the reasoning-phase pulse (mock emits one)
 
 
 def test_chat_stream_false_emits_no_tokens():
     body = _client().get("/chat", params={"message": "hi", "stream": "false"}).text
     assert "event: token" not in body
+    assert "event: thinking" not in body  # the thinking pulse is stream-only
     assert "event: final" in body  # still returns the answer, just not streamed
 
 

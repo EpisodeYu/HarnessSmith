@@ -79,6 +79,26 @@ def test_mock_runs_one_tool_call(tmp_path):
     assert "run_end" in kinds
 
 
+def test_thinking_channel_pulses_while_streaming(tmp_path):
+    """``on_thinking`` is the reasoning-phase channel, separate from ``on_delta``:
+    it fires while streaming and its text never enters the answer."""
+    config = _config(tmp_path)
+    deltas: list[str] = []
+    thinking: list[str] = []
+
+    result = run(
+        "hi",
+        client=MockLLM(),
+        config=config,
+        on_delta=deltas.append,
+        on_thinking=thinking.append,
+    )
+
+    assert thinking == ["(mock thinking)", "(mock thinking)"]  # one pulse per step
+    assert "".join(deltas) == result.answer
+    assert "(mock thinking)" not in (result.answer or "")
+
+
 def test_register_tool_and_hook_without_touching_core(tmp_path):
     registry = Registry()
 
