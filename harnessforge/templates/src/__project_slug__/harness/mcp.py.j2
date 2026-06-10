@@ -29,6 +29,7 @@ import time
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
 
+from .debuglog import log
 from .tools import HIGH, SAFE, Registry, Tool
 from .tools import registry as default_registry
 
@@ -427,6 +428,11 @@ class McpManager:
                     await self._connect(stack, server, errlog)
                 inbox: asyncio.Queue = asyncio.Queue()
                 self._server_inboxes[name] = inbox
+                log.debug(
+                    "mcp %s: connected in %.1fs (%d tools)",
+                    name, time.monotonic() - self._connect_started[name],
+                    len(self.discovered.get(name, [])),
+                )
                 settled.set()
                 while True:
                     req = await inbox.get()
@@ -441,6 +447,7 @@ class McpManager:
                         fut.set_exception(exc)
         except Exception as exc:  # connect failure/timeout: isolate, never fatal
             self.errors[name] = _connect_error(server, exc, self._net_env)
+            log.debug("mcp %s: connect FAILED: %s", name, self.errors[name])
             self._sessions.pop(name, None)
             self._server_inboxes.pop(name, None)
             if not settled.is_set():

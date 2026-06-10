@@ -13,6 +13,7 @@ import os
 import re
 import socket
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from .catalog import CatalogServer
+from .debuglog import log
 from .node_bootstrap import NODE_LTS_VERSION
 from .spec import HarnessSpec, load_spec
 
@@ -258,6 +260,11 @@ def generate(
     :class:`TargetExistsError`) so an existing repo is never clobbered.
     """
     target_dir = Path(target_dir)
+    log.debug(
+        "generate: slug=%s target=%s git_init=%s mcp_servers=%s confirm=%s",
+        spec.project_slug, target_dir, git_init,
+        [s.name for s in (mcp_servers or [])], confirm_default,
+    )
     if target_dir.exists() and any(target_dir.iterdir()):
         raise TargetExistsError(
             f"target directory {target_dir} already exists and is not empty; "
@@ -280,6 +287,8 @@ def generate(
         if predicate is not None and not predicate(spec):
             continue
         out_relpath = _render_relpath(relpath, spec.project_slug, launch_stem)
+        # Logged BEFORE rendering so a template error pinpoints the file.
+        log.debug("generate: render %s", relpath.as_posix())
         rendered = env.get_template(relpath.as_posix()).render(**context)
         out_path = target_dir / out_relpath
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -293,6 +302,10 @@ def generate(
     if git_init:
         result.git_initialized = _git_init(target_dir)
 
+    log.debug(
+        "generate: wrote %d files (git_initialized=%s)",
+        len(result.written_files), result.git_initialized,
+    )
     return result
 
 
@@ -346,16 +359,25 @@ def _clean_env() -> dict[str, str]:
 def _run_uv(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     """Run a ``uv`` subcommand in ``cwd``, raising ToolingError on failure."""
     cmd = ["uv", *args]
+    started = time.monotonic()
     try:
-        return subprocess.run(
+        proc = subprocess.run(
             cmd, cwd=cwd, check=True, capture_output=True, text=True, env=_clean_env()
         )
+        log.debug("uv: ok in %.1fs: %s", time.monotonic() - started, " ".join(cmd))
+        return proc
     except FileNotFoundError as exc:
+        log.debug("uv: not found on PATH")
         raise ToolingError(
             "`uv` was not found on PATH. Install it from https://docs.astral.sh/uv/ "
             "(or re-run with --no-verify to skip the runnability check)."
         ) from exc
     except subprocess.CalledProcessError as exc:
+        log.debug(
+            "uv: FAILED (rc=%s) in %.1fs: %s\n%s",
+            exc.returncode, time.monotonic() - started, " ".join(cmd),
+            f"{(exc.stdout or '').strip()}\n{(exc.stderr or '').strip()}".strip(),
+        )
         raise ToolingError(
             f"command failed ({' '.join(cmd)}):\n"
             f"{(exc.stdout or '').strip()}\n{(exc.stderr or '').strip()}".strip()
@@ -404,8 +426,10 @@ def prewarm_mcp_servers(servers: list[CatalogServer]) -> list[str]:
                 timeout=PREWARM_TIMEOUT_SECONDS,
             )
             warmed.append(server.name)
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.debug("prewarm: %s (%s) skipped: %s", server.name, pkg, type(exc).__name__)
             continue  # offline / unavailable — non-fatal (first run still works online)
+    log.debug("prewarm: warmed %s", warmed)
     return warmed
 
 
@@ -416,6 +440,7 @@ def smoke_check(repo: str | Path, project_slug: str) -> None:
     failure so the caller can surface an actionable message.
     """
     repo = Path(repo)
+    log.debug("smoke: start (repo=%s slug=%s)", repo, project_slug)
     try:
         _run_uv(["sync", "--quiet"], repo)
         _run_uv(["run", "--quiet", "python", "-c", f"import {project_slug}"], repo)
@@ -423,6 +448,7 @@ def smoke_check(repo: str | Path, project_slug: str) -> None:
         _run_uv(["run", "--quiet", "pytest", "-q"], repo)
     except ToolingError as exc:
         raise SmokeCheckError(str(exc)) from exc
+    log.debug("smoke: all green")
 
 
 @dataclass

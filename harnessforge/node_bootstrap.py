@@ -20,6 +20,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from .debuglog import log as debug_log
+
 NODE_LTS_VERSION = "v22.11.0"
 _NODE_OFFICIAL = "https://nodejs.org/dist"
 _NODE_MIRROR = "https://npmmirror.com/mirrors/node"  # domestic mirror (GFW)
@@ -98,6 +100,7 @@ def _extract(archive: Path, dest: Path, ext: str) -> None:
 
 
 def _emit(log, msg: str) -> None:
+    debug_log.debug("node_bootstrap: %s", msg)
     if log is not None:
         log.write(msg + "\n")
         log.flush()

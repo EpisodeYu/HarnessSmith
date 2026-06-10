@@ -173,6 +173,10 @@
         <label class="flex items-center gap-2 text-sm"><input id="cfg-obs-trace" type="checkbox" /> <span data-i18n="obs_trace">write JSONL trace</span></label>
         <label class="block text-sm"><span data-i18n="obs_tracedir">trace_dir</span>
           <input id="cfg-obs-tracedir" class="mt-1 block w-48 rounded-lg border px-3 py-2 font-mono" /></label>
+        <label class="flex items-center gap-2 text-sm"><input id="cfg-obs-debug" type="checkbox" /> <span data-i18n="obs_debug">write local debug log</span></label>
+        <label class="block text-sm"><span data-i18n="obs_debugdir">debug log dir</span>
+          <input id="cfg-obs-debugdir" class="mt-1 block w-48 rounded-lg border px-3 py-2 font-mono" /></label>
+        <p class="text-xs text-slate-500" data-i18n="obs_debug_note">Local only — never uploaded; records step/tool names, counts and durations, never message content or tool arguments.</p>
       </div>
 
       <div class="flex items-center gap-3 border-t pt-3">
@@ -273,6 +277,8 @@
         mem_chars: "chars",
         mem_extend_hint: "Add your own with @register_memory in harness/memory.py — it appears in the backend list once imported. See AGENTS.md.",
 {% endif %}        obs_trace: "write JSONL trace", obs_tracedir: "trace_dir",
+        obs_debug: "write local debug log", obs_debugdir: "debug log dir",
+        obs_debug_note: "Local only — never uploaded; records step/tool names, counts and durations, never message content or tool arguments.",
       },
       zh: {
         nav_chat: "对话", nav_config: "配置", chat_placeholder: "问点什么…",
@@ -357,6 +363,8 @@
         mem_chars: "字符",
         mem_extend_hint: "可自定义:在 harness/memory.py 用 @register_memory 注册后端,import 后即出现在后端列表(见 AGENTS.md)。",
 {% endif %}        obs_trace: "写 JSONL trace", obs_tracedir: "trace 目录",
+        obs_debug: "写本地 debug 日志", obs_debugdir: "debug 日志目录",
+        obs_debug_note: "仅存本机、绝不上传;只记录步骤/工具名、计数与耗时,不记录消息内容与工具参数。",
       },
     };
     let lang = localStorage.getItem("hf_lang") || "{{ language }}";
@@ -1529,6 +1537,8 @@
       const obs = cfg.observability || {};
       $("cfg-obs-trace").checked = !!obs.trace;
       $("cfg-obs-tracedir").value = obs.trace_dir || "traces";
+      $("cfg-obs-debug").checked = !!obs.debug;
+      $("cfg-obs-debugdir").value = obs.debug_dir || "logs";
     }
 
     function collectConfig() {
@@ -1596,7 +1606,10 @@
           .filter((c) => c.checked).map((c) => c.dataset.name),
         default: $("cfg-par-default").value.trim(),
       };
-      patch.observability = { trace: $("cfg-obs-trace").checked, trace_dir: $("cfg-obs-tracedir").value.trim() || "traces" };
+      patch.observability = {
+        trace: $("cfg-obs-trace").checked, trace_dir: $("cfg-obs-tracedir").value.trim() || "traces",
+        debug: $("cfg-obs-debug").checked, debug_dir: $("cfg-obs-debugdir").value.trim() || "logs",
+      };
 {% if spec.memory.enabled %}      // Memory config knobs (the note body is saved separately). Spread the
       // current memory config first so unsurfaced fields (path) round-trip.
       patch.memory = Object.assign({}, cfg.memory || {}, {

@@ -40,6 +40,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import ValidationError
 
 from ..catalog import CatalogError, load_catalog, resolve_servers
+from ..debuglog import log as debug_log, setup as setup_debug_log
 from ..generator import TargetExistsError, generate
 from ..node_bootstrap import ensure_portable_node, node_on_path
 from ..presets import available_presets
@@ -381,6 +382,7 @@ def _new_job(needs_node: bool = False) -> dict:
 
 
 def _set_step(job: dict, key: str, status: str) -> None:
+    debug_log.debug("wizard: launch job %s step %s -> %s", job["id"], key, status)
     for step in job["steps"]:
         if step["key"] == key:
             step["status"] = status
@@ -435,10 +437,13 @@ def _run_launch(job: dict, target_dir: Path, project_slug: str, *, host: str = "
             _set_step(job, "serve", "error")
             job["error"] = "the product web did not become reachable in time"
     except Exception as exc:  # never leave a step stuck on "running"
+        debug_log.debug("wizard: launch job %s crashed", job["id"], exc_info=True)
         for step in job["steps"]:
             if step["status"] == "running":
                 step["status"] = "error"
         job["error"] = str(exc)
+    if job.get("error"):
+        debug_log.debug("wizard: launch job %s error: %s", job["id"], job["error"])
 
 
 def _spawn_launch(job: dict, target_dir: Path, project_slug: str) -> None:
@@ -470,6 +475,7 @@ def _resolve_prefill(spec: HarnessSpec, names: list[str]):
 
 
 def create_app() -> FastAPI:
+    setup_debug_log()  # covered by the CLI path too; direct uvicorn use gets it here
     app = FastAPI(title="HarnessForge wizard")
 
     @app.get("/", response_class=HTMLResponse)
@@ -521,14 +527,21 @@ def create_app() -> FastAPI:
         try:
             spec = HarnessSpec.model_validate(_with_defaults(dict(body.get("spec") or {})))
         except ValidationError as exc:
+            debug_log.debug("wizard: /generate spec invalid: %s", exc)
             return JSONResponse({"ok": False, "errors": _format_errors(exc)}, status_code=400)
         try:
             servers = _resolve_prefill(spec, body.get("mcp_servers") or [])
         except CatalogError as exc:
+            debug_log.debug("wizard: /generate mcp prefill invalid: %s", exc)
             return JSONResponse(
                 {"ok": False, "errors": [{"loc": "mcp_servers", "msg": str(exc)}]},
                 status_code=400,
             )
+        debug_log.debug(
+            "wizard: /generate slug=%s target=%s launch=%s servers=%s",
+            spec.project_slug, target_dir, bool(body.get("launch")),
+            [s.name for s in servers],
+        )
         try:
             result = generate(
                 spec,

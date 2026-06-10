@@ -95,6 +95,12 @@ paradigms:
 observability:
   trace: {{ observability.trace | tojson }}
   trace_dir: {{ observability.trace_dir }}
+  # Local debug log (<debug_dir>/debug.log): step/tool/LLM lifecycle, for
+  # troubleshooting. Local-only — never uploaded, never committed (gitignored);
+  # records names/counts/durations/error types, NEVER message content or tool
+  # arguments. Also toggleable live from the web /config Observability page.
+  debug: false
+  debug_dir: logs
 
 # Conversation persistence (resume). When enabled (default), each run saves the
 # message body to <dir>/<id>.json so `run --continue` / `run --resume <id>` /

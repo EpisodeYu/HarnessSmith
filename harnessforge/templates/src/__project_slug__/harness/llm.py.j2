@@ -9,11 +9,13 @@ implement (vLLM, together, groq, ...).
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .config import Config, LLMProfileConfig, resolve_env
+from .debuglog import log
 
 
 @dataclass
@@ -112,7 +114,20 @@ class OpenAIClient:
         # is accepted for a uniform signature and takes effect at the next step
         # boundary (the loop re-checks it). Web chat defaults to streaming, where
         # cancellation IS mid-token (see ``stream``).
-        resp = self._client.chat.completions.create(**self._request_kwargs(messages, tools))
+        log.debug(
+            "llm complete: model=%s messages=%d tools=%d",
+            self.model, len(messages), len(tools or []),
+        )
+        started = time.monotonic()
+        try:
+            resp = self._client.chat.completions.create(**self._request_kwargs(messages, tools))
+        except Exception as exc:
+            log.debug(
+                "llm complete FAILED after %.1fs: %s: %s",
+                time.monotonic() - started, type(exc).__name__, exc,
+            )
+            raise
+        log.debug("llm complete: response in %.1fs", time.monotonic() - started)
         message = resp.choices[0].message
         calls = [
             ToolCall(id=tc.id, name=tc.function.name, arguments=tc.function.arguments)
@@ -150,10 +165,22 @@ class OpenAIClient:
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}
 
+        log.debug(
+            "llm stream: model=%s messages=%d tools=%d",
+            self.model, len(messages), len(tools or []),
+        )
+        started = time.monotonic()
         content: list[str] = []
         calls: dict[int, dict[str, str]] = {}
         usage = Usage()
-        stream_obj = self._client.chat.completions.create(**kwargs)
+        try:
+            stream_obj = self._client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            log.debug(
+                "llm stream FAILED after %.1fs: %s: %s",
+                time.monotonic() - started, type(exc).__name__, exc,
+            )
+            raise
         for chunk in stream_obj:
             if cancel is not None and cancel():
                 stream_obj.close()  # stop the model: close the HTTP stream and bail
@@ -183,6 +210,10 @@ class OpenAIClient:
             ToolCall(id=calls[i]["id"], name=calls[i]["name"], arguments=calls[i]["arguments"])
             for i in sorted(calls)
         ]
+        log.debug(
+            "llm stream: done in %.1fs (tool_calls=%d)",
+            time.monotonic() - started, len(tool_calls),
+        )
         return LLMResponse(content="".join(content) or None, tool_calls=tool_calls, usage=usage)
 
 

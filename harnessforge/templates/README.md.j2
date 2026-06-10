@@ -203,6 +203,7 @@ src/{{ project_slug }}/
     tools.py                # tool registry + built-in safe tools
     hooks.py                # lifecycle hooks (extend without touching the loop)
     trace.py                # JSONL trace + token/cost accounting
+    debuglog.py             # opt-in local debug log (names/counts only — never content)
     session.py              # save/resume a conversation (.harness/sessions/<id>.json)
     prompts.py              # system-prompt assembly
     mock.py                 # offline MockLLM for tests / --mock

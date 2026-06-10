@@ -36,7 +36,8 @@ from ..harness.config import (
 from ..harness.budget import BUDGET_CONDITIONS
 from ..harness.context import CONDITIONS, STRATEGIES
 {% if spec.memory.enabled %}from ..harness.memory import BACKENDS as _MEMORY_BACKENDS
-{% endif %}from ..harness.extensions import import_extensions, load_hooks
+{% endif %}from ..harness.debuglog import log, setup as setup_debug_log
+from ..harness.extensions import import_extensions, load_hooks
 from ..harness.hooks import Hooks
 from ..harness.interaction import (
     AskResponse,
@@ -406,6 +407,7 @@ def _chat_events(
             # synthetic final answer.
             q.put(("stopped" if interrupted else "final", payload))
         except Exception as exc:  # never leave the stream hanging
+            log.debug("web chat run %s FAILED", run_id, exc_info=True)
             q.put(("error", {"where": "run", "error": str(exc)}))
         finally:
             q.put(None)
@@ -845,6 +847,11 @@ def create_app(
             app.state.config = Config.model_validate(current)
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        # Re-arm the local debug log so the Observability toggle takes effect
+        # immediately (no restart). Section NAMES only — values never logged here.
+        obs = app.state.config.observability
+        setup_debug_log(obs.debug, obs.debug_dir)
+        log.debug("web /config: updated sections %s", sorted(k for k in _EDITABLE_FIELDS if k in patch))
 {% if spec.mcp.enabled %}        # Keep the registry's MCP tools in lock-step with the new allowlist so what
         # the model is offered always matches the Tools page: a newly-enabled MCP
         # tool gets registered, a disabled one dropped. No reconnect needed — just

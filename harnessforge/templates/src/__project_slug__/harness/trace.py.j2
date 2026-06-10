@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import LLMProfileConfig
+from .debuglog import trace_event
 from .llm import Usage
 
 
@@ -62,6 +63,9 @@ class Trace:
         if self._fh is not None:
             self._fh.write(json.dumps(record, ensure_ascii=False) + "\n")
             self._fh.flush()
+        # Mirror into the opt-in debug log (content fields stripped there) even
+        # when the JSONL trace itself is disabled.
+        trace_event(kind, {"run_id": self.run_id, **data})
 
     def add_usage(self, usage: Usage, profile: LLMProfileConfig) -> float:
         """Accumulate token counts and cost; return this response's cost."""

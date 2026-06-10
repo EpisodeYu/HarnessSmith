@@ -15,6 +15,7 @@ from pathlib import Path
 import typer
 
 from ..harness.config import LLMProfileConfig, load_config, resolve_env
+from ..harness.debuglog import log
 from ..harness.interaction import (
     AskRequest,
     AskResponse,
@@ -317,6 +318,10 @@ def run(
     from ..harness import session as session_store
 
     config = load_config(config_path)
+    log.debug(
+        "cli run: mode=%s role=%s mock=%s stream=%s continue=%s resume=%s",
+        mode or config.paradigms.default, role, mock, stream, continue_session, resume,
+    )
     _validate_role(role, config)
     hooks = _prepare_runtime(config)
     # Fail fast with an actionable hint instead of a provider traceback when the
@@ -381,6 +386,8 @@ def run(
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
     except Exception as exc:  # LLM / network / tool failure — show it, not a traceback
+        # The traceback lands in the debug log (when enabled) for diagnosis.
+        log.debug("cli run: FAILED", exc_info=True)
         if printed:
             typer.echo("")  # close any half-streamed line
         typer.secho(f"run failed: {exc}", fg=typer.colors.RED, err=True)
@@ -445,6 +452,7 @@ def chat(
     from ..harness import session as session_store
 
     config = load_config(config_path)
+    log.debug("cli chat: role=%s mock=%s", role, mock)
     _validate_role(role, config)
     hooks = _prepare_runtime(config)
     if not mock:
@@ -921,6 +929,7 @@ def serve(
 
     bind_port = port if port else _find_free_port(8000, host)
     config = load_config(config_path)
+    log.debug("cli serve: %s:%s mock=%s", host, bind_port, mock)
     # Import extensions, surface config diagnostics, and fail-fast on hard errors
     # before binding the port. create_app re-imports (idempotent) and mounts hooks.
     _prepare_runtime(config)

@@ -453,6 +453,33 @@ def test_config_post_updates_runtime_config():
     assert client.get("/config").json()["prompts"]["system"] == "NEW SYSTEM PROMPT"
 
 
+def test_config_post_toggles_debug_log_live(tmp_path):
+    """Flipping observability.debug on the /config page re-arms the local debug
+    log immediately (no restart) — and turning it off detaches it again."""
+    from logging.handlers import RotatingFileHandler
+
+    from {{ project_slug }}.harness import debuglog
+
+    client = _client()
+    log_dir = tmp_path / "logs"
+    try:
+        resp = client.post(
+            "/config",
+            json={"observability": {"trace": False, "debug": True, "debug_dir": str(log_dir)}},
+        )
+        assert resp.status_code == 200
+        assert (log_dir / debuglog.LOG_FILE_NAME).is_file()
+    finally:
+        resp = client.post(
+            "/config",
+            json={"observability": {"trace": False, "debug": False}},
+        )
+    assert resp.status_code == 200
+    assert not any(
+        isinstance(h, RotatingFileHandler) for h in debuglog.log.handlers
+    )
+
+
 def test_config_post_rejects_invalid_value():
     resp = _client().post(
         "/config", json={"budget": {"conditions": {"max_steps": -1}}}

@@ -393,6 +393,14 @@ It then appears in the web Config → Budget panel automatically (via
 Every run writes a JSONL trace under the configured `trace_dir` with per-step
 token counts and cost. Inspect a run with `cat traces/run-*.jsonl`.
 
+For troubleshooting there is also an opt-in **local debug log**
+(`observability.debug: true`, written to `<debug_dir>/debug.log`, toggleable
+live from the web /config Observability page). It records the loop / tool /
+LLM / config lifecycle as names, counts, durations and error types — **never**
+message content, tool arguments, tool results, or secrets — so it is safe to
+share when reporting a problem. It stays on this machine (`logs/` is
+gitignored); nothing is ever uploaded. See `harness/debuglog.py`.
+
 ## Tune the context window
 
 `harness/context.py` keeps the history within budget before each LLM call. It

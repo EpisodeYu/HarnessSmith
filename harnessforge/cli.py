@@ -19,6 +19,7 @@ import typer
 from pydantic import ValidationError
 
 from .catalog import CatalogError, available_servers, resolve_servers
+from .debuglog import log, setup as setup_debug_log
 from .generator import (
     SmokeCheckError,
     TargetExistsError,
@@ -46,6 +47,8 @@ app = typer.Typer(
 @app.callback()
 def _main() -> None:
     """HarnessForge — forge your own agent harness (no agent-framework lock-in)."""
+    setup_debug_log()
+    log.debug("invoked: %s", sys.argv[1:])
 
 
 @app.command()
@@ -106,8 +109,17 @@ def new(
         PresetNotFoundError,
         CatalogError,
     ) as exc:
+        log.debug("new: invalid spec (%s: %s)", type(exc).__name__, exc)
         typer.secho(f"Invalid spec: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
+    log.debug(
+        "new: spec loaded (slug=%s preset=%s web=%s mcp=%s skills=%s memory=%s "
+        "paradigms=%s mcp_prefill=%s)",
+        harness_spec.project_slug, preset, harness_spec.interfaces.web,
+        harness_spec.mcp.enabled, harness_spec.skills.enabled,
+        harness_spec.memory.enabled, harness_spec.paradigms,
+        [s.name for s in mcp_servers],
+    )
 
     if mcp_servers and not harness_spec.mcp.enabled:
         typer.secho(
@@ -123,6 +135,7 @@ def new(
             harness_spec, target_dir, git_init=git_init, mcp_servers=mcp_servers
         )
     except TargetExistsError as exc:
+        log.debug("new: target exists, refused (%s)", exc)
         typer.secho(f"Skipped (no overwrite): {exc}", fg=typer.colors.YELLOW, err=True)
         raise typer.Exit(code=1)
 
@@ -145,13 +158,16 @@ def new(
             typer.echo("Smoke-testing the generated repo ...")
             smoke_check(result.target_dir, result.project_slug)
     except SmokeCheckError as exc:
+        log.debug("new: smoke check FAILED:\n%s", exc)
         typer.secho(f"Smoke check failed:\n{exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=3)
     except ToolingError as exc:
+        log.debug("new: tooling error:\n%s", exc)
         typer.secho(f"Tooling error:\n{exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=3)
 
     if verify:
+        log.debug("new: verified runnable at %s", result.target_dir)
         typer.secho("Verified runnable.", fg=typer.colors.GREEN)
     typer.echo(
         f"\nNext:\n  cd {result.target_dir}\n"
@@ -239,6 +255,7 @@ def wizard(
         )
         raise typer.Exit(code=1) from exc
     bind_port = port if port else _find_free_port(8000, host=host)
+    log.debug("wizard: serving on %s:%s (open_browser=%s)", host, bind_port, open_browser)
     typer.secho(
         f"HarnessForge wizard → http://{host}:{bind_port}  (open this; Ctrl-C to stop)",
         fg=typer.colors.GREEN,
@@ -253,6 +270,10 @@ def wizard(
 def doctor() -> None:
     """Pre-flight: check that uv is installed and the package index is reachable."""
     report = run_doctor()
+    log.debug(
+        "doctor: uv_ok=%s (%s) network_ok=%s notes=%s",
+        report.uv_ok, report.uv_version, report.network_ok, report.notes,
+    )
     uv_line = f"uv: {report.uv_version}" if report.uv_ok else "uv: NOT FOUND"
     net_line = "network: ok" if report.network_ok else "network: unreachable"
     color = typer.colors.GREEN if report.healthy else typer.colors.YELLOW

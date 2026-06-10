@@ -23,6 +23,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .config import ContextConfig
+from .debuglog import log
 from .llm import LLMClient
 
 if TYPE_CHECKING:
@@ -234,4 +235,8 @@ def fit(
             from .memory import compact_rescue
 
             compact_rescue(config, dropped)
-{% endif %}    return strategy(messages, ctx, summarizer=summarizer)
+{% endif %}    fitted = strategy(messages, ctx, summarizer=summarizer)
+    log.debug(
+        "context: %s compacted %d -> %d messages", ctx.strategy, len(messages), len(fitted)
+    )
+    return fitted

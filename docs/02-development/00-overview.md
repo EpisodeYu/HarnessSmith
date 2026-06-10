@@ -128,7 +128,7 @@ HarnessForge/                      # 生成器本体(本仓库)
 ├── config.yaml + harness.spec.yaml + .env.example + LICENSE  (+RULES.md when prompts.rules_files seeds it, Slice 6B)
 ├── uv.lock + .python-version + requirements.txt
 ├── Dockerfile + .dockerignore + .devcontainer/
-├── src/<pkg>/harness/             # config/loop/llm/tools/trace/prompts/hooks (+context L2, +mcp.py Slice 4 opt-in, +paradigms/ Slice 5 始终, +skills.py Slice 6 opt-in, +rag L3)
+├── src/<pkg>/harness/             # config/loop/llm/tools/trace/debuglog/prompts/hooks (+context L2, +mcp.py Slice 4 opt-in, +paradigms/ Slice 5 始终, +skills.py Slice 6 opt-in, +rag L3)。debuglog = 可选本地 debug 日志(2026-06-10,observability.debug 运行期开关,只记名称/计数/耗时,绝不记内容/参数,绝不上传;详见 01 §5)
 ├── src/<pkg>/interfaces/          # cli.py (run, +--mode Slice 5) (+web.py SSE chat + /config + 范式下拉,Slice 3/5,opt-in)
 └── tests/ + README.md + AGENTS.md
 ```

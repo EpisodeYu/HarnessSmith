@@ -21,6 +21,8 @@ import time
 import uuid
 from pathlib import Path
 
+from .debuglog import log
+
 
 def new_id() -> str:
     """A short, unique session id (same shape as a trace run id)."""
@@ -99,6 +101,10 @@ def load(session_id: str, sessions_dir: str) -> list[dict]:
     """
     data = _read(session_id, sessions_dir)
     messages = data.get("messages", [])
+    log.debug(
+        "session %s: load (%d messages, status=%s)",
+        session_id, len(messages), data.get("status", "complete"),
+    )
     if data.get("status", "complete") != "complete":
         return repair_orphan_tool_results(messages)
     repaired = repair_orphan_tool_results(messages)
@@ -153,6 +159,9 @@ def save(
     _atomic_write(
         _path(session_id, sessions_dir),
         json.dumps(record, ensure_ascii=False, indent=2),
+    )
+    log.debug(
+        "session %s: saved (%d messages, status=%s)", session_id, len(messages), status
     )
 
 

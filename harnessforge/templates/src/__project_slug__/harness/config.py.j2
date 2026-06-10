@@ -107,6 +107,12 @@ class ObservabilityConfig(BaseModel):
 
     trace: bool = True
     trace_dir: str = "traces"
+    # Opt-in local debug log (see ``harness/debuglog.py``): step/tool/LLM/config
+    # lifecycle for troubleshooting. Local-only — never uploaded, and it records
+    # names/counts/durations/error types, never message content or tool
+    # arguments. Toggleable at runtime from the web /config Observability page.
+    debug: bool = False
+    debug_dir: str = "logs"
 
 
 class SessionsConfig(BaseModel):
@@ -465,14 +471,30 @@ def set_env_value(name: str, value: str, env_path: str | Path = DEFAULT_ENV_FILE
 
 
 def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Config:
-    """Load and validate ``config.yaml``."""
+    """Load and validate ``config.yaml``.
+
+    Also the single choke point that arms the opt-in local debug log from
+    ``observability.debug`` — every entry point (CLI, web, your own scripts
+    using ``load_config``) gets it without extra wiring.
+    """
+    from .debuglog import log, setup as setup_debug_log
+
     path = Path(path)
     if not path.exists():
         raise ConfigError(f"config file not found: {path}")
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
         raise ConfigError("config.yaml must be a YAML mapping at the top level")
-    return Config.model_validate(data)
+    config = Config.model_validate(data)
+    obs = config.observability
+    setup_debug_log(obs.debug, obs.debug_dir)
+    log.debug(
+        "config loaded from %s (profiles=%s roles=%s paradigms=%s tools=%d)",
+        path, [p.name for p in config.llms], config.roles,
+        config.paradigms.enabled, len(config.tools),
+    )
+{% if spec.mcp.enabled %}    log.debug("mcp servers configured: %s", [s.name for s in config.mcp.servers])
+{% endif %}    return config
 
 
 _CONFIRM_KEY_RE = re.compile(r"^confirm\s*:")

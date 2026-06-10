@@ -1,0 +1,72 @@
+"""Local-only debug log, opt-in via ``observability.debug`` (default off).
+
+When enabled, harness modules append one-line lifecycle records to
+``<debug_dir>/debug.log`` (rotating at ~1 MB) so a misbehaving run can be
+diagnosed after the fact: which step / tool / server / config phase broke, how
+long it took, and what error class came back.
+
+Privacy contract (hard rule, also enforced by tests): lines carry **names,
+counts, durations, and error types — never message content, tool arguments,
+tool results, or secret values**. The file stays on this machine: nothing is
+ever uploaded, and ``logs/`` is gitignored. (The JSONL trace is the richer,
+content-bearing record; this log is the safe-to-share one.)
+"""
+
+from __future__ import annotations
+
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+log = logging.getLogger("{{ project_slug }}")
+log.addHandler(logging.NullHandler())  # silent unless setup() attaches a file
+
+LOG_FILE_NAME = "debug.log"
+_FORMAT = "%(asctime)s %(levelname)s %(message)s"
+
+# Trace-event fields that may carry user/model content. ``trace_event`` drops
+# them so the debug log never sees arguments, results, or message text.
+_PRIVATE_FIELDS = frozenset({"arguments", "result", "content", "answer", "messages"})
+
+
+def setup(enabled: bool, directory: str = "logs") -> Path | None:
+    """(Re)configure the debug log; return its path when enabled.
+
+    Idempotent and runtime-toggleable: any existing file handler is replaced
+    (or just removed when ``enabled`` is false), so a ``/config`` save flips
+    logging on or off without a restart. Best-effort — an unwritable directory
+    degrades to no log rather than breaking the run.
+    """
+    for handler in list(log.handlers):
+        if isinstance(handler, RotatingFileHandler):
+            log.removeHandler(handler)
+            handler.close()
+    if not enabled:
+        log.setLevel(logging.NOTSET)  # off = zero overhead (isEnabledFor is False)
+        return None
+    try:
+        target = Path(directory)
+        target.mkdir(parents=True, exist_ok=True)
+        path = target / LOG_FILE_NAME
+        handler = RotatingFileHandler(
+            path, maxBytes=1_000_000, backupCount=2, encoding="utf-8"
+        )
+    except OSError:
+        return None
+    handler.setFormatter(logging.Formatter(_FORMAT))
+    log.addHandler(handler)
+    log.setLevel(logging.DEBUG)
+    return path
+
+
+def trace_event(kind: str, data: dict) -> None:
+    """Mirror one trace event into the debug log, minus its private fields.
+
+    Called by ``Trace.event`` regardless of whether the JSONL trace itself is
+    enabled, so the debug log covers the loop lifecycle (run_start, llm_response,
+    tool_call/-result names, run_end, errors) on its own.
+    """
+    if not log.isEnabledFor(logging.DEBUG):
+        return
+    public = {k: v for k, v in data.items() if k not in _PRIVATE_FIELDS}
+    log.debug("trace %s %s", kind, public)

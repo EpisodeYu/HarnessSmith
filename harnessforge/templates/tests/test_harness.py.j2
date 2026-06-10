@@ -292,6 +292,64 @@ def test_trace_records_tokens_and_cost(tmp_path):
     assert end["total_tokens"] == result.trace.total_tokens
 
 
+def test_debug_log_records_tool_names_but_never_arguments(tmp_path):
+    from {{ project_slug }}.harness import debuglog
+
+    log_dir = tmp_path / "logs"
+    config = _config(
+        tmp_path,
+        observability={"trace": False, "debug": True, "debug_dir": str(log_dir)},
+    )
+    debuglog.setup(config.observability.debug, config.observability.debug_dir)
+    try:
+        script = [ScriptedCall("calculator", {"expression": "1+ARGUMENT_MARKER"}), "FINAL_ANSWER_MARKER"]
+        run("USER_INPUT_MARKER", client=MockLLM(script=script), config=config)
+    finally:
+        debuglog.setup(False)  # detach so other tests don't share the handler
+    text = (log_dir / debuglog.LOG_FILE_NAME).read_text(encoding="utf-8")
+    # The lifecycle is there (tool/llm/run events, by name) ...
+    assert "calculator" in text
+    assert "trace run_start" in text and "trace run_end" in text
+    assert "trace tool_call" in text and "trace tool_result" in text
+    # ... but tool arguments / results / message content never are.
+    assert "ARGUMENT_MARKER" not in text
+    assert "USER_INPUT_MARKER" not in text
+    assert "FINAL_ANSWER_MARKER" not in text
+
+
+def test_debug_log_off_means_no_log_file(tmp_path):
+    from {{ project_slug }}.harness import debuglog
+
+    log_dir = tmp_path / "logs"
+    config = _config(
+        tmp_path,
+        observability={"trace": False, "debug": False, "debug_dir": str(log_dir)},
+    )
+    assert debuglog.setup(config.observability.debug, config.observability.debug_dir) is None
+    run("hi", client=MockLLM(), config=config)
+    assert not log_dir.exists()
+
+
+def test_debug_log_setup_is_idempotent_and_toggleable(tmp_path):
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    from {{ project_slug }}.harness import debuglog
+
+    try:
+        assert debuglog.setup(True, str(tmp_path / "a")) is not None
+        assert debuglog.setup(True, str(tmp_path / "b")) is not None  # re-points, no dup
+        handlers = [
+            h for h in debuglog.log.handlers if isinstance(h, RotatingFileHandler)
+        ]
+        assert len(handlers) == 1
+    finally:
+        debuglog.setup(False)
+    assert not any(
+        isinstance(h, RotatingFileHandler) for h in debuglog.log.handlers
+    )
+
+
 def test_profile_for_routes_roles():
     config = _multi_profile_config()
     assert config.profile_for("generation").name == "primary"

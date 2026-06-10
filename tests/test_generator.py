@@ -189,6 +189,18 @@ def test_config_yaml_renders_from_spec_without_secrets(tmp_path, preset_spec):
     assert "sk-" not in config  # never a real secret value
 
 
+def test_debug_log_is_generated_off_by_default_and_gitignored(tmp_path, preset_spec):
+    """The opt-in local debug log ships in every product: module present,
+    config knob rendered (default off), and its dir never reaches git."""
+    out = tmp_path / "ca"
+    generate(preset_spec, out, git_init=False)
+    assert (out / "src" / "coding_assistant" / "harness" / "debuglog.py").is_file()
+    config = yaml.safe_load((out / "config.yaml").read_text(encoding="utf-8"))
+    assert config["observability"]["debug"] is False
+    assert config["observability"]["debug_dir"] == "logs"
+    assert "logs/" in (out / ".gitignore").read_text(encoding="utf-8")
+
+
 def test_rules_injection_mechanism_is_always_generated(tmp_path, spec):
     """Even with no rule files seeded, prompts.py carries the always-apply rules
     mechanism and config.yaml exposes the (empty) runtime knob — but no unused
