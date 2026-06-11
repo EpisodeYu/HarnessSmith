@@ -43,6 +43,17 @@ class LLMResponse:
     content: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
+    # The model's reasoning / chain-of-thought when a thinking model produced one
+    # (OpenAI-compatible ``reasoning_content``; native Anthropic thinking block).
+    # It is NOT answer text — UIs show it via the thinking channel, never in
+    # ``content``. It is carried so it can be echoed back on later turns: reasoning
+    # endpoints (MiMo / DeepSeek thinking / Qwen / Kimi) REQUIRE the reasoning that
+    # accompanied a tool call to be present in history or they reject the next
+    # request. ``reasoning_signature`` is the opaque token native Anthropic returns
+    # on a thinking block (it must round-trip unchanged with the block); empty for
+    # OpenAI-compatible endpoints. Both stay None when the endpoint emits nothing.
+    reasoning: str | None = None
+    reasoning_signature: str | None = None
 
 
 def _usage_from_openai(raw: Any) -> Usage:
@@ -134,9 +145,40 @@ class OpenAIClient:
         self.seed = profile.seed
         self.stop = profile.stop
         self.extra_body = profile.extra_body
+        self.reasoning_history_field = profile.reasoning_history_field
+
+    def _wire_messages(self, messages: list[dict]) -> list[dict]:
+        """Map the neutral reasoning carrier on assistant messages to this
+        endpoint's wire shape, leaving everything else untouched.
+
+        The loop stores a tool-calling assistant's reasoning under the neutral
+        ``reasoning_content`` key (plus an Anthropic-only ``reasoning_signature``).
+        Here we re-emit that text under ``reasoning_history_field`` — default
+        ``reasoning_content`` (what MiMo / DeepSeek thinking / Qwen / Kimi want;
+        some vLLM builds want ``reasoning``), or ``""`` to disable passback for an
+        endpoint that rejects the field — and drop the Anthropic-only signature so
+        it never leaks to an OpenAI-compatible endpoint. Only what the endpoint
+        itself produced is echoed, so plain (non-reasoning) models never see it.
+        """
+        field_name = self.reasoning_history_field
+        out: list[dict] = []
+        for message in messages:
+            if message.get("role") == "assistant" and (
+                "reasoning_content" in message or "reasoning_signature" in message
+            ):
+                reasoning = message.get("reasoning_content")
+                message = {
+                    k: v
+                    for k, v in message.items()
+                    if k not in ("reasoning_content", "reasoning_signature")
+                }
+                if field_name and reasoning:
+                    message[field_name] = reasoning
+            out.append(message)
+        return out
 
     def _request_kwargs(self, messages: list[dict], tools: list[dict] | None) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {"model": self.model, "messages": messages}
+        kwargs: dict[str, Any] = {"model": self.model, "messages": self._wire_messages(messages)}
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
@@ -197,7 +239,12 @@ class OpenAIClient:
             for tc in (message.tool_calls or [])
         ]
         usage = _usage_from_openai(resp.usage)
-        return LLMResponse(content=message.content, tool_calls=calls, usage=usage)
+        # Thinking models put their chain-of-thought on a non-standard field
+        # (``reasoning_content`` on MiMo / DeepSeek / Qwen / Kimi; ``reasoning`` on
+        # some vLLM builds). Captured so it can be echoed back when this turn calls
+        # tools — those endpoints 400 on the next request if it is missing.
+        reasoning = getattr(message, "reasoning_content", None) or getattr(message, "reasoning", None)
+        return LLMResponse(content=message.content, tool_calls=calls, usage=usage, reasoning=reasoning)
 
     def stream(
         self,
@@ -233,6 +280,7 @@ class OpenAIClient:
         )
         started = time.monotonic()
         content: list[str] = []
+        reasoning_parts: list[str] = []
         calls: dict[int, dict[str, str]] = {}
         usage = Usage()
         try:
@@ -254,10 +302,14 @@ class OpenAIClient:
             delta = chunk.choices[0].delta
             # Non-standard but common on OpenAI-compatible reasoning endpoints
             # (DeepSeek-R1 style): the model's reasoning streams here before any
-            # content. Not part of the SDK's typed delta, hence getattr.
-            reasoning = getattr(delta, "reasoning_content", None)
-            if reasoning and on_thinking is not None:
-                on_thinking(reasoning)
+            # content. Not part of the SDK's typed delta, hence getattr. It is also
+            # accumulated (not just surfaced live) so a tool-calling turn can echo
+            # it back next request — required by MiMo / DeepSeek / Qwen / Kimi.
+            reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
+            if reasoning:
+                reasoning_parts.append(reasoning)
+                if on_thinking is not None:
+                    on_thinking(reasoning)
             if delta.content:
                 content.append(delta.content)
                 if on_delta is not None:
@@ -278,7 +330,12 @@ class OpenAIClient:
             "llm stream: done in %.1fs (tool_calls=%d)",
             time.monotonic() - started, len(tool_calls),
         )
-        return LLMResponse(content="".join(content) or None, tool_calls=tool_calls, usage=usage)
+        return LLMResponse(
+            content="".join(content) or None,
+            tool_calls=tool_calls,
+            usage=usage,
+            reasoning="".join(reasoning_parts) or None,
+        )
 
 
 def _client_for_profile(profile: LLMProfileConfig) -> LLMClient:

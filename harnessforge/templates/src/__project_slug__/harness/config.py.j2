@@ -72,6 +72,16 @@ class LLMProfileConfig(BaseModel):
     # Merged verbatim into the request (OpenAI SDK ``extra_body`` / Anthropic
     # ``extra_body``). Values only — NEVER put secrets here (keys belong in .env).
     extra_body: dict[str, Any] = Field(default_factory=dict)
+    # How a thinking model's reasoning is echoed back in history. Reasoning
+    # endpoints that return reasoning alongside tool calls (MiMo / DeepSeek
+    # thinking / Qwen / Kimi) REQUIRE that reasoning present on later turns or they
+    # 400 — so the loop re-attaches it to tool-calling assistant messages under
+    # this field name. Default ``reasoning_content`` fits those endpoints; some
+    # vLLM builds want ``reasoning``. Set "" to disable passback for an endpoint
+    # that rejects the field. An endpoint that emits no reasoning never gets it
+    # back, so this is a no-op for plain (non-thinking) models. (Native Anthropic
+    # profiles ignore this — they round-trip thinking blocks with their signature.)
+    reasoning_history_field: str = "reasoning_content"
     # Cost accounting (price per 1,000,000 tokens, in your own currency — fill in
     # your local price). These drive the per-LLM spend shown on the Budget page and
     # the ``cost_limit`` stop; left 0 cost stays 0. ``cached_input_cost_per_million``

@@ -429,6 +429,7 @@ def test_openai_client_stream_closes_on_cancel():
     client.top_p = client.frequency_penalty = client.presence_penalty = None
     client.seed = client.stop = None
     client.extra_body = {}
+    client.reasoning_history_field = "reasoning_content"
     client._client = types.SimpleNamespace(
         chat=types.SimpleNamespace(
             completions=types.SimpleNamespace(create=lambda **kw: _Stream())
@@ -542,6 +543,162 @@ def test_compute_cost_discounts_cached_tokens_only_when_priced():
     assert compute_cost(usage, priced) == 6.4
     unpriced = LLMProfileConfig(name="d", model="m", input_cost_per_million=10.0)
     assert compute_cost(usage, unpriced) == 10.0  # no spurious discount
+
+
+# --- reasoning_content passback (thinking models + tool calls) --------------
+
+
+def _tool_call_msg(reasoning=None, signature=None):
+    """A tool-calling assistant history dict, optionally carrying reasoning."""
+    msg = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "calc", "arguments": "{}"}}
+        ],
+    }
+    if reasoning is not None:
+        msg["reasoning_content"] = reasoning
+    if signature is not None:
+        msg["reasoning_signature"] = signature
+    return msg
+
+
+def test_openai_complete_captures_reasoning_content():
+    """A thinking model's reasoning is read off the response (``reasoning_content``,
+    falling back to ``reasoning``) so it can be echoed back later."""
+    import types
+
+    from {{ project_slug }}.harness.config import LLMProfileConfig
+    from {{ project_slug }}.harness.llm import OpenAIClient
+
+    client = OpenAIClient(LLMProfileConfig(name="d", model="m"))
+
+    def _resp(**msgkw):
+        msg = types.SimpleNamespace(
+            content=msgkw.get("content"),
+            tool_calls=msgkw.get("tool_calls"),
+            reasoning_content=msgkw.get("reasoning_content"),
+            reasoning=msgkw.get("reasoning"),
+        )
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)], usage=None)
+
+    client._client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=lambda **kw: _resp(reasoning_content="cot"))
+        )
+    )
+    assert client.complete([], None).reasoning == "cot"
+
+    client._client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=lambda **kw: _resp(content="hi", reasoning="alt"))
+        )
+    )
+    assert client.complete([], None).reasoning == "alt"  # falls back to `reasoning`
+
+
+def test_assistant_message_carries_reasoning_only_with_tool_calls():
+    """The reasoning carrier rides a tool-calling assistant message (where reasoning
+    endpoints require it); a plain answer message carries nothing extra."""
+    from {{ project_slug }}.harness.paradigms import assistant_message
+
+    with_tools = assistant_message(
+        LLMResponse(
+            tool_calls=[ToolCall(id="c1", name="calc", arguments="{}")],
+            reasoning="why",
+            reasoning_signature="sig",
+        )
+    )
+    assert with_tools["reasoning_content"] == "why"
+    assert with_tools["reasoning_signature"] == "sig"
+
+    final = assistant_message(LLMResponse(content="the answer", reasoning="why"))
+    assert "reasoning_content" not in final  # no tool calls -> nothing to preserve
+
+
+def test_openai_wire_messages_reemits_renames_strips_and_can_disable():
+    """The wire layer maps the neutral carrier to the endpoint's shape: re-emit
+    under the configured field (default ``reasoning_content``, or ``reasoning``),
+    drop the Anthropic-only signature, or disable passback with ``""``."""
+    from {{ project_slug }}.harness.config import LLMProfileConfig
+    from {{ project_slug }}.harness.llm import OpenAIClient
+
+    hist = [{"role": "user", "content": "q"}, _tool_call_msg(reasoning="why", signature="sig")]
+
+    default = OpenAIClient(LLMProfileConfig(name="d", model="m"))._wire_messages(hist)[1]
+    assert default["reasoning_content"] == "why"
+    assert "reasoning_signature" not in default  # Anthropic-only, never sent to OpenAI
+
+    renamed = OpenAIClient(
+        LLMProfileConfig(name="d", model="m", reasoning_history_field="reasoning")
+    )._wire_messages(hist)[1]
+    assert renamed["reasoning"] == "why" and "reasoning_content" not in renamed
+
+    off = OpenAIClient(
+        LLMProfileConfig(name="d", model="m", reasoning_history_field="")
+    )._wire_messages(hist)[1]
+    assert not any(k.startswith("reasoning") for k in off)
+
+    assert hist[1]["reasoning_signature"] == "sig"  # the original history is not mutated
+
+
+def test_reasoning_round_trips_through_agent_loop(tmp_path):
+    """End to end: a tool-calling step's reasoning lands in the saved history (so a
+    follow-up turn echoes it back); the final answer message carries none."""
+    config = _config(tmp_path)
+    result = run(
+        "hi",
+        client=MockLLM(script=[ScriptedCall("get_current_time", {}), "done"]),
+        config=config,
+    )
+    tool_asst = [m for m in result.messages if m.get("role") == "assistant" and m.get("tool_calls")]
+    assert tool_asst and tool_asst[0]["reasoning_content"] == "(mock reasoning)"
+    finals = [m for m in result.messages if m.get("role") == "assistant" and not m.get("tool_calls")]
+    assert finals and all("reasoning_content" not in m for m in finals)
+
+
+def test_compaction_keeps_reasoning_on_surviving_tool_call():
+    """Compaction keeps surviving messages whole, so a kept tool-calling assistant
+    keeps its reasoning carrier (stripping it would 400 the reasoning endpoint)."""
+    messages = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "old"},
+        {"role": "assistant", "content": "old answer"},
+        {"role": "user", "content": "now"},
+        _tool_call_msg(reasoning="why"),
+        {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+    ]
+
+    truncated = fit(messages, ContextConfig(strategy="truncate", keep_last_turns=1), force=True)
+    kept = [m for m in truncated if m.get("role") == "assistant" and m.get("tool_calls")]
+    assert kept and kept[0]["reasoning_content"] == "why"  # survived truncate
+
+    summarized = fit(
+        messages,
+        ContextConfig(strategy="summarize", keep_last_turns=1),
+        summarizer=MockLLM(script=["summary"]),
+        force=True,
+    )
+    kept = [m for m in summarized if m.get("role") == "assistant" and m.get("tool_calls")]
+    assert kept and kept[0]["reasoning_content"] == "why"  # survived summarize
+
+
+def test_session_round_trips_reasoning_content(tmp_path):
+    """Persistence stores message dicts verbatim, so reasoning survives save/resume."""
+    from {{ project_slug }}.harness import session as session_store
+
+    sdir = str(tmp_path / "s")
+    sid = session_store.new_id()
+    body = [
+        {"role": "user", "content": "q"},
+        _tool_call_msg(reasoning="why"),
+        {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+    ]
+    session_store.save(sid, body, sdir)
+    loaded = session_store.load(sid, sdir)
+    asst = [m for m in loaded if m.get("role") == "assistant"][0]
+    assert asst["reasoning_content"] == "why"
 
 
 # --- LLM call robustness (overflow rescue / fallback / SDK reliability) -----

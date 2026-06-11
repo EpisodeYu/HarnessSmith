@@ -12,6 +12,7 @@ from {{ project_slug }}.harness.llm_anthropic import (
     AnthropicClient,
     from_anthropic_content,
     from_anthropic_usage,
+    reasoning_from_content,
     supports_sampling,
     to_anthropic_messages,
     to_anthropic_tools,
@@ -58,6 +59,55 @@ def test_assistant_tool_calls_become_tool_use_blocks():
     }
 
 
+def test_preserved_thinking_block_leads_tool_calling_assistant():
+    """With extended thinking, a tool-calling assistant turn must start with the
+    original signature-bearing thinking block — so the neutral reasoning carrier
+    (reasoning_content + reasoning_signature) maps to a leading ``thinking`` block."""
+    _, messages = to_anthropic_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "let me check",
+                "reasoning_content": "the user wants X",
+                "reasoning_signature": "sig-abc",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": "{}"},
+                    }
+                ],
+            }
+        ]
+    )
+    blocks = messages[0]["content"]
+    assert blocks[0] == {
+        "type": "thinking",
+        "thinking": "the user wants X",
+        "signature": "sig-abc",
+    }
+    assert blocks[1] == {"type": "text", "text": "let me check"}
+    assert blocks[2]["type"] == "tool_use"
+
+
+def test_reasoning_carrier_without_signature_is_skipped():
+    """A bare thinking block (no signature) would itself 400, so a reasoning carrier
+    lacking a signature is dropped rather than emitted."""
+    _, messages = to_anthropic_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "thoughts but no signature",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "e", "arguments": "{}"}}
+                ],
+            }
+        ]
+    )
+    assert [b["type"] for b in messages[0]["content"]] == ["tool_use"]
+
+
 def test_consecutive_tool_results_fold_into_one_user_turn():
     _, messages = to_anthropic_messages(
         [
@@ -100,6 +150,19 @@ def test_response_blocks_map_back_to_text_and_tool_calls():
     assert len(calls) == 1
     assert calls[0].id == "tu_1" and calls[0].name == "echo"
     assert json.loads(calls[0].arguments) == {"text": "hi"}
+
+
+def test_reasoning_from_content_extracts_thinking_text_and_signature():
+    """A thinking block's text + signature are pulled out so they can round-trip;
+    content with no thinking block yields (None, None)."""
+    reasoning, signature = reasoning_from_content(
+        [
+            {"type": "thinking", "thinking": "step by step", "signature": "sig-xyz"},
+            {"type": "text", "text": "answer"},
+        ]
+    )
+    assert reasoning == "step by step" and signature == "sig-xyz"
+    assert reasoning_from_content([{"type": "text", "text": "no thinking"}]) == (None, None)
 
 
 def test_usage_maps_input_output_to_prompt_completion_total():
@@ -211,6 +274,7 @@ def _fake_events():
         ns(type="message_start", message=ns(usage=ns(input_tokens=7))),
         ns(type="content_block_start", index=0, content_block=ns(type="thinking")),
         ns(type="content_block_delta", index=0, delta=ns(type="thinking_delta", thinking="hmm")),
+        ns(type="content_block_delta", index=0, delta=ns(type="signature_delta", signature="sig-abc")),
         ns(type="content_block_start", index=1, content_block=ns(type="text")),
         ns(type="content_block_delta", index=1, delta=ns(type="text_delta", text="Hel")),
         ns(type="content_block_delta", index=1, delta=ns(type="text_delta", text="lo")),
@@ -244,6 +308,10 @@ def test_stream_assembles_text_tools_usage_and_routes_channels():
     assert response.tool_calls[0].name == "echo"
     assert json.loads(response.tool_calls[0].arguments) == {"text": "hi"}
     assert (response.usage.prompt_tokens, response.usage.completion_tokens) == (7, 5)
+    # The thinking text + signature are captured so a tool-calling turn can echo
+    # the block back unchanged on the next request.
+    assert response.reasoning == "hmm"
+    assert response.reasoning_signature == "sig-abc"
 
 
 def test_stream_cancel_closes_the_stream():

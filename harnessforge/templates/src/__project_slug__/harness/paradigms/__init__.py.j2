@@ -79,8 +79,18 @@ def get_paradigm(name: str) -> Paradigm:
 
 
 def assistant_message(response: LLMResponse) -> dict:
-    """The OpenAI-shaped assistant message carrying any requested tool calls."""
-    return {
+    """The OpenAI-shaped assistant message carrying any requested tool calls.
+
+    When a thinking model reasoned before calling tools, that reasoning rides
+    back under the neutral ``reasoning_content`` key (plus ``reasoning_signature``
+    for native Anthropic, whose thinking blocks must round-trip unchanged). This
+    matters ONLY on tool-calling turns: reasoning endpoints (MiMo / DeepSeek
+    thinking / Qwen / Kimi) reject the next request if the reasoning that
+    accompanied a tool call is missing from history. Each client maps this carrier
+    to its own wire shape and strips it for endpoints that didn't produce it, so a
+    plain model's history is byte-for-byte unchanged.
+    """
+    message = {
         "role": "assistant",
         "content": response.content or "",
         "tool_calls": [
@@ -92,6 +102,11 @@ def assistant_message(response: LLMResponse) -> dict:
             for call in response.tool_calls
         ],
     }
+    if response.tool_calls and response.reasoning:
+        message["reasoning_content"] = response.reasoning
+        if response.reasoning_signature:
+            message["reasoning_signature"] = response.reasoning_signature
+    return message
 
 
 def _truncate_result(result: str, max_chars: int | None) -> str:

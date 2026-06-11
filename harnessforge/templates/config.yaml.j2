@@ -34,6 +34,12 @@ llms:
     # Escape hatch for NON-standard provider params (e.g. Qwen/DashScope top_k,
     # enable_thinking). Merged verbatim into the request. Values only — no secrets.
     # extra_body: {top_k: 40}
+    # Thinking models that return `reasoning_content` with a tool call (MiMo /
+    # DeepSeek thinking / Qwen / Kimi) REQUIRE it echoed back on later turns or they
+    # 400 — the loop does this automatically under this field name. Default fits
+    # those; some vLLM builds want `reasoning`; "" disables passback. No-op for
+    # models that emit no reasoning. (Native Anthropic profiles ignore this.)
+    # reasoning_history_field: reasoning_content
     # The model's total context window (input+output budget). Set it to drive
     # accurate `window_pct` compaction (see context: below). Left unset, the harness
     # skips percentage-based pre-compaction and leans on overflow auto-rescue — so a

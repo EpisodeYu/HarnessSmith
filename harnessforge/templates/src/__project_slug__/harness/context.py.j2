@@ -90,6 +90,9 @@ def estimate_tokens(messages: list[dict]) -> int:
     total = 0
     for message in messages:
         total += len(str(message.get("content") or "")) // 4 + 4
+        # A tool-calling assistant's reasoning rides in history (reasoning models
+        # require it echoed back) and counts toward the prompt size.
+        total += len(str(message.get("reasoning_content") or "")) // 4
         for call in message.get("tool_calls") or []:
             args = call.get("function", {}).get("arguments") or ""
             total += len(str(args)) // 4
@@ -127,7 +130,13 @@ def _cond_max_turns(messages: list[dict], threshold: float) -> bool:
 
 
 def _split_keep_last_turns(messages: list[dict], keep_last_turns: int):
-    """Split into (system, dropped, kept) where kept starts at a user turn."""
+    """Split into (system, dropped, kept) where kept starts at a user turn.
+
+    Kept messages are returned as the same dict objects (never rebuilt), so a
+    tool-calling assistant keeps its ``reasoning_content`` carrier — reasoning
+    endpoints 400 if that is stripped from a surviving tool-call message. Any new
+    strategy must preserve that key when it keeps a tool-calling assistant.
+    """
     system = [m for m in messages if m.get("role") == "system"]
     rest = [m for m in messages if m.get("role") != "system"]
 

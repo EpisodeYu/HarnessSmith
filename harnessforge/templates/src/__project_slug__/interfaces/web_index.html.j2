@@ -1885,6 +1885,17 @@
           cached_input_cost_per_million: 0, cost_limit: 0,
         });
       });
+      // reasoning_history_field is a yaml-only expert knob (no card input): carry a
+      // non-default value over by name so a Save from any tab never silently
+      // reverts it (the whole llms list is replaced on POST /config).
+      const origByName = {};
+      (cfg.llms || []).forEach((p) => { if (p && p.name) origByName[p.name] = p; });
+      patch.llms.forEach((p) => {
+        const orig = origByName[p.name];
+        if (orig && orig.reasoning_history_field && orig.reasoning_history_field !== "reasoning_content") {
+          p.reasoning_history_field = orig.reasoning_history_field;
+        }
+      });
       // Collect from the live checkboxes: a previously-listed tool always
       // round-trips (unchecking just disables it); a discovered tool is written to
       // the allowlist only when ticked, so config isn't bloated with every tool a

@@ -181,6 +181,16 @@ API** instead (`harness/llm_anthropic.py`) — first-class adaptive thinking
 Everything else (roles, routing, budget, trace) is identical; the loop never
 knows which spec a profile speaks.
 
+**Reasoning passback (thinking models + tools).** When a thinking model reasons
+before calling a tool, that reasoning is captured and echoed back on later turns
+attached to the tool-calling assistant message — reasoning endpoints (MiMo /
+DeepSeek thinking / Qwen / Kimi) **400 the next request if it is missing**, and
+native Anthropic requires the signed thinking block to round-trip. It is handled
+automatically and only for tool-calling turns, so a model that emits no reasoning
+is unaffected. The OpenAI-compatible field defaults to `reasoning_content`; set a
+profile's `reasoning_history_field` to `reasoning` for vLLM builds that want that
+name, or to `""` to disable passback for an endpoint that rejects the field.
+
 ## Project rules (always-apply)
 
 Steer the agent on **every** turn with markdown rule files — the open
