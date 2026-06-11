@@ -40,9 +40,16 @@
         <form id="chat-form" class="flex items-center gap-2 border-t border-slate-200 bg-white px-6 py-3">
           <input id="msg" class="flex-1 rounded-lg border px-3 py-2" data-i18n-ph="chat_placeholder" placeholder="Ask something…" autocomplete="off" />
           <select id="mode" class="rounded-lg border px-2 py-2 text-sm" data-i18n-title="chat_mode_title" title="Loop paradigm"></select>
-          <label class="flex items-center gap-1 text-sm text-slate-500">
-            <input id="stream" type="checkbox" checked /> <span data-i18n="chat_stream">stream</span>
-          </label>
+          <div class="relative shrink-0">
+            <button id="ctx-meter" type="button" class="inline-flex h-9 w-9 items-center justify-center" data-i18n-title="ctx_meter_title" title="Context usage">
+              <svg viewBox="0 0 36 36" class="h-8 w-8 -rotate-90">
+                <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e2e8f0" stroke-width="3.5"></circle>
+                <circle id="ctx-meter-arc" cx="18" cy="18" r="15.5" fill="none" stroke="#94a3b8" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="97.39" stroke-dashoffset="97.39"></circle>
+              </svg>
+              <span id="ctx-meter-label" class="absolute inset-0 flex items-center justify-center text-[9px] font-medium text-slate-600"></span>
+            </button>
+            <div id="ctx-meter-pop" class="absolute bottom-full right-0 mb-2 hidden whitespace-nowrap rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs text-white shadow-lg"></div>
+          </div>
           <button id="chat-send" class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="chat_send">Send</button>
         </form>
       </section>
@@ -194,7 +201,10 @@
     const I18N = {
       en: {
         nav_chat: "Chat", nav_config: "Config", chat_placeholder: "Ask something…",
-        chat_send: "Send", chat_stop: "Stop", chat_stream: "stream", chat_mode_title: "Loop paradigm",
+        chat_send: "Send", chat_stop: "Stop", chat_mode_title: "Loop paradigm",
+        ctx_meter_title: "Context usage — click for details",
+        ctx_meter_empty: "Context usage (no data yet)",
+        ctx_meter_nowin: "set context_window to show %",
         chat_new: "New chat", chat_sessions_title: "Saved sessions (resume)",
         chat_session_new_opt: "— new session —",
         chat_untitled: "New chat", chat_sessions_empty: "No conversations yet",
@@ -293,7 +303,10 @@
       },
       zh: {
         nav_chat: "对话", nav_config: "配置", chat_placeholder: "问点什么…",
-        chat_send: "发送", chat_stop: "停止", chat_stream: "流式", chat_mode_title: "循环范式",
+        chat_send: "发送", chat_stop: "停止", chat_mode_title: "循环范式",
+        ctx_meter_title: "上下文占用 —— 点击查看详情",
+        ctx_meter_empty: "上下文占用(暂无数据)",
+        ctx_meter_nowin: "设置 context_window 后显示占比",
         chat_new: "新会话", chat_sessions_title: "已保存会话(续聊)",
         chat_session_new_opt: "— 新会话 —",
         chat_untitled: "新会话", chat_sessions_empty: "还没有会话",
@@ -337,7 +350,7 @@
         set_key_ph: "在 .env 设置该 key 的值(如已存在则覆盖)", set_key_btn: "写入 .env",
         set_url_ph: "在 .env 设置该 url 的值(如已存在则覆盖)", set_url_btn: "写入 .env",
         key_saved: "已写入 .env", key_need_name: "请先填环境变量名",
-        ctx_strategy_label: "策略", ctx_keep_label: "保留最近轮数", ctx_combine_label: "触发组合方式 (or/and)",
+        ctx_strategy_label: "策略", ctx_keep_label: "完整保留最近轮数", ctx_combine_label: "触发组合方式 (or/and)",
         ctx_combine_hint: "or = 任一触发条件命中即压缩;and = 全部命中才压缩(仅在 2 个及以上触发条件时才有区别)。",
         ctx_toolcap_label: "单工具结果上限(字符)",
         ctx_toolcap_hint: "单条工具结果进入历史前的字符上限(0=不限)。window_pct 按 profile 的 context_window 的比例(0–1)触发压缩。",
@@ -606,8 +619,43 @@
     let currentRunId = null;     // id of the in-flight run (for POST /chat/{id}/stop)
     let activeES = null;         // the open EventSource while streaming
     let streaming = false;       // true while a turn is in flight (Send -> Stop)
+    // Context meter: the generation profile's window (from the run event; null when
+    // unset) and the last step's real prompt_tokens drive the ring next to Send.
+    let ctxMeterWindow = null;
 
     function chatIsEmpty() { return !currentSession && log.children.length === 0; }
+
+    // Compact token count: 940 -> "940", 12500 -> "12K", 1000000 -> "1M".
+    function fmtTok(n) {
+      n = Math.max(0, Math.round(Number(n) || 0));
+      if (n < 1000) return String(n);
+      if (n < 1e6) return +(n / 1000).toFixed(n < 10000 ? 1 : 0) + "K";
+      return +(n / 1e6).toFixed(1) + "M";
+    }
+
+    // Paint the ring + center label from used prompt_tokens vs the window. With a
+    // window we show a filled fraction + "NN%" (amber past 85%, red past 95% — the
+    // window_pct compaction zone); without one, a flat ring + the raw token count.
+    const CTX_C = 97.39;  // 2·π·15.5 (the SVG circle's circumference)
+    function updateCtxMeter(used) {
+      const arc = $("ctx-meter-arc"), label = $("ctx-meter-label"), pop = $("ctx-meter-pop");
+      if (!arc) return;
+      used = Math.max(0, Math.round(Number(used) || 0));
+      if (ctxMeterWindow && ctxMeterWindow > 0) {
+        const ratio = used / ctxMeterWindow;
+        const clamped = Math.min(1, Math.max(0, ratio));
+        arc.style.strokeDashoffset = (CTX_C * (1 - clamped)).toFixed(2);
+        arc.style.stroke = ratio >= 0.95 ? "#dc2626" : ratio >= 0.85 ? "#d97706" : "#0f172a";
+        label.textContent = used ? Math.round(ratio * 100) + "%" : "";
+        pop.textContent = fmtTok(used) + "/" + fmtTok(ctxMeterWindow) + " token (" + Math.round(ratio * 100) + "%)";
+      } else {
+        arc.style.strokeDashoffset = CTX_C.toFixed(2);  // flat ring: no window to fill against
+        arc.style.stroke = "#94a3b8";
+        label.textContent = used ? fmtTok(used) : "";
+        pop.textContent = used ? (fmtTok(used) + " token · " + t("ctx_meter_nowin")) : t("ctx_meter_empty");
+      }
+    }
+    function resetCtxMeter() { updateCtxMeter(0); }
 
     function updateMainTitle() {
       const inConfig = !$("view-config").classList.contains("hidden");
@@ -840,6 +888,7 @@
         const meta = sessionsCache.find((s) => s.id === id);
         currentTitle = meta ? (meta.title || "") : "";
         renderHistory(data.messages);
+        resetCtxMeter();  // a loaded session's context size is unknown until its next turn
         show("chat");
         renderSessionList();
         updateMainTitle();
@@ -851,10 +900,21 @@
     $("chat-new").addEventListener("click", () => {
       if (chatIsEmpty()) { show("chat"); return; }
       currentSession = null; currentTitle = ""; log.innerHTML = "";
+      resetCtxMeter();
       show("chat");
       renderSessionList();
       updateMainTitle();
     });
+
+    // Context meter: click toggles a popover with the exact used/window figures;
+    // a click anywhere else dismisses it.
+    $("ctx-meter").addEventListener("click", (e) => {
+      e.stopPropagation();
+      $("ctx-meter-pop").classList.toggle("hidden");
+    });
+    document.addEventListener("click", () => $("ctx-meter-pop").classList.add("hidden"));
+    resetCtxMeter();
+
     loadSessions();
     updateMainTitle();
 
@@ -886,7 +946,7 @@
     function startChat(message, opts) {
       opts = opts || {};
       const mode = (opts.mode != null) ? opts.mode : $("mode").value;
-      const stream = $("stream").checked;
+      const stream = true;  // always stream (the toggle was replaced by the context meter)
       line("you" + (mode ? " (" + mode + ")" : "") + ": " + message, "font-semibold");
 
       let answer = null;
@@ -899,7 +959,13 @@
       setStreaming(true);
 
       es.addEventListener("run", (ev) => {
-        currentRunId = JSON.parse(ev.data).run_id;  // enable Stop for this run
+        const d = JSON.parse(ev.data);
+        currentRunId = d.run_id;  // enable Stop for this run
+        ctxMeterWindow = d.context_window || null;  // generation profile's window (may be unset)
+      });
+      es.addEventListener("step", (ev) => {
+        const d = JSON.parse(ev.data);  // real prompt_tokens of the context just sent
+        if (d.prompt_tokens != null) updateCtxMeter(d.prompt_tokens);
       });
       es.addEventListener("session", (ev) => {
         currentSession = JSON.parse(ev.data).id;  // remember it so the next turn resumes
@@ -1194,6 +1260,9 @@
       const trig = ctx.triggers || {};
       const names = reg.conditions.slice();
       Object.keys(trig).forEach((n) => { if (!names.includes(n)) names.push(n); });
+      // window_pct is the usage-driven default — list it first among the conditions.
+      const wp = names.indexOf("window_pct");
+      if (wp > 0) { names.splice(wp, 1); names.unshift("window_pct"); }
       const box = $("cfg-ctx-triggers"); box.innerHTML = "";
       names.forEach((name) => {
         const ok = reg.conditions.includes(name);

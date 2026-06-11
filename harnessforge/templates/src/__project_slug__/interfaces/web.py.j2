@@ -82,7 +82,16 @@ class _StreamHooks(Hooks):
 
     def after_step(self, step: int, response: LLMResponse) -> None:
         self._inner.after_step(step, response)
-        self._q.put(("step", {"step": step, "tools": [c.name for c in response.tool_calls]}))
+        # prompt_tokens is the real size of the context just sent — the web UI's
+        # context meter reads it (against the profile's context_window) live.
+        self._q.put((
+            "step",
+            {
+                "step": step,
+                "tools": [c.name for c in response.tool_calls],
+                "prompt_tokens": response.usage.prompt_tokens,
+            },
+        ))
 
     def before_tool(self, call: ToolCall) -> None:
         self._inner.before_tool(call)
@@ -419,8 +428,14 @@ def _chat_events(
             q.put(None)
 
     # Announce the run id (for /stop) + session id (to resume) up front, then the
-    # title (if we made one) so the sidebar updates immediately.
-    yield _sse("run", {"run_id": run_id})
+    # title (if we made one) so the sidebar updates immediately. context_window is
+    # the generation profile's declared window (None if unset) so the chat's context
+    # meter can show usage as a fraction of it.
+    try:
+        gen_window = config.profile_for("generation").context_window
+    except Exception:
+        gen_window = None
+    yield _sse("run", {"run_id": run_id, "context_window": gen_window})
     if session_id is not None:
         yield _sse("session", {"id": session_id})
     if new_title:
