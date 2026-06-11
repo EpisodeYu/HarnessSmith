@@ -70,16 +70,17 @@
           <select id="cfg-ctx-strategy" class="mt-1 block rounded-lg border px-3 py-2"></select></label>
         <label class="block text-sm"><span data-i18n="ctx_keep_label">keep_last_turns</span>
           <input id="cfg-ctx-keep" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
-        <label class="block text-sm"><span data-i18n="ctx_combine_label">combine</span>
-          <select id="cfg-ctx-combine" class="mt-1 block rounded-lg border px-3 py-2">
-            <option value="or">or</option><option value="and">and</option>
-          </select></label>
         <label class="block text-sm"><span data-i18n="ctx_toolcap_label">max_tool_result_chars</span>
           <input id="cfg-ctx-toolcap" type="number" min="0" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
           <span class="block text-xs text-gray-500" data-i18n="ctx_toolcap_hint">Cap one tool result (0 = off).</span></label>
         <div>
           <p class="text-sm" data-i18n="ctx_triggers_label">Triggers (threshold; blank = off)</p>
           <div id="cfg-ctx-triggers" class="mt-1 space-y-2"></div>
+          <label class="mt-2 block text-sm"><span data-i18n="ctx_combine_label">Trigger combine (or/and)</span>
+            <select id="cfg-ctx-combine" class="mt-1 block rounded-lg border px-3 py-2">
+              <option value="or">or</option><option value="and">and</option>
+            </select>
+            <span class="block text-xs text-gray-500" data-i18n="ctx_combine_hint">or = any trigger fires; and = all must fire (only matters with 2+ triggers).</span></label>
         </div>
         <p class="text-xs text-gray-500" data-i18n="ctx_extend_hint">Define your own with @register_strategy / @register_condition in harness/context.py — they appear here once imported. See AGENTS.md.</p>
       </div>
@@ -237,7 +238,8 @@
         set_key_ph: "set this key's value in .env (overwrites if it exists)", set_key_btn: "Save to .env",
         set_url_ph: "set this URL's value in .env (overwrites if it exists)", set_url_btn: "Save to .env",
         key_saved: "saved to .env", key_need_name: "set the env-var name first",
-        ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_combine_label: "combine (or/and)",
+        ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_combine_label: "Trigger combine (or/and)",
+        ctx_combine_hint: "or = any trigger fires; and = all must fire (only matters with 2+ triggers).",
         ctx_toolcap_label: "max_tool_result_chars",
         ctx_toolcap_hint: "Cap one tool result before it enters history (0 = off). window_pct compacts at a fraction (0–1) of a profile's context_window.",
         ctx_triggers_label: "Triggers (condition → threshold; blank = off)",
@@ -335,7 +337,8 @@
         set_key_ph: "在 .env 设置该 key 的值(如已存在则覆盖)", set_key_btn: "写入 .env",
         set_url_ph: "在 .env 设置该 url 的值(如已存在则覆盖)", set_url_btn: "写入 .env",
         key_saved: "已写入 .env", key_need_name: "请先填环境变量名",
-        ctx_strategy_label: "策略", ctx_keep_label: "保留最近轮数", ctx_combine_label: "组合方式 (or/and)",
+        ctx_strategy_label: "策略", ctx_keep_label: "保留最近轮数", ctx_combine_label: "触发组合方式 (or/and)",
+        ctx_combine_hint: "or = 任一触发条件命中即压缩;and = 全部命中才压缩(仅在 2 个及以上触发条件时才有区别)。",
         ctx_toolcap_label: "单工具结果上限(字符)",
         ctx_toolcap_hint: "单条工具结果进入历史前的字符上限(0=不限)。window_pct 按 profile 的 context_window 的比例(0–1)触发压缩。",
         ctx_triggers_label: "触发条件(条件 → 阈值;留空=不启用)",
