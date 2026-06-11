@@ -60,6 +60,8 @@ loop 拿到的永远是中性的 `LLMResponse`(`content` / `tool_calls` / `usage
 
 ## 4. 设计：spec 开关式可选模块（默认零痕迹）
 
+> **口径变更（2026-06-11，人定向，取代本节"门控/零痕迹"描述）**：双协议改为**内建**——每个产物都渲染 `harness/llm_anthropic.py` + `tests/test_llm_anthropic.py` 并带 `anthropic>=0.92` 依赖；`config.yaml` 显式写出每个 profile 的 `provider`（默认 `openai`），用户运行期在 `/config` 面板下拉或手改 yaml 即可切换，无需重新生成。spec 的 `provider` 字段保留，仅决定 profile 的初始值。本节以下的"条件渲染/关闭零痕迹"描述保留为原设计记录。
+
 ### 4.1 spec / config 面
 
 LLM API 面是结构轴。**新增一个 spec 字段标记 profile 走哪套规范**（这是 `CLAUDE.md §6.1` 改 spec schema，本方案待签的一部分）：
@@ -122,7 +124,7 @@ def _client_for_profile(profile):
 
 1. **立项 Slice 12**：✅ 批准（"开始规划并实现"即签字）。
 2. **spec 字段**：✅ `provider: Literal["openai","anthropic"]`，默认 `openai`（`spec.LLMProfile` + 产物 `LLMProfileConfig` 同步）。
-3. **依赖与文件门控**：✅ 任一 profile=anthropic 才渲染 `llm_anthropic.py` + `tests/test_llm_anthropic.py`、才把 `anthropic>=0.92` 加进产物 `dependencies`；默认 spec 的 `pyproject`/`config.yaml`/spec 快照零 anthropic 痕迹（快照序列化时丢弃默认 `provider: openai`，保持旧 spec 字节稳定）。实现说明：依赖进 `dependencies`（沿用 web/mcp 的条件渲染机制）而非字面 `optional-dependencies`——`uv sync` 直接可用，开箱即跑。
+3. **依赖与文件门控**：~~任一 profile=anthropic 才渲染/才加依赖、默认零痕迹~~ → **2026-06-11 人定向推翻：双协议内建**。每个产物恒渲染 `llm_anthropic.py` + 其测试、恒带 `anthropic>=0.92`（依赖进 `dependencies`，`uv sync` 开箱即跑）；`config.yaml` 显式写 `provider:`（默认 `openai`）供用户改；spec 快照仍丢弃默认 `provider: openai`（旧 spec 字节稳定）。openai-only 运行不 import anthropic SDK（懒加载）。
 4. **思考流通道**：✅ 独立通道——`LLMClient.stream(on_thinking=...)` 新回调（与 `on_delta` 分离，chunk 可为 `""`=「在思考但内容隐藏」）；Web 推独立 `event: thinking`（前端一条灰色 "thinking …" 行，首个 token/工具/结束事件时移除）；CLI 每轮一行灰色 `· thinking …`（stderr，不污染 stdout 答案流）。OpenAI 兼容端点的 `reasoning_content` 透传进同一通道；MockLLM 流式时发一次 `"(mock thinking)"` 脉冲使通道离线可测。
 5. **分阶段**：✅ Phase 1+2 一次做完（`LLMClient` Protocol 本就要求 `complete`+`stream`，只做 Phase 1 产物 Web 流式即缺口）；Phase 3（`cache_control` 精修 / structured outputs）仍留待后续。
 6. **Opus 4.7/4.8 采样约束**：✅ 按模型族前缀（`claude-opus-4-7` / `claude-opus-4-8` / `claude-fable`）**静默跳过** `temperature`（产物本就不发 `top_p`/`top_k`）。另：`reasoning_effort` 复用为 Anthropic `effort`（`thinking: adaptive` + `output_config.effort`；`none`=不开思考、`minimal` 映射 `low`）；`max_tokens` 必填，未设兜底 16000。
@@ -132,7 +134,8 @@ def _client_for_profile(profile):
 - 映射纯函数（`to_anthropic_messages` / `to_anthropic_tools` / `from_anthropic_content` / `from_anthropic_usage`）+ 流式拼装（含 `input_json_delta` 累积、thinking/text 双通道、cancel 关流）由产物自带 `tests/test_llm_anthropic.py` 覆盖，不需真 key。
 - 分发：`llm._client_for_profile(profile)` 按 `provider` 选实现（`make_client` + `ClientRouter` 共用）；未渲染 anthropic 模块的产物若手改 `provider: anthropic`，报带指引的 `RuntimeError` 而非裸 ImportError。
 - 门禁记录：生成器快测 171 全绿 + golden 13 全绿（含新增 anthropic golden、Docker 2、uvx 冒烟）。wizard 不露出 provider（行为性/llm 配置本就烤默认，沿用 Slice 7 口径）。
-- **补遗（2026-06-11，人定向"面板加下拉、与 name/model 并列"）**：产物 `/config` 面板的 LLM 卡片在 **anthropic-enabled 产物**里露出 `provider` 下拉（name/model/provider 三列，默认产物不渲染、零痕迹）；修复面板保存整组替换 `llms` 时**静默丢 `provider`** 的回传 bug（产物自带 `test_config_post_round_trips_profile_provider` 回归）；Web `/test-llm` 与 CLI `test-llm` 原硬编码 `OpenAIClient`，改为按 `provider` 走 `_client_for_profile` 分发（真实 MiMo anthropic 端点实测 `{"ok": true}` / PASSED）。provider 的运行期切换语义：anthropic-enabled 产物里两个客户端都在、面板/配置随时切；默认产物没有 anthropic 客户端，故不提供选项（手改 yaml 会得到带指引的 RuntimeError）。
+- **补遗 1（2026-06-11，人定向"面板加下拉、与 name/model 并列"）**：产物 `/config` 面板的 LLM 卡片露出 `provider` 下拉（name/model/provider 三列）；修复面板保存整组替换 `llms` 时**静默丢 `provider`** 的回传 bug（产物自带 `test_config_post_round_trips_profile_provider` 回归）；Web `/test-llm` 与 CLI `test-llm` 原硬编码 `OpenAIClient`，改为按 `provider` 走 `_client_for_profile` 分发（真实 MiMo anthropic 端点实测 `{"ok": true}` / PASSED）。
+- **补遗 2（2026-06-11，人定向，同日推翻门控）**：人审后明确产品口径为"**产物自带双协议，默认 openai，用户可选变更**"——下拉初版仅在 anthropic-enabled 产物渲染，现改为**所有产物恒有**；生成器删除 `CONDITIONAL_TEMPLATES` 门控与 `anthropic_enabled` 上下文变量。端到端实测：默认 openai 产物 → 面板把 profile 切到 anthropic（MiMo）→ 写回 config.yaml → 真实流式 + thinking + 工具调用一次通过。wizard 仍不需要任何 anthropic 选项（产物天生双协议，切换是运行期配置）。
 
 ### 真实端点验收（2026-06-11，人提供 key，已通过）
 
@@ -145,4 +148,4 @@ def _client_for_profile(profile):
 
 ---
 
-> 一句话：双规范不是替换，是给推理模型补上"原生才有"的 thinking/effort——靠 loop 已有的 provider-neutral `LLMClient` 扩展点，加一个映射客户端 + 一个 spec 开关，关掉零痕迹。**已实现并过全部门禁（2026-06-10）。**
+> 一句话：双规范不是替换，是给推理模型补上"原生才有"的 thinking/effort——靠 loop 已有的 provider-neutral `LLMClient` 扩展点，加一个映射客户端；**2026-06-11 起双协议内建于每个产物**，`provider` 默认 `openai`、运行期面板/配置随时切。**已实现并过全部门禁（2026-06-10；内建化 2026-06-11）。**

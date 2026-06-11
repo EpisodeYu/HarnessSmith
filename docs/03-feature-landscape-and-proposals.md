@@ -102,7 +102,7 @@
 
 - **是什么**：`llm.py` 第二个 client 走 Anthropic Messages（顶层 `system` / content blocks / `tool_use`+`tool_result` / `effort` + adaptive thinking / Opus 4.7/4.8 禁 `temperature`·`top_p`·`top_k` / prompt caching / structured outputs），把 loop 的消息·工具格式映射进出；同时把 reasoning/thinking 阶段做成显式流式提示（避免"无反应等待"，这是 Slice 3 真实 LLM 验收时记下的 UX 坑）。spec 开关式**可选模块**，默认仍 OpenAI 兼容端点。
 - **为什么**：推理模型（thinking/effort）已是 2026 主流，而"接 Claude 走 OpenAI 兼容端点 / LiteLLM"会丢掉 thinking、prompt caching、effort 这些一等能力。这从"以后可能要"正在变成"用户现在就要"。
-- **契合 & 薄**：`llm.py` 已是 Protocol/适配层，第二个 client 是**加文件不改循环**，符合扩展点设计。default-off → 不启用零痕迹、`pyproject` 不进 `anthropic`。
+- **契合 & 薄**：`llm.py` 已是 Protocol/适配层，第二个 client 是**加文件不改循环**，符合扩展点设计。default-off → 不启用零痕迹、`pyproject` 不进 `anthropic`。(实现说明 2026-06-11:人定向改为**双协议内建**——恒渲染恒带依赖,默认 `provider: openai` 运行期可切,见 `05-llm-dual-spec-anthropic.md`)
 - **红线**：**改 LLM API 面 = `CLAUDE.md §6.4`，实现前需人再签具体方案**（backlog 已注明）。务必保住"默认 provider-agnostic Chat Completions"不动，双规范是**可选第二条**而非替换。
 
 ---

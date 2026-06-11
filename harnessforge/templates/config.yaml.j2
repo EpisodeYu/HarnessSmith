@@ -6,8 +6,8 @@ project_slug: {{ project_slug }}
 llms:
 {% for profile in llms %}  - name: {{ profile.name }}
     model: {{ profile.model | tojson }}   # required: your model id (e.g. gpt-4o); empty = configure before chatting
-{% if profile.provider != "openai" %}    provider: {{ profile.provider }}   # native Anthropic Messages (default openai = Chat Completions via base_url)
-{% endif %}    api_key_env: {{ profile.api_key_env }}
+    provider: {{ profile.provider }}   # openai = Chat Completions via base_url; anthropic = native Anthropic Messages
+    api_key_env: {{ profile.api_key_env }}
 {% if profile.base_url_env %}    base_url_env: {{ profile.base_url_env }}
 {% endif %}{% if profile.provider == "anthropic" %}    # Optional knobs (sent ONLY when set). On this native Anthropic profile,
     # `reasoning_effort` maps to adaptive thinking + `effort` (low/medium/high/

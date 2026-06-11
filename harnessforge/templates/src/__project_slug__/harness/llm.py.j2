@@ -240,19 +240,17 @@ class OpenAIClient:
 def _client_for_profile(profile: LLMProfileConfig) -> LLMClient:
     """Pick the client implementation for a profile by its ``provider``.
 
-    The anthropic module is imported lazily and only exists in repos generated
-    with an anthropic profile — a repo generated without one fails here with a
-    pointer instead of a bare ImportError.
+    The anthropic module is imported lazily so openai-only runs never load the
+    anthropic SDK; an ImportError here means the dependency was stripped.
     """
     if profile.provider == "anthropic":
         try:
             from .llm_anthropic import AnthropicClient
         except ImportError as exc:
             raise RuntimeError(
-                f"profile {profile.name!r} sets provider: anthropic, but this repo "
-                "was generated without the native Anthropic client. Regenerate with "
-                "an anthropic profile in the spec, or add harness/llm_anthropic.py "
-                "and the `anthropic` dependency yourself."
+                f"profile {profile.name!r} sets provider: anthropic, but the "
+                "`anthropic` package is not installed — run `uv sync` (it is a "
+                "default dependency of this repo)."
             ) from exc
         return AnthropicClient(profile)
     return OpenAIClient(profile)

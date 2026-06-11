@@ -27,9 +27,10 @@ class LLMProfile(BaseModel):
     model: str
     # Which API spec this profile speaks (Slice 12). "openai" (default) is the
     # provider-agnostic Chat Completions path via base_url; "anthropic" is the
-    # native Anthropic Messages API (first-class thinking/effort). Any profile
-    # opting in renders harness/llm_anthropic.py and adds the `anthropic`
-    # dependency; all-default leaves the repo with zero anthropic footprint.
+    # native Anthropic Messages API (first-class thinking/effort). Both clients
+    # ship in every product (human decision 2026-06-11: dual protocol built-in);
+    # this field just sets the profile's initial value in config.yaml — users
+    # switch at runtime via the /config panel or by editing the file.
     provider: Literal["openai", "anthropic"] = "openai"
     api_key_env: str = "OPENAI_API_KEY"
     base_url_env: str | None = None
