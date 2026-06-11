@@ -7,13 +7,12 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     // Apply the saved theme BEFORE first paint so there is no flash of the wrong
-    // theme. `hf_theme` is one of system/light/dark (system follows the OS).
+    // theme. `hf_theme` is "light" (default) or "dark".
     (function () {
       try {
-        var pref = localStorage.getItem("hf_theme") || "system";
-        var dark = pref === "dark" || (pref === "system" && window.matchMedia &&
-          window.matchMedia("(prefers-color-scheme: dark)").matches);
-        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.classList.toggle(
+          "dark", localStorage.getItem("hf_theme") === "dark"
+        );
       } catch (e) {}
     })();
   </script>
@@ -73,9 +72,8 @@
       </div>
       <div id="session-list" class="flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 text-sm"></div>
       <div class="flex items-center gap-2 border-t border-slate-200 px-3 py-2 text-sm">
-        <span class="text-slate-500" data-i18n="theme_label">Theme</span>
-        <div id="theme-toggle" class="ml-auto flex items-center gap-0.5 rounded-lg border border-slate-300 p-0.5">
-          <button type="button" data-theme="system" class="rounded px-1.5 py-0.5 text-xs" data-i18n-title="theme_system" title="System">🖥</button>
+        <span class="flex-1 rounded-lg px-2 py-1 text-left text-slate-600">🎨 <span data-i18n="theme_label">Theme</span></span>
+        <div id="theme-toggle" class="flex items-center gap-0.5 rounded-lg border border-slate-300 p-0.5">
           <button type="button" data-theme="light" class="rounded px-1.5 py-0.5 text-xs" data-i18n-title="theme_light" title="Light">☀</button>
           <button type="button" data-theme="dark" class="rounded px-1.5 py-0.5 text-xs" data-i18n-title="theme_dark" title="Dark">🌙</button>
         </div>
@@ -257,6 +255,14 @@
           </select>
         </div>
         <div class="space-y-1 border-t pt-3">
+          <h4 class="text-sm font-medium" data-i18n="sys_stream_label">Streaming</h4>
+          <p class="text-xs text-slate-500" data-i18n="sys_stream_hint">Stream the assistant's reply token by token.</p>
+          <div id="sys-stream-toggle" class="inline-flex items-center gap-0.5 rounded-lg border border-slate-300 p-0.5">
+            <button type="button" data-stream="1" class="rounded px-3 py-0.5 text-sm" data-i18n="sys_stream_on">Enable</button>
+            <button type="button" data-stream="0" class="rounded px-3 py-0.5 text-sm" data-i18n="sys_stream_off">Disable</button>
+          </div>
+        </div>
+        <div class="space-y-1 border-t pt-3">
           <h4 class="text-sm font-medium" data-i18n="sys_export_label">Export configuration</h4>
           <p class="text-xs text-slate-500" data-i18n="sys_export_hint">Download config.yaml — every behavioral setting except secrets (keys stay in .env).</p>
           <button id="sys-export" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="sys_export_btn">Download config.yaml</button>
@@ -314,8 +320,11 @@
         subtab_tools: "Tools",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
         {% if spec.memory.enabled %}subtab_memory: "Memory", {% endif %}subtab_observability: "Observability",
         subtab_system: "System",
-        theme_label: "Theme", theme_system: "Follow system", theme_light: "Light", theme_dark: "Dark",
+        theme_label: "Theme", theme_light: "Light", theme_dark: "Dark",
         sys_lang_label: "Language",
+        sys_stream_label: "Streaming",
+        sys_stream_hint: "Stream the assistant's reply token by token.",
+        sys_stream_on: "Enable", sys_stream_off: "Disable",
         sys_export_label: "Export configuration",
         sys_export_hint: "Download config.yaml — every behavioral setting except secrets (keys stay in .env).",
         sys_export_btn: "Download config.yaml",
@@ -429,8 +438,11 @@
         subtab_tools: "工具",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_prompts: "提示词", subtab_paradigms: "范式",
         {% if spec.memory.enabled %}subtab_memory: "记忆", {% endif %}subtab_observability: "可观测",
         subtab_system: "系统",
-        theme_label: "主题", theme_system: "跟随系统", theme_light: "浅色", theme_dark: "深色",
+        theme_label: "主题", theme_light: "浅色", theme_dark: "深色",
         sys_lang_label: "语言",
+        sys_stream_label: "流式输出",
+        sys_stream_hint: "逐 token 流式显示助手回复。",
+        sys_stream_on: "启用", sys_stream_off: "禁用",
         sys_export_label: "导出配置",
         sys_export_hint: "下载 config.yaml —— 除密钥外的全部行为性配置(密钥仍在 .env)。",
         sys_export_btn: "下载 config.yaml",
@@ -1063,7 +1075,7 @@
     function startChat(message, opts) {
       opts = opts || {};
       const mode = (opts.mode != null) ? opts.mode : $("mode").value;
-      const stream = true;  // always stream (the toggle was replaced by the context meter)
+      const stream = streamEnabled();  // System tab toggle (default enabled)
       line("you" + (mode ? " (" + mode + ")" : "") + ": " + message, "font-semibold");
 
       let answer = null;
@@ -1351,7 +1363,7 @@
     function gateChat() {
       const none = !hasLLM();
       $("no-llm").classList.toggle("hidden", !none);
-      ["msg", "mode", "stream", "chat-send"].forEach((id) => { $(id).disabled = none; });
+      ["msg", "mode", "chat-send"].forEach((id) => { $(id).disabled = none; });
     }
 
     // Build the Context tab from the registries: the strategy dropdown lists every
@@ -2217,17 +2229,15 @@
       e.returnValue = "";
     });
 
-    // ---- System tab: theme + language + config import/export ----------
-    // Theme is a pure client-side preference (system/light/dark) kept in
-    // localStorage; the head script applies it pre-paint, this keeps the toggle
-    // in sync and reacts to OS changes while on "system".
+    // ---- System tab: theme + streaming + language + config import/export ----
+    // Theme is a pure client-side preference (light default / dark) kept in
+    // localStorage; the head script applies it pre-paint, this keeps the toggle in
+    // sync and repaints on click.
     const THEME_KEY = "hf_theme";
-    const themeMq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
-    function themePref() { return localStorage.getItem(THEME_KEY) || "system"; }
+    function themePref() { return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light"; }
     function applyTheme() {
       const pref = themePref();
-      const dark = pref === "dark" || (pref === "system" && themeMq && themeMq.matches);
-      document.documentElement.classList.toggle("dark", dark);
+      document.documentElement.classList.toggle("dark", pref === "dark");
       document.querySelectorAll("#theme-toggle [data-theme]").forEach((b) => {
         b.classList.toggle("bg-slate-200", b.dataset.theme === pref);
       });
@@ -2235,9 +2245,20 @@
     document.querySelectorAll("#theme-toggle [data-theme]").forEach((b) => {
       b.addEventListener("click", () => { localStorage.setItem(THEME_KEY, b.dataset.theme); applyTheme(); });
     });
-    if (themeMq && themeMq.addEventListener) {
-      themeMq.addEventListener("change", () => { if (themePref() === "system") applyTheme(); });
+
+    // Streaming is a client-side chat preference (enabled by default): it drives
+    // the `/chat?stream=` flag. Kept in localStorage (`hf_stream`, "0" = disabled).
+    const STREAM_KEY = "hf_stream";
+    function streamEnabled() { return localStorage.getItem(STREAM_KEY) !== "0"; }
+    function applyStreamToggle() {
+      const on = streamEnabled();
+      document.querySelectorAll("#sys-stream-toggle [data-stream]").forEach((b) => {
+        b.classList.toggle("bg-slate-200", (b.dataset.stream === "1") === on);
+      });
     }
+    document.querySelectorAll("#sys-stream-toggle [data-stream]").forEach((b) => {
+      b.addEventListener("click", () => { localStorage.setItem(STREAM_KEY, b.dataset.stream); applyStreamToggle(); });
+    });
 
     // Language selector in the System tab mirrors the sidebar one (shared state).
     const sysLangSel = $("sys-lang");
@@ -2280,6 +2301,7 @@
 
     applyI18n();
     applyTheme();
+    applyStreamToggle();
     loadConfig();  // populate cfg up front so the chat gate (no-LLM banner) is correct
   </script>
 </body>

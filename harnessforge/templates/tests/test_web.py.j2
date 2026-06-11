@@ -609,14 +609,26 @@ def test_config_post_persists_to_yaml_preserving_comments(tmp_path):
 
 
 def test_index_has_system_tab_and_theme_toggle():
-    """The product ships a System config sub-tab (language + import/export) and a
-    sidebar theme toggle wired to a contained dark-theme override."""
+    """The product ships a System config sub-tab (language + streaming + import/
+    export) and a sidebar light/dark theme toggle wired to a contained override."""
     body = _client().get("/").text
     assert 'data-cfg="system"' in body and "subtab_system" in body
     assert 'id="theme-toggle"' in body and "hf_theme" in body
     assert "function applyTheme" in body
     assert "html.dark" in body  # the dark-theme CSS override block
+    assert 'data-theme="light"' in body and 'data-theme="dark"' in body  # light/dark only
+    assert 'data-theme="system"' not in body  # no follow-system option
     assert "/system/config-export" in body and "/system/config-import" in body
+
+
+def test_index_has_streaming_toggle_on_system_tab():
+    """Streaming is an enable/disable control on the System tab (default enabled)
+    that drives the /chat?stream= flag — not a chat-form checkbox."""
+    body = _client().get("/").text
+    assert 'id="sys-stream-toggle"' in body
+    assert 'data-stream="1"' in body and 'data-stream="0"' in body
+    assert "hf_stream" in body and "function streamEnabled" in body
+    assert "const stream = streamEnabled()" in body  # the chat request reads it
 
 
 def test_system_config_export_returns_yaml_without_secrets():
