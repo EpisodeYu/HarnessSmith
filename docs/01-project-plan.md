@@ -49,7 +49,7 @@
 - **第 2 个 preset**(rag-research 骨架,RAG 实现可桩)。
 - **极简 Web chat**:FastAPI + SSE 流式聊天页(不含 `/config` 面板)。
 - **多 LLM profile + 角色路由**:命名 profile + `generation`/`compaction`/`embedding` 角色,`client_for(role)` 解析。
-- **上下文管理**(实现说明,2026-06-06 增强为条件/策略两层):**触发条件 `triggers`**(何时压,内置 `max_tokens`/`max_turns`,`combine: or/and` 组合)+ **策略 `strategy`**(怎么压,`truncate`/`summarize`/`none`,用户可 `@register_strategy` 自加)。两者都是薄注册表、按名分发(非抽象层)。运行期 `config.yaml` 权威,`spec.context` 仅种子;**默认 `summarize` + `max_tokens: 192000` 触发、不限轮数**(人 2026-06-06 定),summarize 走 compaction 角色、**缺 compaction 角色则回落首个 profile(即用 generation 模型做摘要),不回落 truncate**(实现说明 2026-06-08:`profile_for` 缺角色回落首个 profile,故 summarizer 永不为 None;摘要开销已计入 trace 与预算,见 test-report-2026-06-08 RT-1/RT-2)。
+- **上下文管理**(实现说明,2026-06-06 增强为条件/策略两层;2026-06-11 触发改 usage 驱动):**触发条件 `triggers`**(何时压,内置 `window_pct`/`max_tokens`/`max_turns`,`combine: or/and` 组合)+ **策略 `strategy`**(怎么压,`truncate`/`summarize`/`none`,用户可 `@register_strategy` 自加)+ **`max_tool_result_chars`**(单工具结果入历史前的截断闸,A1)。两者都是薄注册表、按名分发(非抽象层)。运行期 `config.yaml` 权威,`spec.context` 仅种子;**默认 `summarize` + `window_pct: 0.85` 触发**(2026-06-11 改,取代原 `max_tokens: 192000`):按真实上一步 `prompt_tokens` ÷ 该 profile 的 `context_window` 触发,**`context_window` 默认不填 → `window_pct` 不触发**,靠 A1 截断 + 溢出自救(B2)兜底,不误伤大窗口模型;`max_tokens` 绝对触发用真实 usage(字符估算仅兜底首调用)。summarize 走 compaction 角色、**缺 compaction 角色则回落首个 profile**(实现说明 2026-06-08,RT-1/RT-2)。自定义条件旧 2 参签名向后兼容。详见 [`06-llm-robustness-and-context.md`](./06-llm-robustness-and-context.md)。
 - **生成期 Web wizard**:单页表单产出 spec(L1 先用 CLI + preset 顶替,这里再补 GUI)。
 
 ### L3 — 推迟到 v1+(明确不在 MVP)
@@ -150,7 +150,7 @@ flowchart LR
 - `src/<pkg>/harness/trace.py` — 每次 run 的 JSONL trace + token/成本计数。
 - `src/<pkg>/harness/debuglog.py`(2026-06-10 增量,始终生成)— 可选**本地 debug 日志**:运行期 `config.yaml observability.debug`/`debug_dir`(默认关,不进 spec;web /config 可观测页可实时开关)。loop/工具/LLM/MCP/session/config 生命周期一行一条(`Trace.event` 镜像剔除私密字段 + 关键点直记),**只记名称/计数/耗时/错误类型,绝不记消息内容、工具参数/结果或密钥**;只落本机(`logs/` gitignored),绝不上传。生成器自身亦有**常开** debug 日志(`harnessforge/debuglog.py` → `~/.harnessforge/logs/debug.log`,滚动 ~1MB,`HARNESSFORGE_LOG_DIR` 可改)覆盖渲染/lock/冒烟/wizard/Node 引导各阶段。
 - `src/<pkg>/harness/prompts.py` — 系统提示拼装(system + **全局 rule 文件注入**(Slice 6B,`prompts.rules_files` 列出的 markdown 每轮注入,开放 `AGENTS.md`/`CLAUDE.md`/`.cursor/rules` 模式;空=零效果)+ skills/environment L2)。
-- `src/<pkg>/harness/context.py`(L2)— truncate / summarize。
+- `src/<pkg>/harness/context.py`(L2)— truncate / summarize;usage 驱动触发(`window_pct`/`max_tokens`,真实 `prompt_tokens` 经 `ContextInfo` 注入)+ 单工具结果截断(`max_tool_result_chars`)+ 溢出强制压缩(`fit(force=True)`)。
 - `src/<pkg>/harness/rag.py`(L3)。
 - `src/<pkg>/interfaces/cli.py` — `run`(L2 增 `ingest`)。
 - `src/<pkg>/interfaces/web.py`(L2)— `/chat` SSE。

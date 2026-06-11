@@ -27,6 +27,7 @@ from ..trace import Trace
 from . import (
     RunResult,
     assistant_message,
+    generate,
     register_paradigm,
     run_tool,
 )
@@ -76,6 +77,10 @@ def run(
     context_cfg = config.context
     # Summarization usage is recorded to the trace (and counts toward the budget).
     summarizer = make_summarizer(client_for, config, context_cfg, trace)
+    # Real prompt-token usage from the previous response drives compaction (the
+    # char estimate is only a first-call fallback); the window bounds window_pct.
+    last_prompt_tokens = 0
+    context_window = profile.context_window
 
     tracker = BudgetTracker(config.budget)
     # Read-only: high-risk tools are never offered, and ``run_tool`` refuses any
@@ -111,16 +116,21 @@ def run(
             stop_reason = "interrupted"
             break
 
-        messages = fit_context(messages, context_cfg, summarizer=summarizer{% if spec.memory.enabled %}, config=config{% endif %})
+        messages = fit_context(
+            messages, context_cfg, summarizer=summarizer,
+            last_prompt_tokens=last_prompt_tokens, context_window=context_window, config=config,
+        )
         hooks.before_step(step, messages)
         try:
-            if on_delta is not None or on_thinking is not None:
-                response = client.stream(
-                    messages, tool_schemas or None,
-                    on_delta=on_delta, on_thinking=on_thinking, cancel=cancel,
-                )
-            else:
-                response = client.complete(messages, tool_schemas or None, cancel=cancel)
+            # One call with context-overflow auto-rescue + optional profile fallback
+            # (shared plumbing); messages may come back compacted by an overflow rescue.
+            response, messages = generate(
+                client, messages, tool_schemas or None,
+                on_delta=on_delta, on_thinking=on_thinking, cancel=cancel,
+                context_cfg=context_cfg, summarizer=summarizer,
+                last_prompt_tokens=last_prompt_tokens, context_window=context_window,
+                config=config, fallback_name=profile.fallback,
+            )
         except Exception as exc:
             hooks.on_error("llm", exc)
             trace.event("error", where="llm", error=str(exc))
@@ -134,12 +144,15 @@ def run(
             break
 
         cost = trace.add_usage(response.usage, profile)
+        last_prompt_tokens = response.usage.prompt_tokens  # feed the next compaction check
         trace.event(
             "llm_response",
             step=step,
             has_tool_calls=bool(response.tool_calls),
             prompt_tokens=response.usage.prompt_tokens,
             completion_tokens=response.usage.completion_tokens,
+            cached_prompt_tokens=response.usage.cached_prompt_tokens,
+            reasoning_tokens=response.usage.reasoning_tokens,
             step_cost_usd=cost,
         )
         hooks.after_step(step, response)
@@ -150,7 +163,10 @@ def run(
 
         messages.append(assistant_message(response))
         for call in response.tool_calls:
-            result = run_tool(registry, call, hooks, trace, allowed=set(active))
+            result = run_tool(
+                registry, call, hooks, trace, allowed=set(active),
+                max_result_chars=context_cfg.max_tool_result_chars,
+            )
             messages.append(
                 {"role": "tool", "tool_call_id": call.id, "content": result}
             )

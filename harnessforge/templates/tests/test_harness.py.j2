@@ -483,6 +483,9 @@ def test_openai_client_stream_closes_on_cancel():
     client = OpenAIClient.__new__(OpenAIClient)  # bypass __init__ (no SDK / network)
     client.model = "m"
     client.temperature = client.max_tokens = client.reasoning_effort = None
+    client.top_p = client.frequency_penalty = client.presence_penalty = None
+    client.seed = client.stop = None
+    client.extra_body = {}
     client._client = types.SimpleNamespace(
         chat=types.SimpleNamespace(
             completions=types.SimpleNamespace(create=lambda **kw: _Stream())
@@ -527,6 +530,187 @@ def test_crash_recovery_via_checkpoint_is_resumable(tmp_path):
     resumed = run("and now?", client=MockLLM(script=["ok"]), config=config, history=history)
     assert resumed.stop_reason == "final"
     assert any(m.get("content") == "go" for m in resumed.messages)  # prior turn carried
+
+
+# --- LLM sampling knobs + usage details (config enrichment) ----------------
+
+
+def test_openai_request_sends_sampling_knobs_only_when_set():
+    """The new sampling knobs are sent ONLY when set; extra_body is merged for
+    non-standard provider params (top_k, ...). A bare profile sends none of them."""
+    from {{ project_slug }}.harness.config import LLMProfileConfig
+    from {{ project_slug }}.harness.llm import OpenAIClient
+
+    bare = OpenAIClient(LLMProfileConfig(name="d", model="m"))
+    kw = bare._request_kwargs([{"role": "user", "content": "hi"}], None)
+    for key in ("temperature", "top_p", "frequency_penalty", "presence_penalty",
+                "seed", "stop", "extra_body"):
+        assert key not in kw
+
+    full = OpenAIClient(
+        LLMProfileConfig(
+            name="d", model="m", temperature=0.3, top_p=0.9, frequency_penalty=0.5,
+            presence_penalty=0.2, seed=7, stop=["END"], extra_body={"top_k": 40},
+        )
+    )
+    kw = full._request_kwargs([{"role": "user", "content": "hi"}], None)
+    assert kw["temperature"] == 0.3 and kw["top_p"] == 0.9
+    assert kw["frequency_penalty"] == 0.5 and kw["presence_penalty"] == 0.2
+    assert kw["seed"] == 7 and kw["stop"] == ["END"]
+    assert kw["extra_body"] == {"top_k": 40}  # non-standard params ride along
+
+
+def test_openai_usage_reads_cached_and_reasoning_details():
+    """Optional usage breakdowns (cached prompt tokens / reasoning tokens) are read
+    when the provider sends them, and default to 0 when it doesn't."""
+    import types
+
+    from {{ project_slug }}.harness.llm import _usage_from_openai
+
+    raw = types.SimpleNamespace(
+        prompt_tokens=100, completion_tokens=50, total_tokens=150,
+        prompt_tokens_details=types.SimpleNamespace(cached_tokens=80),
+        completion_tokens_details=types.SimpleNamespace(reasoning_tokens=20),
+    )
+    usage = _usage_from_openai(raw)
+    assert (usage.prompt_tokens, usage.completion_tokens) == (100, 50)
+    assert usage.cached_prompt_tokens == 80 and usage.reasoning_tokens == 20
+
+    bare = types.SimpleNamespace(
+        prompt_tokens=10, completion_tokens=5, total_tokens=15,
+        prompt_tokens_details=None, completion_tokens_details=None,
+    )
+    b = _usage_from_openai(bare)
+    assert b.cached_prompt_tokens == 0 and b.reasoning_tokens == 0
+
+
+def test_compute_cost_discounts_cached_tokens_only_when_priced():
+    """Cached prompt tokens bill at the cached price when set; left unset they fall
+    back to the full input price (so an unset cached price never under-counts)."""
+    from {{ project_slug }}.harness.config import LLMProfileConfig
+    from {{ project_slug }}.harness.llm import Usage
+    from {{ project_slug }}.harness.trace import compute_cost
+
+    usage = Usage(prompt_tokens=1_000_000, completion_tokens=0, cached_prompt_tokens=400_000)
+    priced = LLMProfileConfig(
+        name="d", model="m", input_cost_per_million=10.0, cached_input_cost_per_million=1.0
+    )
+    # fresh 600k @10/M + cached 400k @1/M = 6.0 + 0.4
+    assert compute_cost(usage, priced) == 6.4
+    unpriced = LLMProfileConfig(name="d", model="m", input_cost_per_million=10.0)
+    assert compute_cost(usage, unpriced) == 10.0  # no spurious discount
+
+
+# --- LLM call robustness (overflow rescue / fallback / SDK reliability) -----
+
+
+def test_is_context_overflow_matches_only_overlong_request_errors():
+    from {{ project_slug }}.harness.llm import is_context_overflow
+
+    class _Err(Exception):
+        def __init__(self, msg, status=None):
+            super().__init__(msg)
+            self.status_code = status
+
+    assert is_context_overflow(_Err("This model's maximum context length is 8192 tokens", 400))
+    assert is_context_overflow(_Err("prompt is too long for the context window"))
+    assert not is_context_overflow(_Err("503 service unavailable", 503))
+    assert not is_context_overflow(_Err("rate limited", 429))
+
+
+class _OverflowOnceClient:
+    """Rejects the first call as over-long, then succeeds (B2 retry)."""
+
+    def __init__(self):
+        self.calls = 0
+        self.last_len = None
+
+    def complete(self, messages, tools=None, *, cancel=None):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("This model's maximum context length is 8192 tokens")
+        self.last_len = len(messages)
+        return LLMResponse(content="recovered", usage=Usage(10, 5, 15))
+
+    def stream(self, messages, tools=None, *, on_delta=None, on_thinking=None, cancel=None):
+        return self.complete(messages, tools, cancel=cancel)
+
+
+def test_generate_rescues_context_overflow_and_retries_once():
+    """B2: an over-long request is caught, the history force-compacted, and the
+    step retried once — the caller adopts the compacted messages."""
+    from {{ project_slug }}.harness.paradigms import generate
+
+    client = _OverflowOnceClient()
+    ctx = ContextConfig(strategy="truncate", keep_last_turns=2)
+    messages = _conversation(8)
+    response, new_messages = generate(client, messages, None, context_cfg=ctx)
+
+    assert response.content == "recovered"
+    assert client.calls == 2  # failed once, retried after compaction
+    assert len(new_messages) < len(messages)  # compacted body adopted
+    assert client.last_len == len(new_messages)  # the retry used the compacted body
+
+
+def test_generate_falls_back_to_another_profile_on_error(tmp_path, monkeypatch):
+    """B3: a non-overflow error before any output streamed retries the step on the
+    profile's fallback (resolved by name)."""
+    from {{ project_slug }}.harness import llm as llm_mod
+    from {{ project_slug }}.harness.paradigms import generate
+
+    class _Boom:
+        def complete(self, messages, tools=None, *, cancel=None):
+            raise RuntimeError("503 service unavailable")
+
+    class _Backup:
+        def complete(self, messages, tools=None, *, cancel=None):
+            return LLMResponse(content="from-backup", usage=Usage(1, 1, 2))
+
+    monkeypatch.setattr(llm_mod, "client_for_profile_name", lambda cfg, name: _Backup())
+    response, _ = generate(
+        _Boom(), [{"role": "user", "content": "hi"}], None,
+        config=_config(tmp_path), fallback_name="backup",
+    )
+    assert response.content == "from-backup"
+
+
+def test_generate_does_not_fall_back_after_streaming_started(tmp_path, monkeypatch):
+    """B3 caveat: once tokens have streamed, a mid-stream break is NOT retried (the
+    partial output already showed) — the error propagates instead."""
+    from {{ project_slug }}.harness import llm as llm_mod
+    from {{ project_slug }}.harness.paradigms import generate
+
+    class _PartialThenBoom:
+        def stream(self, messages, tools=None, *, on_delta=None, on_thinking=None, cancel=None):
+            if on_delta is not None:
+                on_delta("partial")
+            raise RuntimeError("network reset mid-stream")
+
+    fb_calls = {"n": 0}
+    monkeypatch.setattr(
+        llm_mod, "client_for_profile_name",
+        lambda cfg, name: fb_calls.__setitem__("n", fb_calls["n"] + 1),
+    )
+    with pytest.raises(RuntimeError):
+        generate(
+            _PartialThenBoom(), [{"role": "user", "content": "hi"}], None,
+            on_delta=lambda t: None, config=_config(tmp_path), fallback_name="backup",
+        )
+    assert fb_calls["n"] == 0  # never fell back after a partial stream
+
+
+def test_openai_client_passes_timeout_and_retries_to_sdk():
+    """timeout_seconds / max_retries are forwarded to the SDK client (only when set)."""
+    from {{ project_slug }}.harness.config import LLMProfileConfig
+    from {{ project_slug }}.harness.llm import OpenAIClient
+
+    tuned = OpenAIClient(
+        LLMProfileConfig(name="d", model="m", timeout_seconds=7.0, max_retries=5)
+    )
+    assert tuned._client.max_retries == 5
+    assert tuned._client.timeout == 7.0
+    bare = OpenAIClient(LLMProfileConfig(name="d", model="m"))
+    assert bare._client.max_retries != 5  # SDK default preserved when unset
 
 
 # --- Slice 10: interaction channel (ask_question + shared asker) ------------
@@ -1134,6 +1318,94 @@ def test_context_combine_and_requires_all_conditions():
         triggers={"max_tokens": 50, "max_turns": 3},  # both exceeded
     )
     assert len(fit(messages, both)) < len(messages)
+
+
+def test_context_window_pct_uses_real_usage_and_is_inactive_without_window():
+    """window_pct compacts at a fraction of the model's window using the real last
+    prompt-token count; with no context_window it never fires (overflow rescue is
+    the net)."""
+    from {{ project_slug }}.harness.context import ContextInfo, fit, should_compact
+
+    ctx = ContextConfig(strategy="truncate", triggers={"window_pct": 0.8}, keep_last_turns=2)
+    messages = _conversation(6)
+    # 9000 / 10000 = 90% >= 80% -> compact
+    hot = ContextInfo(last_prompt_tokens=9000, context_window=10000)
+    assert should_compact(messages, ctx, info=hot) is True
+    # 1000 / 10000 = 10% -> no compaction
+    cool = ContextInfo(last_prompt_tokens=1000, context_window=10000)
+    assert should_compact(messages, ctx, info=cool) is False
+    # no context_window -> inactive regardless of usage
+    nowin = ContextInfo(last_prompt_tokens=9_000_000, context_window=None)
+    assert should_compact(messages, ctx, info=nowin) is False
+    assert fit(messages, ctx, last_prompt_tokens=9_000_000) is messages  # unset -> no-op
+
+
+def test_context_max_tokens_prefers_real_usage_over_estimate():
+    """The max_tokens condition uses the real last prompt_tokens when known, and
+    falls back to the char estimate only on the first call (no usage yet)."""
+    from {{ project_slug }}.harness.context import ContextInfo, should_compact
+
+    ctx = ContextConfig(strategy="truncate", triggers={"max_tokens": 5000}, keep_last_turns=2)
+    small = _conversation(2)  # char estimate well under 5000
+    # real usage says we're over -> compact even though the estimate is small
+    assert should_compact(small, ctx, info=ContextInfo(last_prompt_tokens=6000)) is True
+    # no usage yet -> the small estimate is under the threshold -> no compaction
+    assert should_compact(small, ctx, info=ContextInfo(last_prompt_tokens=0)) is False
+
+
+def test_context_force_compacts_regardless_of_triggers():
+    """fit(force=True) compacts even when no trigger fires — the overflow rescue path."""
+    messages = _conversation(8)
+    ctx = ContextConfig(strategy="truncate", triggers={}, keep_last_turns=2)  # never triggers
+    assert fit(messages, ctx) is messages  # no trigger -> no-op
+    forced = fit(messages, ctx, force=True)
+    assert len(forced) < len(messages)  # forced compaction happened anyway
+
+
+def test_legacy_two_arg_condition_still_works():
+    """Backward compat: a custom condition with the old (messages, threshold)
+    signature is still called correctly (the dispatcher only passes info to
+    conditions that accept it)."""
+    from {{ project_slug }}.harness.context import ContextInfo, register_condition, should_compact
+
+    @register_condition("legacy_two_arg")
+    def _legacy(messages, threshold):  # no info param
+        return len(messages) > threshold
+
+    try:
+        ctx = ContextConfig(strategy="truncate", triggers={"legacy_two_arg": 3})
+        assert should_compact(_conversation(4), ctx, info=ContextInfo()) is True
+        assert should_compact([{"role": "user", "content": "x"}], ctx) is False
+    finally:
+        from {{ project_slug }}.harness.context import CONDITIONS
+        CONDITIONS.pop("legacy_two_arg", None)
+
+
+def test_tool_result_truncation_caps_one_observation(tmp_path):
+    """A1: run_tool caps an oversized tool result with a [truncated N chars] marker
+    so a single huge observation can't blow the context window."""
+    from {{ project_slug }}.harness.paradigms import run_tool
+    from {{ project_slug }}.harness.tools import Registry
+
+    registry = Registry()
+
+    @registry.tool(name="big", description="returns a lot")
+    def big() -> str:
+        return "x" * 1000
+
+    trace = Trace(enabled=False)
+    capped = run_tool(
+        registry, ToolCall(id="c", name="big", arguments="{}"),
+        Hooks(), trace, allowed={"big"}, max_result_chars=100,
+    )
+    assert capped.startswith("x" * 100)
+    assert "[truncated 900 chars]" in capped
+    # no cap (0 / None) -> full result
+    full = run_tool(
+        registry, ToolCall(id="c", name="big", arguments="{}"),
+        Hooks(), trace, allowed={"big"}, max_result_chars=0,
+    )
+    assert full == "x" * 1000
 
 
 def test_context_custom_condition_and_strategy_are_pluggable():

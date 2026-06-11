@@ -157,12 +157,26 @@ def from_anthropic_content(content: list[Any]) -> tuple[str | None, list[ToolCal
 
 
 def from_anthropic_usage(raw: Any) -> Usage:
-    """Map Anthropic ``usage`` (input/output tokens) onto the neutral Usage."""
+    """Map Anthropic ``usage`` onto the neutral Usage.
+
+    Anthropic reports the cached prompt prefix separately from fresh input
+    (``cache_read_input_tokens`` = served from cache, ``cache_creation_input_tokens``
+    = written to cache); the neutral ``prompt_tokens`` is their sum so token budgets
+    see the whole prompt, and ``cached_prompt_tokens`` carries the cheap-billed reads.
+    """
     if raw is None:
         return Usage()
-    prompt = int(_field(raw, "input_tokens", 0) or 0)
+    fresh = int(_field(raw, "input_tokens", 0) or 0)
+    cache_read = int(_field(raw, "cache_read_input_tokens", 0) or 0)
+    cache_creation = int(_field(raw, "cache_creation_input_tokens", 0) or 0)
+    prompt = fresh + cache_read + cache_creation
     completion = int(_field(raw, "output_tokens", 0) or 0)
-    return Usage(prompt, completion, prompt + completion)
+    return Usage(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        total_tokens=prompt + completion,
+        cached_prompt_tokens=cache_read,
+    )
 
 
 class AnthropicClient:
@@ -173,11 +187,20 @@ class AnthropicClient:
 
         api_key = resolve_env(profile.api_key_env) or "missing-api-key"
         base_url = resolve_env(profile.base_url_env)
-        self._client = Anthropic(api_key=api_key, base_url=base_url)
+        # Per-call reliability is sent to the SDK only when set (else its defaults).
+        client_kwargs: dict[str, Any] = {"api_key": api_key, "base_url": base_url}
+        if profile.timeout_seconds is not None:
+            client_kwargs["timeout"] = profile.timeout_seconds
+        if profile.max_retries is not None:
+            client_kwargs["max_retries"] = profile.max_retries
+        self._client = Anthropic(**client_kwargs)
         self.model = profile.model
         self.temperature = profile.temperature
         self.max_tokens = profile.max_tokens
         self.reasoning_effort = profile.reasoning_effort
+        self.top_p = profile.top_p
+        self.stop = profile.stop
+        self.extra_body = profile.extra_body
 
     def _request_kwargs(self, messages: list[dict], tools: list[dict] | None) -> dict[str, Any]:
         system, anthropic_messages = to_anthropic_messages(messages)
@@ -192,12 +215,22 @@ class AnthropicClient:
             kwargs["tools"] = to_anthropic_tools(tools)
         if self.temperature is not None and supports_sampling(self.model):
             kwargs["temperature"] = self.temperature
+        # top_p obeys the same per-model sampling rule (Opus 4.7+/Fable reject it).
+        # frequency_penalty / presence_penalty / seed have no Messages-API equivalent
+        # and are intentionally not mapped here (use OpenAI-shaped profiles for those).
+        if self.top_p is not None and supports_sampling(self.model):
+            kwargs["top_p"] = self.top_p
+        if self.stop is not None:
+            kwargs["stop_sequences"] = [self.stop] if isinstance(self.stop, str) else list(self.stop)
         if self.reasoning_effort and self.reasoning_effort != "none":
             # Adaptive thinking + effort: the native form of "reasoning depth".
             kwargs["thinking"] = {"type": "adaptive"}
             kwargs["output_config"] = {
                 "effort": _EFFORT_ALIASES.get(self.reasoning_effort, self.reasoning_effort)
             }
+        # Non-standard params (e.g. native top_k) ride along verbatim.
+        if self.extra_body:
+            kwargs["extra_body"] = dict(self.extra_body)
         return kwargs
 
     def complete(
@@ -257,6 +290,7 @@ class AnthropicClient:
         calls: dict[int, dict[str, str]] = {}
         prompt_tokens = 0
         completion_tokens = 0
+        cached_tokens = 0
         try:
             stream_obj = self._client.messages.create(**kwargs)
         except Exception as exc:
@@ -272,7 +306,10 @@ class AnthropicClient:
             etype = getattr(event, "type", "")
             if etype == "message_start":
                 usage = getattr(event.message, "usage", None)
-                prompt_tokens = int(_field(usage, "input_tokens", 0) or 0)
+                cache_read = int(_field(usage, "cache_read_input_tokens", 0) or 0)
+                cache_creation = int(_field(usage, "cache_creation_input_tokens", 0) or 0)
+                prompt_tokens = int(_field(usage, "input_tokens", 0) or 0) + cache_read + cache_creation
+                cached_tokens = cache_read
             elif etype == "content_block_start":
                 block = event.content_block
                 if _field(block, "type") == "tool_use":
@@ -320,6 +357,9 @@ class AnthropicClient:
             content="".join(content) or None,
             tool_calls=tool_calls,
             usage=Usage(
-                prompt_tokens, completion_tokens, prompt_tokens + completion_tokens
+                prompt_tokens,
+                completion_tokens,
+                prompt_tokens + completion_tokens,
+                cached_prompt_tokens=cached_tokens,
             ),
         )

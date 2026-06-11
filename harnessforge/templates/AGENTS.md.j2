@@ -152,7 +152,28 @@ llms:
 
 Add the matching name(s) to `.env`. To track spend, set
 `input_cost_per_million` / `output_cost_per_million` on the profile (price per
-1M tokens, in your own currency).
+1M tokens, in your own currency); `cached_input_cost_per_million` prices
+provider-cached prompt tokens (cheaper) when your provider reports them.
+
+Sampling and reliability knobs are optional and sent **only when set** (unset =
+the provider's default): `temperature`, `top_p`, `frequency_penalty`,
+`presence_penalty`, `seed`, `stop`, and `reasoning_effort` (reasoning models).
+For a non-standard provider param with no field of its own — e.g. Qwen/DashScope
+`top_k` / `enable_thinking` — use `extra_body`, a dict merged verbatim into the
+request (values only, never secrets). `context_window` (the model's total window)
+turns on accurate `window_pct` compaction (see "Tune the context window").
+`timeout_seconds` / `max_retries` are passed to the SDK; `fallback` names another
+profile to retry a step with if a call errors before any output streamed.
+
+```yaml
+llms:
+  - name: default
+    model: your-model-name
+    api_key_env: YOUR_API_KEY
+    context_window: 200000      # enables window_pct compaction; unset = no early compaction
+    fallback: backup            # optional failover to another profile on error
+    # top_p: 0.95               # extra_body: {top_k: 40}   # for non-standard params
+```
 
 A profile with `provider: anthropic` speaks the **native Anthropic Messages
 API** instead (`harness/llm_anthropic.py`) — first-class adaptive thinking
@@ -418,23 +439,34 @@ context:
   strategy: summarize     # how: truncate | summarize | none (or your own)
   keep_last_turns: 6       # how many recent turns the strategy keeps
   combine: or              # when: or = any trigger fires; and = all must fire
+  max_tool_result_chars: 100000  # cap one tool result before it enters history (0 = off)
   triggers:                # when: condition name -> threshold
-    max_tokens: 192000     # compact once the estimated prompt exceeds this
+    window_pct: 0.85       # compact at 85% of the profile's context_window
+    # max_tokens: 192000   # ...and/or an absolute token count (real usage when known)
     # max_turns: 40        # ...and/or after this many user turns
 ```
 
-Built-in conditions are `max_tokens` (estimated prompt tokens) and `max_turns`
-(user turns); built-in strategies are `truncate`, `summarize` (folds older turns
-via the `compaction` role), and `none`. Empty `triggers` (or `strategy: none`)
-means it never fires — a plain loop.
+Compaction is **usage-driven**: the real `prompt_tokens` the provider reported on
+the previous response feeds the trigger (a char estimate is only a first-call
+fallback). Built-in conditions are `window_pct` (real prompt tokens as a fraction
+of the active profile's `context_window` — the default; **inactive until that
+profile sets `context_window`**, so a large-window model is never compacted too
+early), `max_tokens` (an absolute count), and `max_turns` (user turns); built-in
+strategies are `truncate`, `summarize` (folds older turns via the `compaction`
+role), and `none`. Empty `triggers` (or `strategy: none`) means it never fires.
+`max_tool_result_chars` is the first gate — it caps a single huge tool result
+(with a `[truncated N chars]` marker) before it can blow the window. If a request
+still overflows, the loop force-compacts once and retries that step automatically.
 
 Add your own the same way you add a tool — write a function, register it, then
-name it in `config.yaml`:
+name it in `config.yaml`. A condition may take an optional third `info` argument
+(`info.last_prompt_tokens` / `info.context_window`) for usage-driven logic; the
+older two-arg `(messages, threshold)` form still works unchanged:
 
 ```python
 from {{ project_slug }}.harness.context import register_condition, register_strategy
 
-@register_condition("max_chars")        # when: (messages, threshold) -> bool
+@register_condition("max_chars")        # when: (messages, threshold[, info]) -> bool
 def max_chars(messages, threshold):
     return sum(len(m.get("content") or "") for m in messages) > threshold
 

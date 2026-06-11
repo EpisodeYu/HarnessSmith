@@ -94,12 +94,25 @@ def assistant_message(response: LLMResponse) -> dict:
     }
 
 
+def _truncate_result(result: str, max_chars: int | None) -> str:
+    """Cap one tool result so a single huge observation can't blow the window.
+
+    The tail is replaced with a ``[truncated N chars]`` marker so the model knows
+    to narrow its query / paginate. ``max_chars`` of 0 or None means no cap.
+    """
+    if not max_chars or len(result) <= max_chars:
+        return result
+    dropped = len(result) - max_chars
+    return result[:max_chars] + f"\n\n[truncated {dropped} chars]"
+
+
 def run_tool(
     registry: Registry,
     call: ToolCall,
     hooks: Hooks,
     trace: Trace,
     allowed: set[str] | None = None,
+    max_result_chars: int | None = None,
 ) -> str:
     """Execute one tool call; tool errors are captured, never crash the loop.
 
@@ -115,6 +128,9 @@ def run_tool(
     point) and, for a tool the ``confirm`` policy flagged, asks the user to allow
     or reject it. A rejection comes back as an ERROR observation (the model adapts,
     the loop never crashes); with no confirmer set (confirmation off) it is a no-op.
+
+    ``max_result_chars`` caps the result the model sees (A1): a too-large result is
+    truncated with a marker. The trace/hooks still receive the full result.
     """
     hooks.before_tool(call)
     trace.event("tool_call", name=call.name, arguments=call.arguments)
@@ -140,7 +156,73 @@ def run_tool(
     log.debug("tool %s -> %s in %.2fs", call.name, outcome, time.monotonic() - started)
     trace.event("tool_result", name=call.name, result=result)
     hooks.after_tool(call, result)
-    return result
+    return _truncate_result(result, max_result_chars)
+
+
+def generate(
+    client: LLMClient,
+    messages: list[dict],
+    tools: list[dict] | None,
+    *,
+    on_delta: Callable[[str], None] | None = None,
+    on_thinking: Callable[[str], None] | None = None,
+    cancel: Callable[[], bool] | None = None,
+    context_cfg=None,
+    summarizer: LLMClient | None = None,
+    last_prompt_tokens: int = 0,
+    context_window: int | None = None,
+    config=None,
+    fallback_name: str | None = None,
+) -> tuple[LLMResponse, list[dict]]:
+    """One LLM call with two safety nets, shared by every paradigm.
+
+    Returns ``(response, messages)`` — ``messages`` MAY differ from the input when
+    an overflow rescue compacted it, so the caller should adopt the returned list.
+
+    - **B2 context-overflow auto-rescue**: if the request is rejected for being
+      over-long, force one compaction and retry the same step once (a second
+      failure propagates — bounded, no loop).
+    - **B3 fallback**: on any other error, if nothing has streamed yet and the
+      profile names a ``fallback``, retry the step once with that profile's client.
+      A mid-stream break is never retried (its partial output already showed).
+
+    Streaming is chosen when ``on_delta`` / ``on_thinking`` is given.
+    """
+    from ..context import fit as fit_context
+    from ..llm import client_for_profile_name, is_context_overflow
+
+    streaming = on_delta is not None or on_thinking is not None
+    emitted = {"v": False}
+
+    def _delta(text: str) -> None:
+        emitted["v"] = True
+        if on_delta is not None:
+            on_delta(text)
+
+    def _call(active: LLMClient, msgs: list[dict]) -> LLMResponse:
+        if streaming:
+            return active.stream(msgs, tools, on_delta=_delta, on_thinking=on_thinking, cancel=cancel)
+        return active.complete(msgs, tools, cancel=cancel)
+
+    try:
+        return _call(client, messages), messages
+    except Exception as exc:
+        if context_cfg is not None and is_context_overflow(exc):
+            compacted = fit_context(
+                messages, context_cfg, summarizer=summarizer,
+                last_prompt_tokens=last_prompt_tokens, context_window=context_window,
+                force=True, config=config,
+            )
+            log.debug(
+                "context overflow -> force-compacted %d -> %d msgs, retrying step",
+                len(messages), len(compacted),
+            )
+            return _call(client, compacted), compacted  # one retry; re-raises if it fails again
+        if not emitted["v"] and fallback_name and config is not None:
+            log.debug("llm error (%s) -> retrying step on fallback profile %r",
+                      type(exc).__name__, fallback_name)
+            return _call(client_for_profile_name(config, fallback_name), messages), messages
+        raise
 
 
 # Importing each built-in registers it. ``agent`` is always present (the
@@ -158,4 +240,5 @@ __all__ = [
     "get_paradigm",
     "assistant_message",
     "run_tool",
+    "generate",
 ]

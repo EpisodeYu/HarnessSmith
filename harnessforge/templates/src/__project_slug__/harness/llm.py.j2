@@ -23,6 +23,12 @@ class Usage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    # Optional breakdowns some providers report (0 when not sent): how many prompt
+    # tokens were served from the provider's prompt cache (billed cheaper), and how
+    # many completion tokens the model spent on hidden reasoning. Used for billing
+    # accuracy (cached) and visibility (reasoning); never required by the loop.
+    cached_prompt_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
 @dataclass
@@ -37,6 +43,27 @@ class LLMResponse:
     content: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
+
+
+def _usage_from_openai(raw: Any) -> Usage:
+    """Map an OpenAI-shaped ``usage`` object onto the neutral Usage.
+
+    Reads the optional ``prompt_tokens_details.cached_tokens`` /
+    ``completion_tokens_details.reasoning_tokens`` breakdowns when the provider
+    sends them (many OpenAI-compatible endpoints do; the SDK leaves them off its
+    typed shape, hence getattr). Missing fields stay 0.
+    """
+    if raw is None:
+        return Usage()
+    prompt_details = getattr(raw, "prompt_tokens_details", None)
+    completion_details = getattr(raw, "completion_tokens_details", None)
+    return Usage(
+        prompt_tokens=raw.prompt_tokens or 0,
+        completion_tokens=raw.completion_tokens or 0,
+        total_tokens=raw.total_tokens or 0,
+        cached_prompt_tokens=int(getattr(prompt_details, "cached_tokens", 0) or 0),
+        reasoning_tokens=int(getattr(completion_details, "reasoning_tokens", 0) or 0),
+    )
 
 
 class LLMClient(Protocol):
@@ -90,11 +117,23 @@ class OpenAIClient:
 
         api_key = resolve_env(profile.api_key_env) or "missing-api-key"
         base_url = resolve_env(profile.base_url_env)
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        # Per-call reliability is sent to the SDK only when set (else its defaults).
+        client_kwargs: dict[str, Any] = {"api_key": api_key, "base_url": base_url}
+        if profile.timeout_seconds is not None:
+            client_kwargs["timeout"] = profile.timeout_seconds
+        if profile.max_retries is not None:
+            client_kwargs["max_retries"] = profile.max_retries
+        self._client = OpenAI(**client_kwargs)
         self.model = profile.model
         self.temperature = profile.temperature
         self.max_tokens = profile.max_tokens
         self.reasoning_effort = profile.reasoning_effort
+        self.top_p = profile.top_p
+        self.frequency_penalty = profile.frequency_penalty
+        self.presence_penalty = profile.presence_penalty
+        self.seed = profile.seed
+        self.stop = profile.stop
+        self.extra_body = profile.extra_body
 
     def _request_kwargs(self, messages: list[dict], tools: list[dict] | None) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"model": self.model, "messages": messages}
@@ -111,6 +150,20 @@ class OpenAIClient:
             kwargs["max_tokens"] = self.max_tokens
         if self.reasoning_effort is not None:
             kwargs["reasoning_effort"] = self.reasoning_effort
+        if self.top_p is not None:
+            kwargs["top_p"] = self.top_p
+        if self.frequency_penalty is not None:
+            kwargs["frequency_penalty"] = self.frequency_penalty
+        if self.presence_penalty is not None:
+            kwargs["presence_penalty"] = self.presence_penalty
+        if self.seed is not None:
+            kwargs["seed"] = self.seed
+        if self.stop is not None:
+            kwargs["stop"] = self.stop
+        # Non-standard provider params (top_k, enable_thinking, ...) ride along in
+        # extra_body, which the OpenAI SDK forwards verbatim into the request body.
+        if self.extra_body:
+            kwargs["extra_body"] = dict(self.extra_body)
         return kwargs
 
     def complete(
@@ -143,12 +196,7 @@ class OpenAIClient:
             ToolCall(id=tc.id, name=tc.function.name, arguments=tc.function.arguments)
             for tc in (message.tool_calls or [])
         ]
-        raw = resp.usage
-        usage = (
-            Usage(raw.prompt_tokens, raw.completion_tokens, raw.total_tokens)
-            if raw
-            else Usage()
-        )
+        usage = _usage_from_openai(resp.usage)
         return LLMResponse(content=message.content, tool_calls=calls, usage=usage)
 
     def stream(
@@ -200,11 +248,7 @@ class OpenAIClient:
                 stream_obj.close()  # stop the model: close the HTTP stream and bail
                 break
             if chunk.usage is not None:
-                usage = Usage(
-                    chunk.usage.prompt_tokens,
-                    chunk.usage.completion_tokens,
-                    chunk.usage.total_tokens,
-                )
+                usage = _usage_from_openai(chunk.usage)
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -263,6 +307,32 @@ def make_client(config: Config, role: str = "generation", *, mock: bool = False)
 
         return MockLLM()
     return _client_for_profile(config.profile_for(role))
+
+
+def client_for_profile_name(config: Config, name: str) -> LLMClient:
+    """Build a client for the profile literally named ``name`` (used by per-profile
+    ``fallback`` failover — a profile name, not a role)."""
+    for profile in config.llms:
+        if profile.name == name:
+            return _client_for_profile(profile)
+    raise ValueError(f"fallback profile {name!r} is not configured")
+
+
+def is_context_overflow(exc: Exception) -> bool:
+    """Heuristic: did this LLM error come from an over-long request (the context
+    window was exceeded)? Providers word it differently, so match the common
+    signals; a transient 5xx / timeout is NOT treated as overflow (so it can fail
+    over instead of pointlessly compacting)."""
+    status = getattr(exc, "status_code", None)
+    if status is not None and status not in (400, 413, 422):
+        return False
+    text = f"{getattr(exc, 'code', '') or ''} {exc}".lower()
+    needles = (
+        "context_length_exceeded", "context length", "context window",
+        "maximum context", "too many tokens", "prompt is too long",
+        "reduce the length", "string too long", "input is too long",
+    )
+    return any(needle in text for needle in needles)
 
 
 class ClientRouter:

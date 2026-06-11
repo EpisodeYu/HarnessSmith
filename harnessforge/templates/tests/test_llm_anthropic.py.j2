@@ -108,6 +108,22 @@ def test_usage_maps_input_output_to_prompt_completion_total():
     assert from_anthropic_usage(None).total_tokens == 0
 
 
+def test_usage_folds_cache_tokens_into_prompt_and_exposes_cached():
+    """Anthropic reports cached/created prompt tokens separately; the neutral
+    prompt_tokens is their sum, and cached_prompt_tokens carries the cheap reads."""
+    usage = from_anthropic_usage(
+        {
+            "input_tokens": 7,
+            "output_tokens": 5,
+            "cache_read_input_tokens": 3,
+            "cache_creation_input_tokens": 2,
+        }
+    )
+    assert usage.prompt_tokens == 12  # 7 fresh + 3 read + 2 created
+    assert usage.cached_prompt_tokens == 3
+    assert usage.total_tokens == 17
+
+
 # ---- per-model request rules -------------------------------------------------
 
 
@@ -131,6 +147,30 @@ def test_temperature_skipped_for_models_that_reject_it():
     assert "temperature" in client._request_kwargs([{"role": "user", "content": "x"}], None)
     client.model = "claude-opus-4-8"
     assert "temperature" not in client._request_kwargs([{"role": "user", "content": "x"}], None)
+
+
+def test_top_p_obeys_sampling_rule_and_stop_maps_to_sequences():
+    """top_p follows the same per-model sampling rule as temperature (Opus 4.7+
+    reject it); stop becomes stop_sequences (a bare string is wrapped in a list)."""
+    client = _client(top_p=0.5, stop="STOP")
+    kwargs = client._request_kwargs([{"role": "user", "content": "x"}], None)
+    assert kwargs["top_p"] == 0.5
+    assert kwargs["stop_sequences"] == ["STOP"]
+
+    client.model = "claude-opus-4-8"
+    kwargs = client._request_kwargs([{"role": "user", "content": "x"}], None)
+    assert "top_p" not in kwargs  # rejected by recent Opus, skipped silently
+
+    list_stop = _client(stop=["A", "B"])._request_kwargs([{"role": "user", "content": "x"}], None)
+    assert list_stop["stop_sequences"] == ["A", "B"]
+
+
+def test_extra_body_passes_through_for_nonstandard_params():
+    """Non-standard params (e.g. native top_k) ride along in extra_body verbatim."""
+    kwargs = _client(extra_body={"top_k": 10})._request_kwargs(
+        [{"role": "user", "content": "x"}], None
+    )
+    assert kwargs["extra_body"] == {"top_k": 10}
 
 
 def test_reasoning_effort_maps_to_adaptive_thinking_plus_effort():

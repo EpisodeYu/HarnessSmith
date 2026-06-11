@@ -19,7 +19,9 @@ tokenizer dep.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .config import ContextConfig
@@ -36,10 +38,27 @@ _SUMMARY_PROMPT = (
     "decisions, and any open tasks. Output only the summary."
 )
 
-# A condition answers "should we compact now?" from the live messages and the
-# threshold configured for it in config.yaml. A strategy rewrites the messages
-# to fit (and may use the optional summarizer client).
-Condition = Callable[[list[dict], int], bool]
+
+@dataclass
+class ContextInfo:
+    """Live signals a condition may consult beyond the raw messages.
+
+    ``last_prompt_tokens`` is the prompt-token count the provider reported on the
+    PREVIOUS response — the exact, usage-driven number (0 before the first call,
+    where a char estimate fills in). ``context_window`` is the active generation
+    profile's total window, when it declared one (else ``None``).
+    """
+
+    last_prompt_tokens: int = 0
+    context_window: int | None = None
+
+
+# A condition answers "should we compact now?". Built-ins take ``(messages,
+# threshold, info)`` to use real usage; an older 2-arg ``(messages, threshold)``
+# custom condition still works (the dispatcher only passes ``info`` when accepted),
+# so the extension contract stays backward-compatible. A strategy rewrites the
+# messages to fit (and may use the optional summarizer client).
+Condition = Callable[..., bool]
 Strategy = Callable[..., list[dict]]
 
 CONDITIONS: dict[str, Condition] = {}
@@ -83,12 +102,27 @@ def count_turns(messages: list[dict]) -> int:
 
 
 @register_condition("max_tokens")
-def _cond_max_tokens(messages: list[dict], threshold: int) -> bool:
-    return estimate_tokens(messages) > threshold
+def _cond_max_tokens(messages: list[dict], threshold: float, info: ContextInfo | None = None) -> bool:
+    """Absolute token trigger — the provider's real last prompt_tokens when known,
+    a char estimate only as a first-call fallback."""
+    tokens = info.last_prompt_tokens if (info and info.last_prompt_tokens) else estimate_tokens(messages)
+    return tokens > threshold
+
+
+@register_condition("window_pct")
+def _cond_window_pct(messages: list[dict], threshold: float, info: ContextInfo | None = None) -> bool:
+    """Usage-driven trigger: compact when the prompt fills ``threshold`` (0–1) of
+    the model's context window. Inactive (never fires) until the active profile
+    declares a ``context_window`` — so a large-window model is never compacted too
+    early. Uses real prompt_tokens once known, a char estimate on the first call."""
+    if not info or not info.context_window:
+        return False
+    tokens = info.last_prompt_tokens or estimate_tokens(messages)
+    return tokens / info.context_window >= threshold
 
 
 @register_condition("max_turns")
-def _cond_max_turns(messages: list[dict], threshold: int) -> bool:
+def _cond_max_turns(messages: list[dict], threshold: float) -> bool:
     return count_turns(messages) > threshold
 
 
@@ -198,17 +232,42 @@ def make_summarizer(
     return _AccountingSummarizer(client, trace, config.profile_for("compaction"))
 
 
-def should_compact(messages: list[dict], ctx: ContextConfig) -> bool:
+def _accepts_info(fn: Condition) -> bool:
+    """Whether a condition takes the ``info`` arg (3rd positional, named ``info``,
+    or ``*args``/``**kwargs``). Older 2-arg conditions are called without it, so the
+    extension contract stays backward-compatible."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    if "info" in params:
+        return True
+    positional = 0
+    for param in params.values():
+        if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+            return True
+        if param.kind in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD):
+            positional += 1
+    return positional >= 3
+
+
+def should_compact(
+    messages: list[dict], ctx: ContextConfig, *, info: ContextInfo | None = None
+) -> bool:
     """Evaluate the configured trigger conditions, combined by ``ctx.combine``.
 
-    Unknown condition names (e.g. a typo, or a custom one not imported) are
-    skipped. With no recognized triggers this is ``False`` (never compact).
+    ``info`` carries the real last-response usage + the model's context window for
+    usage-driven conditions (built-ins use it; legacy 2-arg conditions don't).
+    Unknown condition names (a typo, or a custom one not imported) are skipped.
+    With no recognized triggers this is ``False`` (never compact).
     """
-    hits = [
-        CONDITIONS[name](messages, threshold)
-        for name, threshold in ctx.triggers.items()
-        if name in CONDITIONS
-    ]
+    info = info or ContextInfo()
+    hits: list[bool] = []
+    for name, threshold in ctx.triggers.items():
+        fn = CONDITIONS.get(name)
+        if fn is None:
+            continue
+        hits.append(fn(messages, threshold, info) if _accepts_info(fn) else fn(messages, threshold))
     if not hits:
         return False
     return all(hits) if ctx.combine == "and" else any(hits)
@@ -219,13 +278,23 @@ def fit(
     ctx: ContextConfig,
     *,
     summarizer: LLMClient | None = None,
-{% if spec.memory.enabled %}    config=None,
-{% endif %}) -> list[dict]:
-    """Return ``messages`` compacted to fit ``ctx`` (no-op unless triggered)."""
+    last_prompt_tokens: int = 0,
+    context_window: int | None = None,
+    force: bool = False,
+    config=None,
+) -> list[dict]:
+    """Return ``messages`` compacted to fit ``ctx`` (no-op unless triggered).
+
+    ``last_prompt_tokens`` / ``context_window`` feed the usage-driven conditions
+    (the real prompt size from the previous response + the model's window).
+    ``force`` skips the trigger check and compacts now — used by the overflow
+    auto-rescue after the API rejected an over-long request.
+    """
     strategy = STRATEGIES.get(ctx.strategy)
     if ctx.strategy == "none" or strategy is None:
         return messages
-    if not should_compact(messages, ctx):
+    info = ContextInfo(last_prompt_tokens=last_prompt_tokens, context_window=context_window)
+    if not force and not should_compact(messages, ctx, info=info):
         return messages
 {% if spec.memory.enabled %}    # Let long-term memory rescue insight from the turns about to be dropped,
     # before the strategy discards/summarizes them (no-op unless a backend hooks it).

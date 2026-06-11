@@ -22,11 +22,36 @@ llms:
     # temperature: 0.7          # unset = provider default (~1.0 for chat models)
     # max_tokens: 1024
     # reasoning_effort: medium  # reasoning models only: none/minimal/low/medium/high/xhigh
-{% endif %}    # Optional cost accounting. Required if you use the budget max_cost condition —
+{% endif %}    # More optional sampling knobs (all sent ONLY when set). top_p = nucleus
+    # sampling (alter this OR temperature). frequency_penalty / presence_penalty
+    # (-2..2) curb repetition. seed = more deterministic. stop = stop string(s).
+    # Reasoning / thinking modes ignore most of these — leave them unset there.
+    # top_p: 0.95
+    # frequency_penalty: 0.0
+    # presence_penalty: 0.0
+    # seed: 42
+    # stop: ["\n\n"]
+    # Escape hatch for NON-standard provider params (e.g. Qwen/DashScope top_k,
+    # enable_thinking). Merged verbatim into the request. Values only — no secrets.
+    # extra_body: {top_k: 40}
+    # The model's total context window (input+output budget). Set it to drive
+    # accurate `window_pct` compaction (see context: below). Left unset, the harness
+    # skips percentage-based pre-compaction and leans on overflow auto-rescue — so a
+    # large-window model is never compacted too early.
+    # context_window: 200000
+    # Per-call reliability (passed to the SDK). timeout_seconds caps one request;
+    # max_retries retries transient 429/5xx with backoff. fallback names ANOTHER
+    # profile to retry this step with if the call errors before streaming output.
+    # timeout_seconds: 600
+    # max_retries: 2
+    # fallback: backup
+    # Optional cost accounting. Required if you use the budget max_cost condition —
     # otherwise cost stays 0 and the cost limit never triggers. Price per 1,000,000 tokens,
-    # in your own currency (fill in your local price).
+    # in your own currency (fill in your local price). cached_input_cost_per_million
+    # prices provider-cached prompt tokens (cheaper); unset = billed at the input price.
     # input_cost_per_million: 0.0
     # output_cost_per_million: 0.0
+    # cached_input_cost_per_million: 0.0
 {% endfor %}
 # Map roles to profile names above. `generation` is the main loop; `compaction`
 # (optional) is used by context summarize; `title` (optional) names sessions in
@@ -80,17 +105,24 @@ confirm: {{ confirm_default }}
 # Context-window management (runtime knob). A condition in `triggers` decides
 # WHEN to compact (combined by `combine`: or/and); `strategy` decides HOW.
 # truncate = keep system + recent turns; summarize = fold older turns via the
-# `compaction` role; none = off. Built-in conditions: max_tokens (estimated
-# prompt tokens) and max_turns (user turns). Empty triggers = never compact.
-# Add your own with @register_condition / @register_strategy (see harness/context.py).
-{% set sctx = spec.context or {} %}{% set triggers = sctx.get("triggers", {"max_tokens": 192000}) %}context:
+# `compaction` role; none = off. Built-in conditions: window_pct (real prompt
+# tokens as a fraction of the profile's context_window — the usage-driven default,
+# inactive until that profile sets context_window above), max_tokens (absolute
+# tokens: real usage when known, else a char estimate), max_turns (user turns).
+# Empty triggers = never compact. Add your own with @register_condition /
+# @register_strategy (see harness/context.py).
+{% set sctx = spec.context or {} %}{% set triggers = sctx.get("triggers", {"window_pct": 0.85}) %}context:
   strategy: {{ sctx.get("strategy", "summarize") }}
   keep_last_turns: {{ sctx.get("keep_last_turns", 6) }}
   combine: {{ sctx.get("combine", "or") }}   # or = any trigger fires; and = all must fire
+  # Cap one tool result before it enters history (first gate vs one huge observation
+  # blowing the window); the overflow becomes a [truncated N chars] marker. 0 = off.
+  max_tool_result_chars: {{ sctx.get("max_tool_result_chars", 100000) }}
   triggers:
 {% for name, value in triggers.items() %}    {{ name }}: {{ value }}
 {% endfor %}{% if not triggers %}    {}
-{% endif %}    # max_turns: 40   # also compact after N user turns (combine decides and/or)
+{% endif %}    # max_tokens: 192000   # also compact at an absolute token count (real usage when known)
+    # max_turns: 40        # also compact after N user turns (combine decides and/or)
 
 # Loop paradigms (runtime roster). `enabled` lists the selectable paradigms; pick
 # one per turn via `run --mode <name>` (CLI) or the web dropdown. `default` is

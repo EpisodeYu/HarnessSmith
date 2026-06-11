@@ -680,11 +680,14 @@ def test_memory_disabled_omits_footprint(tmp_path, preset_spec):
     prompts_py = (pkg / "harness" / "prompts.py").read_text(encoding="utf-8")
     assert "memory" not in prompts_py.lower()
 
-    # the loop core (context + paradigms) carries none of the memory wiring
+    # the loop core (context + paradigms) carries none of the memory wiring.
+    # (``config`` flows into fit/generate unconditionally now — it is core wiring
+    # for overflow rescue + fallback, not memory — so the memory footprint is just
+    # the compact_rescue hook, gated off here.)
     context_py = (pkg / "harness" / "context.py").read_text(encoding="utf-8")
-    assert "compact_rescue" not in context_py and "config=None" not in context_py
+    assert "compact_rescue" not in context_py
     agent_py = (pkg / "harness" / "paradigms" / "agent.py").read_text(encoding="utf-8")
-    assert "config=config" not in agent_py
+    assert "from ..memory" not in agent_py and "compact_rescue" not in agent_py
 
     cli_py = (pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
     assert "_setup_memory" not in cli_py and "def memory(" not in cli_py

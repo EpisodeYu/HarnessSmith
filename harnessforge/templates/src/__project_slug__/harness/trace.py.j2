@@ -25,9 +25,16 @@ def compute_cost(usage: Usage, profile: LLMProfileConfig) -> float:
     """Cost of one response given the profile's per-1M-token prices.
 
     Currency-agnostic: the profile prices are whatever currency you filled in.
+    Provider-cached prompt tokens bill at ``cached_input_cost_per_million`` when
+    that price is set; left 0 they fall back to the full input price (so an unset
+    cached price never spuriously under-counts).
     """
+    cached = max(0, usage.cached_prompt_tokens)
+    fresh_prompt = max(0, usage.prompt_tokens - cached)
+    cached_price = profile.cached_input_cost_per_million or profile.input_cost_per_million
     return (
-        usage.prompt_tokens / 1_000_000 * profile.input_cost_per_million
+        fresh_prompt / 1_000_000 * profile.input_cost_per_million
+        + cached / 1_000_000 * cached_price
         + usage.completion_tokens / 1_000_000 * profile.output_cost_per_million
     )
 
@@ -39,6 +46,7 @@ class Trace:
     enabled: bool = True
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cached_prompt_tokens: int = 0
     cost_usd: float = 0.0
     _path: Path | None = field(default=None, init=False, repr=False)
     _fh: Any = field(default=None, init=False, repr=False)
@@ -71,6 +79,7 @@ class Trace:
         """Accumulate token counts and cost; return this response's cost."""
         self.prompt_tokens += usage.prompt_tokens
         self.completion_tokens += usage.completion_tokens
+        self.cached_prompt_tokens += usage.cached_prompt_tokens
         cost = compute_cost(usage, profile)
         self.cost_usd += cost
         return cost

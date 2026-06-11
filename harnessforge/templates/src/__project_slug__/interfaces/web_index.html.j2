@@ -74,6 +74,9 @@
           <select id="cfg-ctx-combine" class="mt-1 block rounded-lg border px-3 py-2">
             <option value="or">or</option><option value="and">and</option>
           </select></label>
+        <label class="block text-sm"><span data-i18n="ctx_toolcap_label">max_tool_result_chars</span>
+          <input id="cfg-ctx-toolcap" type="number" min="0" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
+          <span class="block text-xs text-gray-500" data-i18n="ctx_toolcap_hint">Cap one tool result (0 = off).</span></label>
         <div>
           <p class="text-sm" data-i18n="ctx_triggers_label">Triggers (threshold; blank = off)</p>
           <div id="cfg-ctx-triggers" class="mt-1 space-y-2"></div>
@@ -226,15 +229,23 @@
         profile_name: "name", profile_model: "model", profile_provider: "provider",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "env var name",
-        adv_section: "Advanced (sampling)", stats_section: "Pricing (cost tracking)",
+        adv_section: "Advanced", stats_section: "Pricing (cost tracking)",
         profile_temp: "temperature", profile_maxtok: "max_tokens", profile_reasoning: "reasoning effort",
         temp_ph: "model default (≈1)", reasoning_default: "(model default)",
+        profile_top_p: "top_p", profile_freq_pen: "frequency_penalty",
+        profile_pres_pen: "presence_penalty", profile_seed: "seed", profile_stop: "stop",
+        profile_ctxwin: "context_window", ctxwin_ph: "e.g. 200000 / 1000000 (blank = no % compaction)",
+        profile_timeout: "timeout (s)", profile_retries: "max_retries", profile_fallback: "fallback profile",
+        profile_extra: "extra params (JSON; e.g. top_k)", extra_ph: '{"top_k": 40}',
         profile_input_cost: "input cost", profile_output_cost: "output cost",
+        profile_cached_cost: "cached input cost",
         cost_ph: "price / 1M tokens",
         set_key_ph: "set this key's value in .env (overwrites if it exists)", set_key_btn: "Save to .env",
         set_url_ph: "set this URL's value in .env (overwrites if it exists)", set_url_btn: "Save to .env",
         key_saved: "saved to .env", key_need_name: "set the env-var name first",
         ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_combine_label: "combine (or/and)",
+        ctx_toolcap_label: "max_tool_result_chars",
+        ctx_toolcap_hint: "Cap one tool result before it enters history (0 = off). window_pct compacts at a fraction (0–1) of a profile's context_window.",
         ctx_triggers_label: "Triggers (condition → threshold; blank = off)",
         ctx_extend_hint: "Add your own: @register_strategy / @register_condition in harness/context.py — they appear here once imported (see AGENTS.md).",
         cfg_unregistered: "not registered in code — import its module?",
@@ -313,15 +324,23 @@
         profile_name: "名称", profile_model: "model", profile_provider: "provider",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "环境变量名",
-        adv_section: "高级(采样)", stats_section: "定价(成本统计)",
+        adv_section: "高级", stats_section: "定价(成本统计)",
         profile_temp: "temperature", profile_maxtok: "max_tokens", profile_reasoning: "思考深度",
         temp_ph: "模型默认(≈1)", reasoning_default: "(模型默认)",
+        profile_top_p: "top_p", profile_freq_pen: "frequency_penalty",
+        profile_pres_pen: "presence_penalty", profile_seed: "seed", profile_stop: "停止序列",
+        profile_ctxwin: "上下文窗口", ctxwin_ph: "如 200000 / 1000000(留空=不做百分比压缩)",
+        profile_timeout: "超时(秒)", profile_retries: "最大重试", profile_fallback: "回退配置",
+        profile_extra: "额外参数(JSON;如 top_k)", extra_ph: '{"top_k": 40}',
         profile_input_cost: "输入 cost", profile_output_cost: "输出 cost",
+        profile_cached_cost: "缓存输入 cost",
         cost_ph: "价格 / 百万 token",
         set_key_ph: "在 .env 设置该 key 的值(如已存在则覆盖)", set_key_btn: "写入 .env",
         set_url_ph: "在 .env 设置该 url 的值(如已存在则覆盖)", set_url_btn: "写入 .env",
         key_saved: "已写入 .env", key_need_name: "请先填环境变量名",
         ctx_strategy_label: "策略", ctx_keep_label: "保留最近轮数", ctx_combine_label: "组合方式 (or/and)",
+        ctx_toolcap_label: "单工具结果上限(字符)",
+        ctx_toolcap_hint: "单条工具结果进入历史前的字符上限(0=不限)。window_pct 按 profile 的 context_window 的比例(0–1)触发压缩。",
         ctx_triggers_label: "触发条件(条件 → 阈值;留空=不启用)",
         ctx_extend_hint: "可自定义:在 harness/context.py 用 @register_strategy / @register_condition 注册,import 后即在此出现(见 AGENTS.md)。",
         cfg_unregistered: "代码中未注册 —— 是否忘了 import 其模块?",
@@ -1018,6 +1037,8 @@
       const reasoning = p.reasoning_effort || "";
       const reOpt = (v, label) =>
         "<option value='" + v + "'" + (reasoning === v ? " selected" : "") + ">" + (label || v) + "</option>";
+      const stopVal = Array.isArray(p.stop) ? p.stop.join(", ") : (p.stop || "");
+      const extraVal = (p.extra_body && Object.keys(p.extra_body).length) ? JSON.stringify(p.extra_body) : "";
       const provider = p.provider || "openai";
       const provOpt = (v) => "<option value='" + v + "'" + (provider === v ? " selected" : "") + ">" + v + "</option>";
       const div = document.createElement("div");
@@ -1044,11 +1065,23 @@
             "<label>" + t("profile_reasoning") + "<select class='p-reasoning mt-1 w-full rounded border px-2 py-1'>" +
               reOpt("", t("reasoning_default")) + reOpt("none") + reOpt("minimal") + reOpt("low") + reOpt("medium") + reOpt("high") + reOpt("xhigh") +
             "</select></label>" +
-          "</div></details>" +
+            "<label>" + t("profile_top_p") + "<input class='p-topp mt-1 w-full rounded border px-2 py-1' placeholder='\u2014' value='" + escNum(p.top_p) + "'/></label>" +
+            "<label>" + t("profile_freq_pen") + "<input class='p-freqpen mt-1 w-full rounded border px-2 py-1' placeholder='\u2014' value='" + escNum(p.frequency_penalty) + "'/></label>" +
+            "<label>" + t("profile_pres_pen") + "<input class='p-prespen mt-1 w-full rounded border px-2 py-1' placeholder='\u2014' value='" + escNum(p.presence_penalty) + "'/></label>" +
+            "<label>" + t("profile_seed") + "<input class='p-seed mt-1 w-full rounded border px-2 py-1' placeholder='\u2014' value='" + escNum(p.seed) + "'/></label>" +
+            "<label>" + t("profile_stop") + "<input class='p-stop mt-1 w-full rounded border px-2 py-1' placeholder='\u2014' value='" + esc(stopVal) + "'/></label>" +
+            "<label>" + t("profile_ctxwin") + "<input class='p-ctxwin mt-1 w-full rounded border px-2 py-1' placeholder='" + t("ctxwin_ph") + "' value='" + escNum(p.context_window) + "'/></label>" +
+            "<label>" + t("profile_timeout") + "<input class='p-timeout mt-1 w-full rounded border px-2 py-1' placeholder='\u2014' value='" + escNum(p.timeout_seconds) + "'/></label>" +
+            "<label>" + t("profile_retries") + "<input class='p-retries mt-1 w-full rounded border px-2 py-1' placeholder='\u2014' value='" + escNum(p.max_retries) + "'/></label>" +
+            "<label>" + t("profile_fallback") + "<input class='p-fallback mt-1 w-full rounded border px-2 py-1' placeholder='\u2014' value='" + esc(p.fallback || "") + "'/></label>" +
+          "</div>" +
+          "<label class='mt-2 block'>" + t("profile_extra") + "<textarea class='p-extra mt-1 w-full rounded border px-2 py-1 font-mono' rows='2' placeholder='" + t("extra_ph") + "'>" + esc(extraVal) + "</textarea></label>" +
+        "</details>" +
         "<details class='text-xs'><summary class='cursor-pointer text-slate-600'>" + t("stats_section") + "</summary>" +
-          "<div class='mt-2 grid grid-cols-2 gap-2'>" +
+          "<div class='mt-2 grid grid-cols-3 gap-2'>" +
             "<label>" + t("profile_input_cost") + "<input class='p-pcost mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(p.input_cost_per_million) + "'/></label>" +
             "<label>" + t("profile_output_cost") + "<input class='p-ccost mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(p.output_cost_per_million) + "'/></label>" +
+            "<label>" + t("profile_cached_cost") + "<input class='p-cachedcost mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(p.cached_input_cost_per_million) + "'/></label>" +
           "</div></details>";
       return div;
     }
@@ -1073,8 +1106,22 @@
       const temp = numOrNull(g("p-temp")); if (temp != null) o.temperature = temp;
       const mt = numOrNull(g("p-maxtok")); if (mt != null) o.max_tokens = mt;
       const re = g("p-reasoning"); if (re) o.reasoning_effort = re;
+      const tp = numOrNull(g("p-topp")); if (tp != null) o.top_p = tp;
+      const fp = numOrNull(g("p-freqpen")); if (fp != null) o.frequency_penalty = fp;
+      const pp = numOrNull(g("p-prespen")); if (pp != null) o.presence_penalty = pp;
+      const sd = numOrNull(g("p-seed")); if (sd != null) o.seed = sd;
+      const st = g("p-stop"); if (st) o.stop = st;
+      const cw = numOrNull(g("p-ctxwin")); if (cw != null) o.context_window = cw;
+      const to = numOrNull(g("p-timeout")); if (to != null) o.timeout_seconds = to;
+      const mr = numOrNull(g("p-retries")); if (mr != null) o.max_retries = mr;
+      const fb = g("p-fallback"); if (fb) o.fallback = fb;
+      // extra_body: a JSON object of non-standard provider params (top_k, ...).
+      // Invalid / non-object JSON is dropped silently (the field is flagged red live).
+      const ex = g("p-extra");
+      if (ex) { try { const v = JSON.parse(ex); if (v && typeof v === "object" && !Array.isArray(v)) o.extra_body = v; } catch (e) {} }
       o.input_cost_per_million = numOrNull(g("p-pcost")) ?? 0;
       o.output_cost_per_million = numOrNull(g("p-ccost")) ?? 0;
+      o.cached_input_cost_per_million = numOrNull(g("p-cachedcost")) ?? 0;
       return o;
     }
     // Options come from the LIVE profile-name inputs (so renaming/adding a profile
@@ -1141,6 +1188,7 @@
       sel.value = ctx.strategy || "summarize";
       $("cfg-ctx-keep").value = ctx.keep_last_turns ?? 6;
       $("cfg-ctx-combine").value = ctx.combine || "or";
+      $("cfg-ctx-toolcap").value = ctx.max_tool_result_chars ?? 100000;
       const trig = ctx.triggers || {};
       const names = reg.conditions.slice();
       Object.keys(trig).forEach((n) => { if (!names.includes(n)) names.push(n); });
@@ -1153,7 +1201,9 @@
         span.className = "w-44 font-mono"; span.textContent = name + (ok ? "" : UNREG);
         if (!ok) span.title = t("cfg_unregistered");
         const inp = document.createElement("input");
-        inp.type = "number"; inp.min = "1"; inp.placeholder = "\u2014";
+        // step "any" + no min so a 0–1 fraction (window_pct) and absolute token
+        // counts (max_tokens / max_turns) share one input.
+        inp.type = "number"; inp.step = "any"; inp.min = "0"; inp.placeholder = "\u2014";
         inp.className = "cfg-trigger w-40 rounded border px-2 py-1";
         inp.dataset.cond = name;
         inp.value = trig[name] ?? "";
@@ -1580,6 +1630,7 @@
         strategy: $("cfg-ctx-strategy").value,
         keep_last_turns: Number($("cfg-ctx-keep").value || 6),
         combine: $("cfg-ctx-combine").value,
+        max_tool_result_chars: Number($("cfg-ctx-toolcap").value || 0),
       };
       const triggers = {};
       document.querySelectorAll("#cfg-ctx-triggers .cfg-trigger").forEach((el) => {
@@ -1687,9 +1738,16 @@
       $("cfg-profiles").appendChild(profileCard({}));
       buildRoles();  // a new (empty) profile may already provide a name to bind
     });
-    // Keep the role dropdowns in sync as profile names are typed.
+    // Keep the role dropdowns in sync as profile names are typed; flag invalid
+    // extra_body JSON live (it's dropped on Save, never sent half-parsed).
     $("cfg-profiles").addEventListener("input", (e) => {
       if (e.target.classList.contains("p-name")) buildRoles();
+      if (e.target.classList.contains("p-extra")) {
+        const txt = e.target.value.trim();
+        let ok = true;
+        if (txt) { try { const v = JSON.parse(txt); ok = v && typeof v === "object" && !Array.isArray(v); } catch (err) { ok = false; } }
+        e.target.classList.toggle("border-red-500", !ok);
+      }
     });
     // Test a profile, remove it, or write an env-var VALUE (api key / base url)
     // into the local .env (gitignored). Written values are write-only: posted
