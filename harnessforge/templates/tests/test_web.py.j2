@@ -605,6 +605,112 @@ def test_config_post_persists_to_yaml_preserving_comments(tmp_path):
     assert load_config(cfg_path).prompts.system == "PERSISTED"
 
 
+# --- System page: theme (client-side) + config import/export --------------
+
+
+def test_index_has_system_tab_and_theme_toggle():
+    """The product ships a System config sub-tab (language + import/export) and a
+    sidebar theme toggle wired to a contained dark-theme override."""
+    body = _client().get("/").text
+    assert 'data-cfg="system"' in body and "subtab_system" in body
+    assert 'id="theme-toggle"' in body and "hf_theme" in body
+    assert "function applyTheme" in body
+    assert "html.dark" in body  # the dark-theme CSS override block
+    assert "/system/config-export" in body and "/system/config-import" in body
+
+
+def test_system_config_export_returns_yaml_without_secrets():
+    """GET /system/config-export serves config.yaml as a download; the in-memory
+    config is serialized to YAML and never carries a secret value."""
+    resp = _client().get("/system/config-export")
+    assert resp.status_code == 200
+    assert "config.yaml" in resp.headers.get("content-disposition", "")
+    assert "mock-model" in resp.text  # the config serialized to YAML
+    assert "sk-" not in resp.text  # config only stores env-var NAMES, never values
+
+
+def test_system_config_export_returns_file_verbatim(tmp_path):
+    """With a config_path the export is the on-disk file verbatim (comments kept)."""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "# my hand-written config\n"
+        "llms:\n  - name: default\n    model: mock-model\n"
+        "roles:\n  generation: default\n"
+        "observability:\n  trace: false\n"
+        "sessions:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(mock=True, config_path=cfg_path))
+    text = client.get("/system/config-export").text
+    assert "# my hand-written config" in text  # served verbatim
+
+
+def test_system_config_import_replaces_and_persists(tmp_path):
+    """POST /system/config-import validates + applies the new config in-process and
+    writes it back to config.yaml (so it survives a restart)."""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "llms:\n  - name: default\n    model: mock-model\n"
+        "roles:\n  generation: default\n"
+        "prompts:\n  system: original\n"
+        "observability:\n  trace: false\n"
+        "sessions:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(mock=True, config_path=cfg_path))
+    new_yaml = (
+        "llms:\n  - name: default\n    model: mock-model\n"
+        "roles:\n  generation: default\n"
+        "prompts:\n  system: IMPORTED\n"
+        "observability:\n  trace: false\n"
+        "sessions:\n  enabled: false\n"
+    )
+    resp = client.post(
+        "/system/config-import", content=new_yaml, headers={"Content-Type": "text/plain"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert client.get("/config").json()["prompts"]["system"] == "IMPORTED"  # live
+    assert "IMPORTED" in cfg_path.read_text(encoding="utf-8")  # persisted
+    assert load_config(cfg_path).prompts.system == "IMPORTED"  # a restart sees it
+
+
+def test_system_config_import_rejects_invalid_config():
+    """A non-mapping payload or one that fails validation is a 400, and the running
+    config is left untouched (rejected before it is applied)."""
+    client = _client()
+    assert client.get("/config").json()["prompts"].get("system") == "You are a test agent."
+    # unknown top-level key -> Config forbids extras -> 400
+    bad = client.post(
+        "/system/config-import", content="bogus_key: 1\n", headers={"Content-Type": "text/plain"}
+    )
+    assert bad.status_code == 400 and "error" in bad.json()
+    # not a mapping -> 400
+    assert client.post(
+        "/system/config-import", content="- a\n- b\n", headers={"Content-Type": "text/plain"}
+    ).status_code == 400
+    # the original config is intact
+    assert client.get("/config").json()["prompts"]["system"] == "You are a test agent."
+
+
+def test_system_config_import_without_path_applies_in_process(tmp_path, monkeypatch):
+    """An app with no config_path applies an import in the running process but never
+    writes a stray config.yaml to disk."""
+    monkeypatch.chdir(tmp_path)
+    client = _client()
+    new_yaml = (
+        "llms:\n  - name: default\n    model: mock-model\n"
+        "roles:\n  generation: default\n"
+        "prompts:\n  system: INMEM\n"
+        "observability:\n  trace: false\n"
+        "sessions:\n  enabled: false\n"
+    )
+    assert client.post(
+        "/system/config-import", content=new_yaml, headers={"Content-Type": "text/plain"}
+    ).status_code == 200
+    assert client.get("/config").json()["prompts"]["system"] == "INMEM"  # live in-process
+    assert not (tmp_path / "config.yaml").exists()  # nothing written
+
+
 def test_config_post_without_path_does_not_write_file(tmp_path, monkeypatch):
     """An app built from an in-code config (no config_path) applies edits in the
     running process but never creates a stray config.yaml on disk."""

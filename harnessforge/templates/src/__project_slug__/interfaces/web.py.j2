@@ -20,9 +20,10 @@ import queue
 import threading
 from pathlib import Path
 
+import yaml
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from ..harness.config import (
     Config,
@@ -921,6 +922,78 @@ def create_app(
                     status_code=500,
                 )
         return app.state.config.model_dump(mode="json", include=set(_EDITABLE_FIELDS))
+
+    @app.get("/system/config-export")
+    def export_config() -> Response:
+        """Download the whole config.yaml — every behavioral setting EXCEPT secrets.
+
+        config.yaml only ever stores env-var NAMES (real values live in .env), so
+        the exported file is safe to back up / share / move to another machine.
+        Returns the on-disk file verbatim (comments preserved) when there is a
+        config_path; otherwise serializes the live in-process config to YAML.
+        """
+        path = app.state.config_path
+        if path is not None and Path(path).is_file():
+            text = Path(path).read_text(encoding="utf-8")
+        else:
+            text = yaml.safe_dump(
+                app.state.config.model_dump(mode="json", exclude_none=True),
+                sort_keys=False, allow_unicode=True,
+            )
+        return Response(
+            content=text,
+            media_type="application/x-yaml",
+            headers={"Content-Disposition": "attachment; filename=config.yaml"},
+        )
+
+    @app.post("/system/config-import")
+    async def import_config(request: Request):
+        """Replace the whole runtime config from an uploaded/pasted config.yaml.
+
+        Parses + validates the payload (``Config.model_validate`` — a bad config is
+        rejected WITHOUT touching the running one), applies it in-process, and
+        writes it back to config.yaml verbatim. Secrets are never accepted here:
+        config only holds env-var NAMES; real values stay in .env. Like the MCP
+        editor this is a LOCAL, trusted-user control — don't expose /config or this
+        endpoint on a public network.
+        """
+        raw = (await request.body()).decode("utf-8")
+        try:
+            data = yaml.safe_load(raw) if raw.strip() else None
+        except yaml.YAMLError as exc:
+            return JSONResponse({"error": f"could not parse config: {exc}"}, status_code=400)
+        if not isinstance(data, dict):
+            return JSONResponse(
+                {"error": "config must be a YAML/JSON mapping at the top level"},
+                status_code=400,
+            )
+        try:
+            new_config = Config.model_validate(data)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        app.state.config = new_config
+        # Re-arm runtime state that depends on the new config (mirrors POST /config):
+        # the local debug log + any custom @register_* extension modules.
+        obs = new_config.observability
+        setup_debug_log(obs.debug, obs.debug_dir)
+        import_extensions(new_config)
+{% if spec.memory.enabled %}        from ..harness.memory import register_memory_tools
+
+        register_memory_tools(new_config)  # re-bind the long-term memory tools
+{% endif %}{% if spec.mcp.enabled %}        # Rebuild the MCP manager so connected servers + offered tools match the import.
+        if app.state.mcp_manager is not None:
+            await run_in_threadpool(lambda: _rebuild_mcp_manager(app))
+{% endif %}        # Persist verbatim so the imported file survives a restart. No config_path
+        # (a config built in code, e.g. tests) -> in-process only, never a stray file.
+        if app.state.config_path is not None:
+            try:
+                Path(app.state.config_path).write_text(raw, encoding="utf-8")
+            except Exception as exc:
+                return JSONResponse(
+                    {"error": f"applied in-process but could not write config.yaml: {exc}"},
+                    status_code=500,
+                )
+        return {"ok": True}
 
     @app.get("/rules")
     def get_rules() -> dict:

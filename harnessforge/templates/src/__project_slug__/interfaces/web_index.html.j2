@@ -5,6 +5,62 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{ display_name }} — web</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Apply the saved theme BEFORE first paint so there is no flash of the wrong
+    // theme. `hf_theme` is one of system/light/dark (system follows the OS).
+    (function () {
+      try {
+        var pref = localStorage.getItem("hf_theme") || "system";
+        var dark = pref === "dark" || (pref === "system" && window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    /* Dark theme: a contained override of the (limited) light palette this page
+       uses via the Tailwind CDN. Toggling `dark` on <html> repaints the few
+       surface / text / border tokens below — no per-element dark: classes needed. */
+    html.dark { color-scheme: dark; }
+    html.dark body { background-color: #0f172a; color: #e2e8f0; }
+    html.dark .bg-white { background-color: #1e293b !important; }
+    html.dark .bg-slate-50 { background-color: #0f172a !important; }
+    html.dark .bg-slate-100 { background-color: #334155 !important; }
+    html.dark .bg-slate-200 { background-color: #475569 !important; }
+    html.dark .hover\:bg-slate-50:hover { background-color: #1e293b !important; }
+    html.dark .hover\:bg-slate-100:hover { background-color: #334155 !important; }
+    /* Default + slate borders go neutral-dark; accent borders are kept below. */
+    html.dark *, html.dark ::before, html.dark ::after { border-color: #334155; }
+    html.dark .border-slate-800 { border-color: #e2e8f0 !important; }
+    html.dark .text-slate-900 { color: #f1f5f9 !important; }
+    html.dark .text-slate-800 { color: #e2e8f0 !important; }
+    html.dark .text-slate-700 { color: #cbd5e1 !important; }
+    html.dark .text-slate-600 { color: #cbd5e1 !important; }
+    html.dark .text-slate-500 { color: #94a3b8 !important; }
+    html.dark .text-slate-400 { color: #94a3b8 !important; }
+    html.dark .text-gray-500 { color: #94a3b8 !important; }
+    html.dark input, html.dark select, html.dark textarea {
+      background-color: #0f172a; color: #e2e8f0; border-color: #475569;
+    }
+    html.dark input::placeholder, html.dark textarea::placeholder { color: #64748b; }
+    /* Tinted accent surfaces -> dark tints + lightened accent text. */
+    html.dark .bg-amber-50 { background-color: #3f2d0b !important; }
+    html.dark .bg-indigo-50 { background-color: #26264f !important; }
+    html.dark .bg-red-50 { background-color: #3f1d1d !important; }
+    html.dark .bg-red-100 { background-color: #4a1414 !important; }
+    html.dark .bg-emerald-100 { background-color: #0c3b30 !important; }
+    html.dark .text-amber-800 { color: #fde68a !important; }
+    html.dark .text-amber-700 { color: #fcd34d !important; }
+    html.dark .text-amber-600 { color: #fbbf24 !important; }
+    html.dark .text-indigo-700 { color: #c7d2fe !important; }
+    html.dark .text-red-700 { color: #fca5a5 !important; }
+    html.dark .text-emerald-700 { color: #6ee7b7 !important; }
+    html.dark .text-emerald-600 { color: #34d399 !important; }
+    html.dark .border-amber-300 { border-color: #b45309 !important; }
+    html.dark .border-indigo-300 { border-color: #6366f1 !important; }
+    html.dark .border-red-300 { border-color: #b91c1c !important; }
+    html.dark .border-red-500 { border-color: #ef4444 !important; }
+  </style>
 </head>
 <body class="h-screen overflow-hidden bg-slate-50 text-slate-800">
   <div class="flex h-screen">
@@ -16,6 +72,14 @@
         <button id="chat-new" type="button" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-left text-sm hover:bg-slate-50" data-i18n="chat_new">+ New chat</button>
       </div>
       <div id="session-list" class="flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 text-sm"></div>
+      <div class="flex items-center gap-2 border-t border-slate-200 px-3 py-2 text-sm">
+        <span class="text-slate-500" data-i18n="theme_label">Theme</span>
+        <div id="theme-toggle" class="ml-auto flex items-center gap-0.5 rounded-lg border border-slate-300 p-0.5">
+          <button type="button" data-theme="system" class="rounded px-1.5 py-0.5 text-xs" data-i18n-title="theme_system" title="System">🖥</button>
+          <button type="button" data-theme="light" class="rounded px-1.5 py-0.5 text-xs" data-i18n-title="theme_light" title="Light">☀</button>
+          <button type="button" data-theme="dark" class="rounded px-1.5 py-0.5 text-xs" data-i18n-title="theme_dark" title="Dark">🌙</button>
+        </div>
+      </div>
       <div class="flex items-center gap-2 border-t border-slate-200 px-3 py-2 text-sm">
         <button id="tab-chat" type="button" class="hidden" data-i18n="nav_chat">Chat</button>
         <button id="tab-config" type="button" class="flex-1 rounded-lg px-2 py-1 text-left text-slate-600 hover:bg-slate-100">⚙ <span data-i18n="nav_config">Config</span></button>
@@ -184,6 +248,31 @@
         <p class="text-xs text-slate-500" data-i18n="obs_debug_note">Local only — never uploaded; records step/tool names, counts and durations, never message content or tool arguments.</p>
       </div>
 
+      <div data-cfg="system" class="hidden space-y-4">
+        <div class="space-y-1">
+          <h4 class="text-sm font-medium" data-i18n="sys_lang_label">Language</h4>
+          <select id="sys-lang" class="rounded-lg border px-3 py-2 text-sm">
+            <option value="en">English</option>
+            <option value="zh">中文</option>
+          </select>
+        </div>
+        <div class="space-y-1 border-t pt-3">
+          <h4 class="text-sm font-medium" data-i18n="sys_export_label">Export configuration</h4>
+          <p class="text-xs text-slate-500" data-i18n="sys_export_hint">Download config.yaml — every behavioral setting except secrets (keys stay in .env).</p>
+          <button id="sys-export" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="sys_export_btn">Download config.yaml</button>
+        </div>
+        <div class="space-y-2 border-t pt-3">
+          <h4 class="text-sm font-medium" data-i18n="sys_import_label">Import configuration</h4>
+          <p class="text-xs text-slate-500" data-i18n="sys_import_hint">Upload or paste a config.yaml. Importing replaces the current config and writes it back to config.yaml; secrets are never imported (keys stay in .env). Local trusted control — don't expose this panel publicly.</p>
+          <input id="sys-import-file" type="file" accept=".yaml,.yml,.json,.txt" class="block text-sm" />
+          <textarea id="sys-import-text" rows="8" class="w-full rounded-lg border px-3 py-2 font-mono text-xs" data-i18n-ph="sys_import_paste_ph" placeholder="paste config.yaml here…"></textarea>
+          <div class="flex items-center gap-2">
+            <button id="sys-import" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="sys_import_btn">Import</button>
+            <span id="sys-import-status" class="text-xs text-slate-500"></span>
+          </div>
+        </div>
+      </div>
+
       <div class="flex items-center gap-3 border-t pt-3">
         <button id="cfg-save" class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="cfg_save">Save</button>
         <button id="cfg-reload" class="rounded-lg border px-4 py-2" data-i18n="cfg_reload">Reload</button>
@@ -224,6 +313,19 @@
         subtab_llm: "LLM", subtab_context: "Context", subtab_budget: "Budget",
         subtab_tools: "Tools",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
         {% if spec.memory.enabled %}subtab_memory: "Memory", {% endif %}subtab_observability: "Observability",
+        subtab_system: "System",
+        theme_label: "Theme", theme_system: "Follow system", theme_light: "Light", theme_dark: "Dark",
+        sys_lang_label: "Language",
+        sys_export_label: "Export configuration",
+        sys_export_hint: "Download config.yaml — every behavioral setting except secrets (keys stay in .env).",
+        sys_export_btn: "Download config.yaml",
+        sys_import_label: "Import configuration",
+        sys_import_hint: "Upload or paste a config.yaml. Importing replaces the current config and writes it back to config.yaml; secrets are never imported (keys stay in .env). Local trusted control — don't expose this panel publicly.",
+        sys_import_paste_ph: "paste config.yaml here…",
+        sys_import_btn: "Import",
+        sys_import_confirm: "Import replaces your current configuration. Continue?",
+        sys_import_done: "imported",
+        sys_import_failed: "nothing to import",
         profiles_label: "LLM profiles", profile_add: "+ Add profile", profile_remove: "remove",
         test_btn: "Test", test_running: "testing…",
         roles_label: "Roles", roles_hint: "Bind each role to a profile above.",
@@ -326,6 +428,19 @@
         subtab_llm: "LLM", subtab_context: "上下文", subtab_budget: "预算",
         subtab_tools: "工具",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_prompts: "提示词", subtab_paradigms: "范式",
         {% if spec.memory.enabled %}subtab_memory: "记忆", {% endif %}subtab_observability: "可观测",
+        subtab_system: "系统",
+        theme_label: "主题", theme_system: "跟随系统", theme_light: "浅色", theme_dark: "深色",
+        sys_lang_label: "语言",
+        sys_export_label: "导出配置",
+        sys_export_hint: "下载 config.yaml —— 除密钥外的全部行为性配置(密钥仍在 .env)。",
+        sys_export_btn: "下载 config.yaml",
+        sys_import_label: "导入配置",
+        sys_import_hint: "上传或粘贴 config.yaml。导入会替换当前配置并写回 config.yaml;密钥永不导入(仍放 .env)。本地可信控制面 —— 切勿对公网暴露此面板。",
+        sys_import_paste_ph: "在此粘贴 config.yaml…",
+        sys_import_btn: "导入",
+        sys_import_confirm: "导入会替换当前配置,确定继续?",
+        sys_import_done: "已导入",
+        sys_import_failed: "没有可导入的内容",
         profiles_label: "LLM 配置", profile_add: "+ 添加配置", profile_remove: "删除",
         test_btn: "测试", test_running: "测试中…",
         roles_label: "角色", roles_hint: "把每个角色绑定到上面的某个配置。",
@@ -410,6 +525,8 @@
     function applyI18n() {
       document.documentElement.lang = lang;
       $("lang").value = lang;
+      const _sysLang = $("sys-lang");
+      if (_sysLang) _sysLang.value = lang;
       document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
       document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
       document.querySelectorAll("[data-i18n-title]").forEach((el) => { el.title = t(el.dataset.i18nTitle); });
@@ -1047,7 +1164,7 @@
     });
 
     // ---- config: functional sub-tabs ------------------------------------
-    const CFG_TABS = ["llm", "context", "budget", "tools",{% if spec.mcp.enabled %} "mcp",{% endif %} "prompts", "paradigms",{% if spec.memory.enabled %} "memory",{% endif %} "observability"];
+    const CFG_TABS = ["llm", "context", "budget", "tools",{% if spec.mcp.enabled %} "mcp",{% endif %} "prompts", "paradigms",{% if spec.memory.enabled %} "memory",{% endif %} "observability", "system"];
     let cfgTab = "llm";
     let cfg = {};
     // Tracks unsaved edits in the config view. Edits live only in the DOM until
@@ -2100,7 +2217,69 @@
       e.returnValue = "";
     });
 
+    // ---- System tab: theme + language + config import/export ----------
+    // Theme is a pure client-side preference (system/light/dark) kept in
+    // localStorage; the head script applies it pre-paint, this keeps the toggle
+    // in sync and reacts to OS changes while on "system".
+    const THEME_KEY = "hf_theme";
+    const themeMq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    function themePref() { return localStorage.getItem(THEME_KEY) || "system"; }
+    function applyTheme() {
+      const pref = themePref();
+      const dark = pref === "dark" || (pref === "system" && themeMq && themeMq.matches);
+      document.documentElement.classList.toggle("dark", dark);
+      document.querySelectorAll("#theme-toggle [data-theme]").forEach((b) => {
+        b.classList.toggle("bg-slate-200", b.dataset.theme === pref);
+      });
+    }
+    document.querySelectorAll("#theme-toggle [data-theme]").forEach((b) => {
+      b.addEventListener("click", () => { localStorage.setItem(THEME_KEY, b.dataset.theme); applyTheme(); });
+    });
+    if (themeMq && themeMq.addEventListener) {
+      themeMq.addEventListener("change", () => { if (themePref() === "system") applyTheme(); });
+    }
+
+    // Language selector in the System tab mirrors the sidebar one (shared state).
+    const sysLangSel = $("sys-lang");
+    if (sysLangSel) sysLangSel.addEventListener("change", () => {
+      lang = sysLangSel.value; localStorage.setItem("hf_lang", lang); applyI18n();
+    });
+
+    // Export: download the current config.yaml (no secrets — keys live in .env).
+    $("sys-export").addEventListener("click", () => {
+      const a = document.createElement("a");
+      a.href = "/system/config-export"; a.download = "config.yaml";
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+    // Import: load a file into the textarea, then POST the text (raw YAML/JSON) to
+    // /system/config-import which validates + applies + persists it. Acts
+    // immediately (not via the Save button); a refresh re-renders every tab.
+    $("sys-import-file").addEventListener("change", async (e) => {
+      const f = e.target.files[0];
+      if (f) $("sys-import-text").value = await f.text();
+    });
+    $("sys-import").addEventListener("click", async () => {
+      const status = $("sys-import-status");
+      const text = $("sys-import-text").value;
+      if (!text.trim()) { status.className = "text-xs text-red-600"; status.textContent = t("sys_import_failed"); return; }
+      if (!confirm(t("sys_import_confirm"))) return;
+      try {
+        const resp = await fetch("/system/config-import", {
+          method: "POST", headers: { "Content-Type": "text/plain" }, body: text,
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          status.className = "text-xs text-emerald-700"; status.textContent = t("sys_import_done");
+          $("sys-import-text").value = ""; $("sys-import-file").value = "";
+          await loadConfig(); loadParadigms();  // re-render every tab + chat-mode list
+        } else {
+          status.className = "text-xs text-red-600"; status.textContent = data.error || t("cfg_invalid");
+        }
+      } catch (err) { status.className = "text-xs text-red-600"; status.textContent = String(err); }
+    });
+
     applyI18n();
+    applyTheme();
     loadConfig();  // populate cfg up front so the chat gate (no-LLM banner) is correct
   </script>
 </body>

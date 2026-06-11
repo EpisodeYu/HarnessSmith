@@ -416,9 +416,13 @@ def test_web_index_has_paged_config_and_language_switch(tmp_path, preset_spec):
     assert 'id="cfg-tabs"' in idx  # config is paged by function
     for sub in (
         "subtab_llm", "subtab_context", "subtab_budget", "subtab_tools",
-        "subtab_prompts", "subtab_paradigms", "subtab_observability",
+        "subtab_prompts", "subtab_paradigms", "subtab_observability", "subtab_system",
     ):
         assert sub in idx
+    # System tab + sidebar theme toggle (light/dark) ship with the web interface
+    assert 'data-cfg="system"' in idx and 'id="theme-toggle"' in idx
+    assert "html.dark" in idx  # contained dark-theme override
+    assert "/system/config-export" in idx and "/system/config-import" in idx
 
 
 def test_web_surfaces_registered_extensions(tmp_path, preset_spec):
