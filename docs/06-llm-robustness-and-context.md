@@ -1,6 +1,6 @@
 # 06 · LLM 支持线差距:上下文工程正确性 + 调用鲁棒性
 
-> **状态(2026-06-11,人定向后实现完成)**:LLM 配置丰富化 + 本文 **P0 + P1 六项已全部实现并过门禁**(生成器快测 + 全量 golden + Docker + uvx 全绿)。**P2 / P3 仍为 backlog**(`02-development/00-overview.md §2` Slice 13+)。落定的关键决策见下方各节 ✅ 标注与本节末"实现决策落定"。
+> **状态(2026-06-11,人定向后实现完成 + 真实端点验收通过)**:LLM 配置丰富化 + 本文 **P0 + P1 六项已全部实现并过门禁**(生成器快测 + 全量 golden + Docker + uvx 全绿),并经 **MiMo 真实双端点(OpenAI 兼容 + Anthropic 原生)端到端验收 29/29 通过**(人提供 key,详见文末 §8)。**P2 / P3 仍为 backlog**(`02-development/00-overview.md §2` Slice 13+)。落定的关键决策见下方各节 ✅ 标注与本节末"实现决策落定"。
 >
 > 本文原是 2026-06-10 一次"对标成熟 harness、聚焦 LLM 支持"探索的落地待办——逐项登记**此前 backlog 尚未出现**的 LLM 相关差距。
 > 性质同 [`03-feature-landscape-and-proposals.md`](./03-feature-landscape-and-proposals.md)(对标分析 + 建议);与已实现的 [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)(Slice 12)互补不重叠。
@@ -75,6 +75,22 @@ API 报 `context_length_exceeded`(400)时 `paradigms/agent.py` 直接 raise、�
 ## 7. 排期形态 — ✅ P0+P1 已作为一个小切片实现(2026-06-11)
 
 P0 + P1 六项 + LLM 配置丰富化合为一个小切片("LLM 配置丰富化 + 上下文管理策略补充")**已实现**:usage 细分 / 窗口防线 / 采样旋钮对 OpenAI 与 Anthropic 两 client 同样适用,双规范不受影响。**P2/P3 仍可零散插队**(见下)。
+
+## 8. 真实端点验收(2026-06-11,人提供 key,29/29 通过)
+
+用人配置的本地 `.env`(MiMo,`mimo-v2.5`,**OpenAI 兼容 + Anthropic 原生两端点**)生成 `coding-assistant` 产物并对本文全部条目做真实端到端验证,**29 项检查全绿**(允许 token 消耗)。逐项:
+
+- **采样旋钮(LLM 配置丰富化)**:`top_p`/`frequency_penalty`/`presence_penalty`/`seed`/`stop` 一并发给 MiMo OpenAI 端点 **全部被接受(无 400)**,`stop` 序列真实生效(停止串不出现在输出)。`seed` 参数被接受;**复现性是供应商 best-effort**(MiMo 为推理模型,不保证同 seed 同输出)——门槛取"接受 + 两次调用都成功",决定性作观察。
+- **`extra_body` 透传**:`{enable_thinking: false}` 与 `{top_k: 20}` 均被端点接受(无 400),证明 SDK 原样透传非标准参数。**MiMo 忽略 `enable_thinking`(reasoning 仍跑)= 供应商是否实现该参数的范畴**,透传机制本身已由"被接受"证明。
+- **B4 cached/reasoning usage**:MiMo OpenAI 端点真实返回 `prompt_tokens_details.cached_tokens`(实测 192)与 `completion_tokens_details.reasoning_tokens`(实测 63–183),正确映射进 `Usage.cached_prompt_tokens`/`reasoning_tokens`;Anthropic 端 `cache_read_input_tokens` 同样映射。`compute_cost` 对缓存命中按 `cached_input_cost_per_million` 计、**未设缓存价时按全价(不误降)**,均断言精确。
+- **A2 真实 usage 驱动触发**:同一短消息真实 `prompt_tokens=248` ≫ 字符估算 `4`(实证中文/紧凑 prompt 的数倍低估);真实 usage 命中 `max_tokens:100` 触发而字符估算不命中。
+- **B1 `context_window` + `window_pct`**:接近满窗(ratio 0.90)触发、大窗口(×1000)静默不误压、未设 `context_window` 不触发;`summarize` 经**真实 compaction LLM** 把 16 条历史实压到 5 条并带摘要 note。
+- **B2 溢出自救**:**真实发现——MiMo 与 DeepSeek 生产端点对超长输入(~1.25M 字符)自动截断/滑窗并正常作答,而非返回 `context_length_exceeded`**,故无法靠输入体积在这些端点触发 B2(印证其"罕见最后防线"定位)。改用**真实 `openai.BadRequestError` + 真实供应商措辞**验证 `is_context_overflow`(识别三种 overflow 措辞、忽略瞬时 503 以便走 fallback 而非压缩),并以**真实 MiMo 端点作 retry 目标**验证 `generate()` 的"检测溢出 → 强制压一次 → 重试本步"控制流(`calls=2`、消息 3→1、重试成功)。
+- **B3 超时/重试/fallback**:坏模型名报错**未被误判为 overflow**(走 fallback 而非压缩);`generate()` 真实切换到 `backup` profile 重试成功;`timeout_seconds`/`max_retries` 透传 SDK 后真实调用正常。
+- **A1 单工具结果截断**:大结果被截到 `max_tool_result_chars` 并带 `[truncated N chars]` 标注,`0` 关闭则原样通过。
+- **真实 function-calling(两规范)**:OpenAI 与 Anthropic 端各跑通一次完整 agent turn(`calculator`,得正确答案 12),trace 记录真实 usage(含 cached),Anthropic `tool_use`↔`tool_result` 往返 + 思考流 `on_thinking` 真实增量(实测 51 次)均正常。
+
+> 验收方式:生成产物 → `uv sync` → 真实脚本逐项断言(不改生成器/模板代码,纯真实验证)。三项最初的"失败"经核查均为**端点特性而非功能缺陷**(MiMo 不保证 seed 决定性、忽略 enable_thinking;两端点自动截断超长输入),已据此把对应断言定位为观察项 / 改用真实 SDK 异常验证。
 
 ---
 
