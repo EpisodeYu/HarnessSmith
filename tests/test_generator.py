@@ -977,6 +977,32 @@ def test_launch_bat_fallback_uses_exe_to_avoid_self_shadow(tmp_path, spec):
     assert "\nharnessforge wizard --open" not in root_bat  # no bare relaunch
 
 
+def test_root_launchers_offer_web_and_cli_setup():
+    """The repo-root one-click launchers let the user choose the web form or the
+    interactive CLI wizard (the CLI path is what makes headless Linux usable)."""
+    root = Path(__file__).resolve().parents[1]
+    sh = (root / "HarnessForge.sh").read_text(encoding="utf-8")
+    bat = (root / "HarnessForge.bat").read_text(encoding="utf-8")
+
+    # A mode prompt with both options is presented in each launcher.
+    assert "choose_mode" in sh and "CLI wizard" in sh and "Web wizard" in sh
+    assert "Choose [1/2]" in sh and "Choose [1/2]" in bat
+    assert "CLI wizard" in bat and "Web wizard" in bat
+
+    # The CLI branch routes to `harnessforge new` (the interactive wizard); the web
+    # branch keeps the existing `wizard --open` form. The .bat keeps the `.exe`
+    # console fallback so it never relaunches itself.
+    assert "run harnessforge new" in sh  # via `"$uv_bin" run` / `harnessforge new`
+    assert "uv run harnessforge new" in bat
+    assert "harnessforge.exe new" in bat
+    assert "run --extra wizard harnessforge wizard --open" in sh
+
+    # Flat goto in the .bat (the Windows fragility guard from Slice 7): no setlocal,
+    # no `call :` subroutines.
+    assert "setlocal" not in bat.lower()
+    assert "call :" not in bat
+
+
 def test_launch_script_no_web_runs_chat(tmp_path, spec):
     """Without web, the one-click script launches the terminal chat REPL."""
     out = tmp_path / "chatlaunch"

@@ -57,7 +57,8 @@ Secrets never touch `config.yaml`, the spec snapshot, or git — `config.yaml` h
 # Pre-release (v0.1.0): not on PyPI yet — run from a clone of this repo
 uv run harnessforge new my-agent --preset coding-assistant   # from a bundled preset
 uv run harnessforge new my-agent --spec ./harness.spec.yaml  # from your own spec
-uv run harnessforge wizard                                   # single-page spec wizard ([wizard] extra)
+uv run harnessforge new                                      # interactive CLI setup wizard (prompts for everything)
+uv run harnessforge wizard                                   # single-page web spec wizard ([wizard] extra)
 uv run harnessforge doctor                                   # preflight your tooling
 uv run harnessforge new my-agent -p coding-assistant --no-verify  # skip the post-gen smoke check (e.g. offline)
 
@@ -65,12 +66,20 @@ uv run harnessforge new my-agent -p coding-assistant --no-verify  # skip the pos
 # uvx harnessforge new my-agent --preset coding-assistant
 ```
 
-**One-click wizard:** prefer not to type? Double-click **`HarnessForge.bat`**
-(Windows) or run **`./HarnessForge.sh`** (macOS / Linux) — it launches the spec
-wizard and opens it in your browser. No `uv` installed yet? The launcher offers
-to install it for you (user-level, no admin — uv bundles its own Python), then
-continues. Each generated repo ships the same kind of one-click launcher, named
-after its display name (e.g. `My Coding Assistant.bat`).
+Two ways to configure without writing a spec by hand: the **web form**
+(`harnessforge wizard`) and the **interactive CLI wizard** (`harnessforge new`
+with no `--spec`/`--preset` — it asks the same structural questions right in the
+terminal, ideal for headless / SSH boxes where a browser isn't handy). Both bake
+the same sensible defaults and produce identical products.
+
+**One-click launcher:** prefer not to type? Double-click **`HarnessForge.bat`**
+(Windows) or run **`./HarnessForge.sh`** (macOS / Linux) — it asks whether you
+want the **web wizard** (opens in your browser) or the **CLI wizard** (in the
+terminal), then launches it. On a headless Linux box (no display) the CLI wizard
+is the default. No `uv` installed yet? The launcher offers to install it for you
+(user-level, no admin — uv bundles its own Python), then continues. Each
+generated repo ships the same kind of one-click launcher, named after its display
+name (e.g. `My Coding Assistant.bat`).
 
 The generated `my-agent/` repo then runs on its own:
 

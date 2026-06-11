@@ -11,6 +11,10 @@ dependencies = [
     "jinja2>=3.1",
     "pydantic>=2.6",
     "pyyaml>=6.0",
+    # Powers the interactive `harnessforge new` setup wizard (the terminal twin of
+    # the web form). Generator-side only — it never ships into a generated product
+    # (products render their own pyproject), so the "thin product" rule is intact.
+    "questionary>=2.0",
 ]
 
 [project.optional-dependencies]

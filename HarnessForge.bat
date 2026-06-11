@@ -1,9 +1,28 @@
 @echo off
-REM One-click launcher for the HarnessForge wizard (opens the spec wizard in your browser).
-REM Prefers uv (auto-syncs the [wizard] extra); offers to install uv if it's missing.
-echo [HarnessForge] Wizard launcher
+REM One-click launcher for the HarnessForge setup wizard.
+REM Lets you pick how to configure your harness: the Web form (opens in a browser)
+REM or an interactive CLI wizard (right here in the terminal). Prefers uv (auto-syncs
+REM the [wizard] extra for the web form); offers to install uv if it's missing.
+echo [HarnessForge] Setup launcher
 cd /d "%~dp0"
 echo [HarnessForge] Folder: %CD%
+echo.
+
+REM Web form (browser) vs interactive CLI wizard (this terminal). Web is the
+REM default on Windows (a browser is normally present). Set HARNESSFORGE_MODE to
+REM web or cli to skip the prompt (e.g. for automation). Flat goto flow only.
+set "MODE=web"
+if defined HARNESSFORGE_MODE goto :mode_env
+echo [HarnessForge] How do you want to set up your harness?
+echo     [1] Web wizard - fill a form in your browser
+echo     [2] CLI wizard - interactive setup in this terminal
+set /p "MODE=  Choose [1/2] (Enter = web): "
+if "%MODE%"=="2" set "MODE=cli"
+if not "%MODE%"=="cli" set "MODE=web"
+goto :mode_done
+:mode_env
+set "MODE=%HARNESSFORGE_MODE%"
+:mode_done
 echo.
 
 echo [HarnessForge] Step 1/4: looking for uv on PATH ...
@@ -102,27 +121,42 @@ if not errorlevel 1 goto :run_go
 echo [HarnessForge] PyPI looks unreachable - using the Tsinghua mirror this run.
 set "UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple"
 :run_go
+if "%MODE%"=="cli" goto :run_go_cli
 echo [HarnessForge] Launching: uv run --extra wizard harnessforge wizard --open
 echo.
 uv run --extra wizard harnessforge wizard --open
+goto :after_run
+:run_go_cli
+echo [HarnessForge] Launching: uv run harnessforge new
 echo.
-echo [HarnessForge] Process exited (code %errorlevel%). Press a key to close.
-pause >nul
-goto :eof
+uv run harnessforge new
+goto :after_run
 
 :run_cmd
+if "%MODE%"=="cli" goto :run_cmd_cli
 echo [HarnessForge] Launching: harnessforge.exe wizard --open
 echo.
 harnessforge.exe wizard --open
+goto :after_run
+:run_cmd_cli
+echo [HarnessForge] Launching: harnessforge.exe new
 echo.
-echo [HarnessForge] Process exited (code %errorlevel%). Press a key to close.
-pause >nul
-goto :eof
+harnessforge.exe new
+goto :after_run
 
 :run_py
+if "%MODE%"=="cli" goto :run_py_cli
 echo [HarnessForge] Launching: %PY% -m uv run --extra wizard harnessforge wizard --open
 echo.
 %PY% -m uv run --extra wizard harnessforge wizard --open
+goto :after_run
+:run_py_cli
+echo [HarnessForge] Launching: %PY% -m uv run harnessforge new
+echo.
+%PY% -m uv run harnessforge new
+goto :after_run
+
+:after_run
 echo.
 echo [HarnessForge] Process exited (code %errorlevel%). Press a key to close.
 pause >nul

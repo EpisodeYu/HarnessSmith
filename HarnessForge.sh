@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# One-click launcher for the HarnessForge wizard.
+# One-click launcher for the HarnessForge setup wizard.
 #
-# Opens the spec wizard in your browser. Prefers `uv` (which auto-syncs the
-# optional [wizard] extra); if uv is missing it offers to install it (user-level,
-# no root).
+# Lets you pick how to configure your harness: the Web form (opens in a browser)
+# or an interactive CLI wizard (right here in the terminal). Prefers `uv` (which
+# auto-syncs the optional [wizard] extra for the web form); if uv is missing it
+# offers to install it (user-level, no root).
 set -e
-echo "[HarnessForge] Wizard launcher"
+echo "[HarnessForge] Setup launcher"
 cd "$(dirname "$0")"
 echo "[HarnessForge] Folder: $PWD"
 
@@ -13,6 +14,31 @@ find_uv() {
   if command -v uv >/dev/null 2>&1; then echo uv; return 0; fi
   [ -x "$HOME/.local/bin/uv" ] && { echo "$HOME/.local/bin/uv"; return 0; }
   return 1
+}
+
+# Web form vs interactive CLI wizard. On a headless Linux box (no display) the
+# terminal wizard is the sensible default — the web form would only be reachable
+# via SSH port-forward; elsewhere the browser form is the default. Echoes "web"
+# or "cli" on stdout (prompts go to stderr). Set HARNESSFORGE_MODE=web|cli to
+# skip the prompt (e.g. for automation).
+choose_mode() {
+  if [ -n "${HARNESSFORGE_MODE:-}" ]; then echo "$HARNESSFORGE_MODE"; return 0; fi
+  default=web
+  if [ "$(uname)" = Linux ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    default=cli
+  fi
+  {
+    echo "[HarnessForge] How do you want to set up your harness?"
+    echo "    [1] Web wizard - fill a form in your browser"
+    echo "    [2] CLI wizard - interactive setup here in the terminal"
+    printf "  Choose [1/2] (Enter = %s): " "$default"
+  } >&2
+  read -r reply </dev/tty 2>/dev/null || reply=""
+  case "$reply" in
+    1) echo web ;;
+    2) echo cli ;;
+    *) echo "$default" ;;
+  esac
 }
 
 # Auto-pick the package index: when no index is pinned and the official PyPI is
@@ -33,7 +59,12 @@ uv_bin="$(find_uv || true)"
 if [ -z "$uv_bin" ]; then
   # No uv yet: an already-installed harnessforge command works too.
   if command -v harnessforge >/dev/null 2>&1; then
-    echo "[HarnessForge] Found the harnessforge command; launching ..."
+    echo "[HarnessForge] Found the harnessforge command."
+    if [ "$(choose_mode)" = cli ]; then
+      echo "[HarnessForge] Launching: harnessforge new"
+      exec harnessforge new
+    fi
+    echo "[HarnessForge] Launching: harnessforge wizard --open"
     exec harnessforge wizard --open
   fi
   echo "[HarnessForge] uv is not installed yet. How would you like to install it?"
@@ -70,6 +101,10 @@ fi
 
 if [ -n "$uv_bin" ]; then
   pick_index
+  if [ "$(choose_mode)" = cli ]; then
+    echo "[HarnessForge] Launching: $uv_bin run harnessforge new"
+    exec "$uv_bin" run harnessforge new
+  fi
   echo "[HarnessForge] Launching: $uv_bin run --extra wizard harnessforge wizard --open"
   exec "$uv_bin" run --extra wizard harnessforge wizard --open
 fi

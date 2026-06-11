@@ -19,6 +19,7 @@ import typer
 from pydantic import ValidationError
 
 from .catalog import CatalogError, available_servers, resolve_servers
+from .cli_wizard import WizardAborted, run_wizard
 from .debuglog import log, setup as setup_debug_log
 from .generator import (
     SmokeCheckError,
@@ -44,6 +45,16 @@ app = typer.Typer(
 )
 
 
+def _stdin_is_tty() -> bool:
+    """True when stdin is an interactive terminal (so the wizard can prompt).
+
+    A tiny indirection that keeps the tty check monkeypatchable in tests."""
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 @app.callback()
 def _main() -> None:
     """HarnessForge — forge your own agent harness (no agent-framework lock-in)."""
@@ -53,9 +64,10 @@ def _main() -> None:
 
 @app.command()
 def new(
-    target_dir: Path = typer.Argument(
-        ...,
-        help="Directory to create the generated harness repo in.",
+    target_dir: Path | None = typer.Argument(
+        None,
+        help="Directory to create the generated harness repo in "
+        "(the interactive wizard prompts for it when omitted).",
     ),
     spec: Path | None = typer.Option(
         None, "--spec", "-s", help="Path to a HarnessSpec YAML file."
@@ -87,31 +99,68 @@ def new(
         "--prewarm/--no-prewarm",
         help="Warm the uv cache for uvx-based MCP servers (offline-ready first run).",
     ),
+    interactive: bool = typer.Option(
+        True,
+        "--interactive/--no-input",
+        help="Use the interactive setup wizard when no --spec/--preset is given "
+        "(auto-off when stdin is not a terminal; --no-input forces it off).",
+    ),
 ) -> None:
-    """Generate a new agent harness repo from a spec or preset."""
-    if (spec is None) == (preset is None):
+    """Generate a new agent harness repo from a spec, preset, or the interactive wizard."""
+    if spec is not None and preset is not None:
         typer.secho(
             "Provide exactly one of --spec or --preset.", fg=typer.colors.RED, err=True
         )
         raise typer.Exit(code=2)
 
-    try:
-        spec_path = preset_spec_path(preset) if preset else spec
-        harness_spec = load_spec(spec_path)
-        # MCP prefill = preset's baseline + any explicit --mcp-server (catalog).
-        mcp_servers = preset_mcp_servers(preset) if preset else []
-        if mcp_server:
-            mcp_servers = mcp_servers + resolve_servers(list(mcp_server))
-    except (
-        FileNotFoundError,
-        ValueError,
-        ValidationError,
-        PresetNotFoundError,
-        CatalogError,
-    ) as exc:
-        log.debug("new: invalid spec (%s: %s)", type(exc).__name__, exc)
-        typer.secho(f"Invalid spec: {exc}", fg=typer.colors.RED, err=True)
+    # No recipe given: drop into the interactive wizard if we have a terminal,
+    # otherwise tell the user how to feed one (keeps scripts / CI explicit).
+    use_wizard = spec is None and preset is None and interactive and _stdin_is_tty()
+    if spec is None and preset is None and not use_wizard:
+        typer.secho(
+            "Provide --spec or --preset, or run in an interactive terminal to use "
+            "the setup wizard.",
+            fg=typer.colors.RED,
+            err=True,
+        )
         raise typer.Exit(code=2)
+
+    confirm_default = "none"
+    if use_wizard:
+        try:
+            wiz = run_wizard(default_target_dir=str(target_dir) if target_dir else None)
+        except WizardAborted as exc:
+            typer.secho(f"Setup wizard cancelled: {exc}", fg=typer.colors.YELLOW, err=True)
+            raise typer.Exit(code=1)
+        harness_spec = wiz.spec
+        mcp_servers = wiz.mcp_servers
+        confirm_default = wiz.confirm_default
+        target_dir = target_dir or wiz.target_dir
+    else:
+        if target_dir is None:
+            typer.secho(
+                "Missing TARGET_DIR (the directory to generate into).",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        try:
+            spec_path = preset_spec_path(preset) if preset else spec
+            harness_spec = load_spec(spec_path)
+            # MCP prefill = preset's baseline + any explicit --mcp-server (catalog).
+            mcp_servers = preset_mcp_servers(preset) if preset else []
+            if mcp_server:
+                mcp_servers = mcp_servers + resolve_servers(list(mcp_server))
+        except (
+            FileNotFoundError,
+            ValueError,
+            ValidationError,
+            PresetNotFoundError,
+            CatalogError,
+        ) as exc:
+            log.debug("new: invalid spec (%s: %s)", type(exc).__name__, exc)
+            typer.secho(f"Invalid spec: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2)
     log.debug(
         "new: spec loaded (slug=%s preset=%s web=%s mcp=%s skills=%s memory=%s "
         "paradigms=%s mcp_prefill=%s)",
@@ -132,7 +181,11 @@ def new(
 
     try:
         result = generate(
-            harness_spec, target_dir, git_init=git_init, mcp_servers=mcp_servers
+            harness_spec,
+            target_dir,
+            git_init=git_init,
+            mcp_servers=mcp_servers,
+            confirm_default=confirm_default,
         )
     except TargetExistsError as exc:
         log.debug("new: target exists, refused (%s)", exc)

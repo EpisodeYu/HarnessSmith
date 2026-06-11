@@ -31,7 +31,6 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from dataclasses import replace
 from pathlib import Path
 
 import yaml
@@ -44,6 +43,14 @@ from ..debuglog import log as debug_log, setup as setup_debug_log
 from ..generator import TargetExistsError, generate
 from ..node_bootstrap import ensure_portable_node, node_on_path
 from ..presets import available_presets
+from ..scaffold import (
+    GENERATE_CONFIRM as _GENERATE_CONFIRM,
+    PARADIGMS,
+    WIZARD_CATALOG_DEFAULT as _WIZARD_CATALOG_DEFAULT,
+    WIZARD_CATALOG_ORDER as _WIZARD_CATALOG_ORDER,
+    with_default_tools as _with_default_tools,
+    with_defaults as _with_defaults,
+)
 from ..spec import HarnessSpec
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -55,34 +62,11 @@ _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GENERATE_BASE = _REPO_ROOT / "generate"
 
-# The built-in loop paradigms (cf. spec.paradigms' Literal). agent is the default
-# tool-calling loop; plan/ask are read-only.
-PARADIGMS = [
-    {"name": "agent", "description": "Default tool-calling loop (ReAct-style; self-corrects on tool errors)."},
-    {"name": "plan", "description": "Read-only: investigates with low-risk tools and outputs a step-by-step plan."},
-    {"name": "ask", "description": "Read-only: answers questions with low-risk tools; never mutates."},
-]
-
-# Which catalog servers the wizard surfaces, in display order, and which are
-# checked by default. The catalog itself keeps every server (``--mcp-server``
-# still resolves e.g. github/time) — this only curates the *form*. ``git`` is the
-# practical local default (keyless, read tools on); ``github`` (needs a token, no
-# enabled tools) and ``time`` (niche) are hidden here. Desktop Commander (shell +
-# full filesystem) is default-ON in the wizard product — safety is the HITL
-# confirmation gate (``confirm: high``, see ``_BAKED_DEFAULTS`` / ``_GENERATE_CONFIRM``),
-# a deliberate, signed loosening of the "high-risk off by default" baseline for
-# wizard products only (Slice 11). It still needs Node (npx) at runtime.
-_WIZARD_CATALOG_ORDER = ("fetch", "ddg-search", "git", "desktop-commander")
-_WIZARD_CATALOG_DEFAULT = frozenset({"fetch", "ddg-search", "git", "desktop-commander"})
-
-# Catalog servers whose tools the wizard ships ENABLED by default (overriding the
-# catalog's off-by-default state). Powerful but HITL-gated (``confirm: high``).
-_WIZARD_TOOLS_ON = frozenset({"desktop-commander"})
-
-# HITL confirmation policy seeded into a wizard product's config.yaml: every
-# risk=high tool (shell / file writes / Desktop Commander) pauses for the user's
-# OK before it runs. The CLI / preset paths keep the "none" default.
-_GENERATE_CONFIRM = "high"
+# Structural-only baking, catalog curation, and the wizard HITL policy are shared
+# with the interactive CLI wizard — they live in ``harnessforge.scaffold`` (which
+# does NOT import FastAPI, so the core CLI can reuse them). Imported above as
+# PARADIGMS / _WIZARD_CATALOG_ORDER / _WIZARD_CATALOG_DEFAULT / _GENERATE_CONFIRM /
+# _with_defaults / _with_default_tools.
 
 # Background product servers launched by the one-click "generate" flow. Held so
 # the Popen handles (and their log file objects) aren't garbage-collected; the
@@ -96,44 +80,6 @@ _JOBS: dict[str, dict] = {}
 # Ordered launch steps the UI renders. ``render`` is finished before the job is
 # created (generate() ran synchronously); ``sync``/``serve`` run in a worker.
 _LAUNCH_STEPS = ("render", "sync", "serve")
-
-# Behavioral defaults baked into the spec when the (structural-only) wizard form
-# omits them. The wizard intentionally hides these — a generator can produce many
-# products, each configuring its own LLM / prompts / budget at runtime in the
-# product's own config page / .env. Baking sensible defaults keeps the generated
-# product complete and runnable out of the box. Secrets are env-var NAMES only.
-# Only filled when absent/empty, so an explicit spec (or a hand-written one) wins.
-_BAKED_DEFAULTS: dict = {
-    # The LLM profile is scaffolded with the env-var NAMES but NO model: the
-    # one-click wizard never asks which model, so guessing one (gpt-4o-mini) only
-    # mis-fires on non-OpenAI providers. The generated product gates chat until
-    # the user sets a model on its own config page (+ the key in .env).
-    "llms": [
-        {
-            "name": "default",
-            "model": "",
-            "api_key_env": "OPENAI_API_KEY",
-            "base_url_env": "OPENAI_BASE_URL",
-        }
-    ],
-    "roles": {"generation": "default"},
-    "prompts": {"system": "You are a helpful assistant."},
-    "tools": [
-        {"name": "get_current_time", "enabled": True},
-        {"name": "calculator", "enabled": True},
-    ],
-    "budget": {"conditions": {"max_steps": 8}},
-}
-
-
-def _with_defaults(spec_data: dict) -> dict:
-    """Fill behavioral defaults the structural-only wizard form omits."""
-    out = dict(spec_data)
-    for key, value in _BAKED_DEFAULTS.items():
-        if not out.get(key):
-            out[key] = value
-    return out
-
 
 def _spec_yaml(spec: HarnessSpec) -> str:
     """Serialize a validated spec to YAML (env-var NAMES only; never secrets)."""
@@ -451,20 +397,6 @@ def _spawn_launch(job: dict, target_dir: Path, project_slug: str) -> None:
     threading.Thread(
         target=_run_launch, args=(job, target_dir, project_slug), daemon=True
     ).start()
-
-
-def _with_default_tools(server):
-    """Default-enable a server's tools for the wizard product (HITL-gated).
-
-    Powerful servers (Desktop Commander) are shipped ON by default — safety is the
-    ``confirm: high`` HITL gate, not off-by-default. Other servers keep the
-    catalog's per-tool ``default_enabled`` state. ``replace`` keeps the frozen
-    dataclass immutable."""
-    if server.name not in _WIZARD_TOOLS_ON:
-        return server
-    return replace(
-        server, tools=[replace(t, default_enabled=True) for t in server.tools]
-    )
 
 
 def _resolve_prefill(spec: HarnessSpec, names: list[str]):
