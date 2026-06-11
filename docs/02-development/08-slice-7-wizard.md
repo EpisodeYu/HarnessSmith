@@ -169,4 +169,4 @@
 - **配方 vs 活旋钮**(决策④,`01 §4`):wizard 产 `spec`(配方);产物分页 `/config` 改运行期行为性配置;结构性(接口/模块/范式拓扑=代码)只能重新生成。
 - **薄**:默认产物(`web:false`)零改动、零新增依赖;产物 Web 的分页/i18n 是单页前端内的事,`web.py` 后端不变、仍薄。
 - **覆盖随 spec 演进**:若 spec 再增字段,wizard 同步补。
-- **v1+ 衔接**:原生 Anthropic 双规范(prompt caching / adaptive thinking + effort / Opus 4.7/4.8 禁采样 / structured outputs)**2026-06-07 升格为 Slice 12**,§6.4 方案待签(见 `05-llm-dual-spec-anthropic.md`);`/config` 与公开面隔离(Slice 13+)仍是发布前提。
+- **v1+ 衔接**:原生 Anthropic 双规范(prompt caching / adaptive thinking + effort / Opus 4.7/4.8 禁采样 / structured outputs)**2026-06-07 升格为 Slice 12**,§6.4 方案待签(见 `05-llm-dual-spec-anthropic.md`);`/config` 与公开面隔离(Slice 14+)仍是发布前提。

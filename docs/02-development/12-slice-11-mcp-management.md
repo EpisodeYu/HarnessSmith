@@ -26,7 +26,7 @@
 - **常驻 manager = 唯一真相源(本片核心认知)**:现状 `serve` 调 `_start_mcp(config)` 启一次、**丢弃句柄**,且 `/mcp/discover` 每次**另起临时 manager** 扫描——两者分离,导致"面板看到的"与"实际在跑的"与"给 LLM 的"三套状态可能不一致(详见 §2.4 一致性硬伤)。本片把 web 进程的 manager **存进 `app.state`、连接全部已配置 server、作所有 MCP 视图(管理页/Tools 页/状态/CLI 经独立路径)与 LLM 工具集的同一来源**。
 - **连接策略(自主决定,可改判)**:**web `serve`(常驻)连接 `config.mcp.servers` 里的全部 server**(为管理页提供活的连接状态 + 工具发现),**只把 allowlist 内的工具注册进 registry**(LLM 只见启用的)。**CLI `run`/`chat`(一次性)沿用 Slice 4 的"有≥1启用工具才启动该 server"**(单轮不为没用到的 server 白 spawn 子进程);**CLI `mcp status` 显式连接全部** server 报状态。这样长寿命的 web 进程是管理中枢、短命的 CLI 保持精简。
 - **server 启停语义(决策 server_model=B,人 2026-06-09)**:**不加 per-server `enabled` 字段**。"启用 / 停用一个 MCP server"= Tools 页该 server 的**大复选框**(= 它下面全部工具小复选框的总开关);勾上=把该 server 的(全部已发现)工具加入 allowlist 并启用,取消=全关。**彻底移除一个 server = 管理页"删除"**(从 `config.yaml` 删条目 + 断连)。即:server **配置存在**就连上、出现在 Tools 页;**用不用它的工具**由大/小复选框(allowlist)定。
-- **安全面(决策 edit_scope=full,人 2026-06-09;守 `01 §4` 两轴 + `§6` 红线)**:面板可增删/编辑 stdio(`command`/`args`/`env名`)与远程(`url`/`auth_env名`/`transport`)server。**网页能新增 stdio server = 能让产物 spawn 任意本地命令**,这是**新的安全面**——按**威胁模型 A(本地可信、防手滑)**定位:这是 own-code 本地控制面,**不是对不可信对手的强制边界**。文档须讲明"勿对公网暴露 `/config`/`/mcp`";"管理员托管 + 对外发布"拓扑下需配合 **`/config` 与公开面隔离**(仍排 Slice 13+,见 `04-slice-3-product-web.md §4` 与 `00-overview §2` Slice 13+),本片不做隔离本体,但把 MCP 管理面**一并纳入该隔离的保护对象**并在文档登记。
+- **安全面(决策 edit_scope=full,人 2026-06-09;守 `01 §4` 两轴 + `§6` 红线)**:面板可增删/编辑 stdio(`command`/`args`/`env名`)与远程(`url`/`auth_env名`/`transport`)server。**网页能新增 stdio server = 能让产物 spawn 任意本地命令**,这是**新的安全面**——按**威胁模型 A(本地可信、防手滑)**定位:这是 own-code 本地控制面,**不是对不可信对手的强制边界**。文档须讲明"勿对公网暴露 `/config`/`/mcp`";"管理员托管 + 对外发布"拓扑下需配合 **`/config` 与公开面隔离**(仍排 Slice 14+,见 `04-slice-3-product-web.md §4` 与 `00-overview §2` Slice 14+),本片不做隔离本体,但把 MCP 管理面**一并纳入该隔离的保护对象**并在文档登记。
 - **密钥红线(`CLAUDE.md §6.5`)不变**:server 配置只存 `env名`/`auth_env名`,真值经 `.env`/进程环境 `resolve_env` 解析;面板增删改 server **绝不收/不回显真值**(沿用 Slice 3 `/env` 写-only 助手填密钥)。
 - **复用既有机制,不另起炉灶**:条件渲染、依赖落位、tool allowlist 过滤、HITL 确认(Slice 10)、`/config` 回写(Slice 3 `ruamel` round-trip)全部复用;新增逻辑收敛在 `mcp.py`(常驻管理 + 重连)、`web.py`(`/mcp/*` 端点 + 管理页)、`web_index.html`(MCP 标签 + Tools 大复选框)、`cli.py`(`mcp status` / `doctor`)。
 
@@ -100,7 +100,7 @@
 
 ### 2.5 编辑 server 的安全面(决策 edit_scope=full)
 - 全功能增删改(stdio + 远程)经 `/mcp/servers`;**绝不收密钥真值**(只 env 名)。
-- 文档强调:这是**本地可信(威胁模型 A)**控制面,**勿对公网暴露 `/config`/`/mcp`**;"管理员托管+发布"拓扑下须 `/config` 与公开面隔离(Slice 13+,本片把 `/mcp/*` 一并登记为该隔离保护对象)。
+- 文档强调:这是**本地可信(威胁模型 A)**控制面,**勿对公网暴露 `/config`/`/mcp`**;"管理员托管+发布"拓扑下须 `/config` 与公开面隔离(Slice 14+,本片把 `/mcp/*` 一并登记为该隔离保护对象)。
 
 ### 2.6 CLI `mcp status`(决策 cli=include)
 - `mcp` typer 子命令组 + `status`(连全部、报红绿/计数/错因/缺 launcher 提示)。MCP 关时不渲染。**(实现说明)** 产物无 `doctor` 命令(生成器才有),故不在产物扩 doctor。
@@ -139,7 +139,7 @@
 - [x] **② 热重连失败的回退/报错形态(人 2026-06-09)**:per-server 失败隔离(失败 server 标红 + 面板可读错因 + `/mcp/reconnect` 可重试);`rebuild_manager` 新 manager `start` 成功后再 `close` 旧的,新建整体失败则保留旧 manager 并返回错误(面板不自锁)。
 - [x] **③ server 启停 = Tools 页大复选框(server_model=B,人 2026-06-09)**:不加 per-server `enabled` 字段;大复选框 = 该 server 全部工具 allowlist 的总开关;彻底移除 = 管理页删除。
 - [x] **④ SSE = 显式 `transport` 字段(人 2026-06-09)**:`stdio`/`http`/`sse`,留空按形态推断;老 server 用 `sse`。运行期字段,不进 spec。
-- [x] **⑤ 编辑范围 = 全功能 + 文档限定本地可信(edit_scope=full,人 2026-06-09)**:面板可增删改 stdio + 远程 server;新增 stdio = 新安全面,文档强调勿对公网暴露,纳入 Slice 13+ `/config` 隔离保护对象。
+- [x] **⑤ 编辑范围 = 全功能 + 文档限定本地可信(edit_scope=full,人 2026-06-09)**:面板可增删改 stdio + 远程 server;新增 stdio = 新安全面,文档强调勿对公网暴露,纳入 Slice 14+ `/config` 隔离保护对象。
 - [x] **⑥ 架构 = web 常驻 manager 唯一真相源 + 热重连 + 注册表重同步(arch=persistent,人 2026-06-09)**;CLI `mcp status` 纳入本片(cli=include;产物无 `doctor`,健康自检即 `mcp status`,见头部实现说明①)。
 - **软确认(非阻塞,`§5.3`,可一句话改判)**:web `serve` 连接全部已配置 server(管理页活状态来源),CLI 一次性路径仍只起"有启用工具"的 server;`/mcp/status` 读缓存状态 + 手动重连,不每次重连。
 
@@ -150,7 +150,7 @@
 - **薄**:关 MCP 产物逐字一致零痕迹不变;`mcp.py` 实测约 250 行(增量来自 SSE/status/sync/rebuild 四处小函数,仍单文件、无新抽象层,< 300)。MCP 管理页是 `spec.mcp.enabled` 门控的可选件,不进默认薄核心。
 - **核心克制**:`loop.py` 不动;`active_names`/`call` 语义不变;`Registry` 只加 `unregister`/`remove_where`(为重同步)。一致性靠"重同步 registry",不引新抽象层 / 不改循环(守 `§6.8/§6.10`)。
 - **密钥红线(`§6.5`)**:server 增删改只收 env 名;`/mcp/*` 响应 / trace / 日志不回显真值;密钥真值仍走 Slice 3 `/env` 写-only。
-- **安全面(新)**:网页增 stdio server = 让产物 spawn 任意命令 = 威胁模型 A 本地控制面,**非**对手强制边界;文档强调勿对公网暴露 `/config`/`/mcp`,"托管+发布"拓扑须 `/config` 与公开面隔离(Slice 13+,`/mcp/*` 纳入保护)。DC 默认开靠 HITL 兜底,但 HITL 也非安全边界(`01 §4`)。
+- **安全面(新)**:网页增 stdio server = 让产物 spawn 任意命令 = 威胁模型 A 本地控制面,**非**对手强制边界;文档强调勿对公网暴露 `/config`/`/mcp`,"托管+发布"拓扑须 `/config` 与公开面隔离(Slice 14+,`/mcp/*` 纳入保护)。DC 默认开靠 HITL 兜底,但 HITL 也非安全边界(`01 §4`)。
 - **DC / Node 依赖**:DC 默认开需 Node(npx);缺 Node 时失败隔离(管理页标红 + `mcp status`/`doctor` 提示装 Node),不崩产物。Docker/离线沿用 Slice 6(uvx server 可烤镜像;Node server 需镜像带 Node,文档说明)。
 - **不绑框架**:`mcp` 是协议 SDK,非 agent 编排框架,仅 `mcp.enabled` 时进产物;管理面是产物自持,**HarnessForge 不做中心化 MCP 配置/托管**(守"生成后不再依赖 HarnessForge")。
-- **联网 MCP registry / `forge add` 增量接 server** 仍 v1+(Slice 13+),不在本片。
+- **联网 MCP registry / `forge add` 增量接 server** 仍 v1+(Slice 14+),不在本片。

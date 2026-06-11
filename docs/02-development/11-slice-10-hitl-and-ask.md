@@ -54,7 +54,7 @@
 - `create_app` 扩 `app.state.runs`:现为 `run_id -> cancel Event`(`web.py:286`,仅 stop 用),并存一张 `run_id -> {request_id -> reply Queue}`(或在 run 记录上挂 pending 表)。
 - 新增 `POST /chat/{run_id}/respond`(body:`{request_id, option_ids, text}`)→ 把回传投进对应队列,解除 worker 阻塞。未知 run/request 幂等 200。
 - **stop 联动**:`POST /chat/{run_id}/stop`(`web.py:337`)或断连(`GeneratorExit`,`web.py:252`)置 cancel 时,同时给所有 pending 回传队列投一个"取消"哨兵 → 阻塞中的 ask 立即返回(approval=reject / question=降级),不留挂起线程。
-- **超时 / 公开面默认拒绝**:`WebAsker` 可配可选等待上限,超时按 fail-closed(approval=reject)。公开面隔离沿用 Slice 13+ backlog 的"管理面/公开面隔离"前提。
+- **超时 / 公开面默认拒绝**:`WebAsker` 可配可选等待上限,超时按 fail-closed(approval=reject)。公开面隔离沿用 Slice 14+ backlog 的"管理面/公开面隔离"前提。
 
 > **实现说明(2026-06-09)**:pending 表选了"独立平行 map"方案——`app.state.runs` 维持 `run_id -> cancel Event`(stop 端点与既有测试逐字不动),另加 `app.state.pending: run_id -> {request_id -> reply Queue}`,共用 `runs_lock`。`_chat_events` 新增 `pending=None` 形参;worker 线程内 `with using_asker(asker)`(contextvar 不跨线程,故在 worker 内设)。`WebAsker.ask` 投 `("ask", …)` 事件后阻塞在 reply Queue 上,`POST /chat/{run_id}/respond` 投回 `{option_ids,text}` 解除;stop / `GeneratorExit` 给所有 pending Queue 投 `None` 哨兵 fail-closed。`CliAsker` 放在 `interfaces/cli.py`(依赖 typer)、`WebAsker` 放在 `interfaces/web.py`;`Asker` 协议 + `NonInteractiveAsker` + contextvar 注入留在 `harness/interaction.py`(仅 stdlib)。超时等待上限本片未接(留 B / 后续)。
 
@@ -133,5 +133,5 @@
 
 - **底座先建全**:做 A 时 `interaction.py` + `Asker` + CLI/Web 实现 + 前端卡片 + `POST /respond` 一次到位,B 只加"工具边界调用 + `confirm` 配置 + allow 等级",避免管道写两遍。
 - **不抄的(违薄或重叠)**:Claude 式 pattern/参数级匹配(`Bash(npm *)`,我们工具是函数粒度用不上)、`auto` LLM classifier 放行(要再跑模型,重)、`bypass/yolo`(= `confirm: none` 天然覆盖)、`plan` 只读 mode(已用 plan/ask 范式 + allowlist 覆盖)。
-- **公开面隔离**:Web 开 HITL/ask 后,管理面与公开面隔离是 Slice 13+ backlog 的前提(同 `/config`)。
+- **公开面隔离**:Web 开 HITL/ask 后,管理面与公开面隔离是 Slice 14+ backlog 的前提(同 `/config`)。
 - **多 ask 并发**:本片按"一个 run 同一时刻至多一个 pending ask"实现(循环是串行的);若将来 subagent 并发,再扩 pending 表。

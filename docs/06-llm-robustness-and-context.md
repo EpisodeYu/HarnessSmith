@@ -1,6 +1,6 @@
 # 06 · LLM 支持线差距:上下文工程正确性 + 调用鲁棒性
 
-> **状态(2026-06-11,人定向后实现完成 + 真实端点验收通过)**:LLM 配置丰富化 + 本文 **P0 + P1 六项已全部实现并过门禁**(生成器快测 + 全量 golden + Docker + uvx 全绿),并经 **MiMo 真实双端点(OpenAI 兼容 + Anthropic 原生)端到端验收 29/29 通过**(人提供 key,详见文末 §8)。**P2 / P3 仍为 backlog**(`02-development/00-overview.md §2` Slice 13+)。落定的关键决策见下方各节 ✅ 标注与本节末"实现决策落定"。
+> **状态(2026-06-11,人定向后实现完成 + 真实端点验收通过)**:LLM 配置丰富化 + 本文 **P0 + P1 六项已全部实现并过门禁**(生成器快测 + 全量 golden + Docker + uvx 全绿),并经 **MiMo 真实双端点(OpenAI 兼容 + Anthropic 原生)端到端验收 29/29 通过**(人提供 key,详见文末 §8)。**P2 / P3 仍为 backlog**(`02-development/00-overview.md §2` Slice 14+)。落定的关键决策见下方各节 ✅ 标注与本节末"实现决策落定"。
 >
 > 本文原是 2026-06-10 一次"对标成熟 harness、聚焦 LLM 支持"探索的落地待办——逐项登记**此前 backlog 尚未出现**的 LLM 相关差距。
 > 性质同 [`03-feature-landscape-and-proposals.md`](./03-feature-landscape-and-proposals.md)(对标分析 + 建议);与已实现的 [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)(Slice 12)互补不重叠。
@@ -70,7 +70,7 @@ API 报 `context_length_exceeded`(400)时 `paradigms/agent.py` 直接 raise、�
 
 - 全部条目:不引 agent 编排框架、不触云托管/沙箱/权限红线 ✅;零新增依赖 ✅;运行期旋钮不改 spec schema(`§6.1` 不触发)✅;密钥路径不涉(`extra_body` 仅存非密钥值,文档点明)✅。
 - **B3 fallback / extra_body**(已实现):不改 Chat Completions 选型、默认不启用、不动默认行为,**未改 `LLMClient` Protocol 签名** → 确认不触 `§6.4` ✅。**P2 structured outputs**(未做)落地时若要动 Protocol 仍按 `§6.4` 停下请人签。
-- P0+P1 排期 = 人 2026-06-11 定向并实现(见本文顶部状态);**P2/P3 仍排 Slice 13+**(`02-development/00-overview.md §2`)。
+- P0+P1 排期 = 人 2026-06-11 定向并实现(见本文顶部状态);**P2/P3 仍排 Slice 14+**(`02-development/00-overview.md §2`)。
 
 ## 7. 排期形态 — ✅ P0+P1 已作为一个小切片实现(2026-06-11)
 

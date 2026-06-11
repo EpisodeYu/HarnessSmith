@@ -2,7 +2,7 @@
 
 > 目标:让产物支持**全局 rule 文件注入**——把开放标准的 `AGENTS.md` / `CLAUDE.md` / `.cursor/rules` 模式落到产物里:`config.yaml` 的 `prompts.rules_files` 列出若干 markdown 文件,其正文被注入**每一轮**系统提示。与 Slice 6 的标准 SKILL 同源(都是"文件 → 提示注入"),但 **rule 是常驻**(每轮都在),SKILL 是**按需**(相关才加载)。
 >
-> **本片缘起(人 2026-06-05 定向)**:对位 Claude Code / Cursor 的两类能力时确认——产物已有**代码级生命周期 hook**(Slice 1 `hooks.py`),但**缺"常驻 rule 文件"这一档**。人选"做薄版、近期排一个小 slice"(配置级 shell hook 仅记 v1+ backlog,见 `00-overview §2` Slice 13+)。
+> **本片缘起(人 2026-06-05 定向)**:对位 Claude Code / Cursor 的两类能力时确认——产物已有**代码级生命周期 hook**(Slice 1 `hooks.py`),但**缺"常驻 rule 文件"这一档**。人选"做薄版、近期排一个小 slice"(配置级 shell hook 仅记 v1+ backlog,见 `00-overview §2` Slice 14+)。
 >
 > **编号说明**:紧接 Slice 6、在 wizard(Slice 7)之前的薄增量;为不扰动 wizard / v1+(Slice 8+)既有编号,记为 **Slice 6B**(文件 `075-` 排在 `07-`(Slice 6)与 `08-`(Slice 7)之间)。
 >
@@ -53,7 +53,7 @@
 ## 5. 本 slice 注意 / 留给后续
 
 - **wizard(Slice 7)需覆盖 `prompts.rules_files`**:已在 `08-slice-7-wizard.md` §2.1 高级组登记。
-- **配置级 shell hook(Claude Code/Cursor 风格,事件→shell 命令、可 veto)= v1+ backlog**(`00-overview §2` Slice 13+):代码级 `Hooks` 已覆盖同等能力(own-code 写子类即可),且与 Slice 10 HITL 确认 hook 重叠、引入"配置跑任意 shell"新安全面,故缓做。
+- **配置级 shell hook(Claude Code/Cursor 风格,事件→shell 命令、可 veto)= v1+ backlog**(`00-overview §2` Slice 14+):代码级 `Hooks` 已覆盖同等能力(own-code 写子类即可),且与 Slice 10 HITL 确认 hook 重叠、引入"配置跑任意 shell"新安全面,故缓做。
 - **不做**:rule 的 glob / 描述触发 auto-attach(Cursor 进阶特性)——MVP 只做"always-apply 文件列表"薄版;按需触发交给 SKILL(Slice 6)。
 - **后续(2026-06-07,Slice 3 §4)**:产物 Web 的 Prompts 标签把 `rules_files` 从"路径清单 textarea"改为**每文件可编辑正文**(`GET`/`POST /rules` 读写文件,限仓库内相对路径),保留多文件、契合 own-your-code;机制(`_load_rules` + `rules_files`)不变,纯产物 Web 体验升级,详见 `04-slice-3-product-web.md §4`。
 - **CLAUDE.md 约定自动识别(2026-06-07,人定向)**:`_load_rules` 在显式 `rules_files` 之外,**自动发现根目录 `CLAUDE.md`** 并注入(去重、缺失跳过)——对标主流"放个约定文件就被读"的体验。`_CONVENTION_RULE_FILES = ("CLAUDE.md",)`。**`AGENTS.md` 故意排除**:产物里它是"如何扩展本 harness"的开发者指南(`templates/AGENTS.md.j2`,~400 行),不是运行期 rule,自动注入会把整份指南灌进每轮提示;要注入须显式列进 `rules_files`。**空规则文件仍用 `RULES.md`**(显式 seed,保留多文件)。产物自带测试 `test_harness.py::test_root_claude_md_is_auto_recognized` / `test_root_agents_md_is_not_auto_injected`;同步产物 `AGENTS.md` "Project rules" 段 + `config.yaml` 注释。

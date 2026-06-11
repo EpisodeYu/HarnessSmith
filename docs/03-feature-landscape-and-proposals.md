@@ -4,10 +4,10 @@
 >
 > **状态更新（人 2026-06-07 已采纳；T1-C 于 2026-06-08 撤销）**：本文 §3 的 T1-A 会话持久化、T1-B HITL 交互确认已升格为 **v1 必做切片 Slice 8 / 10**；**T1-C Checkpoints 原列 Slice 9，经 2026-06-08 评估撤销不内建**（撤销说明见 §3 T1-C）；§5 的跨会话全局记忆已上移 **v1**；§6 D-1 的 `forge add` 已写出详设 [`04-forge-add-incremental-regeneration.md`](./04-forge-add-incremental-regeneration.md)。路线图见 [`02-development/00-overview.md §2`](./02-development/00-overview.md)。其余项仍为待评估建议。
 >
-> **排期更新（人 2026-06-07 定向，本文建议已被采纳并细化排期）**：在三件套之外又排定了几项——① **跨会话记忆**紧接 Slice 8 记为 **Slice 8B**；② **Slice 10 HITL 交互确认**独立做（复用 `before_tool` + Web 审批管道；原与 Slice 9 Checkpoints 配对的"工具护栏对"已因 **Slice 9 于 2026-06-08 撤销**而解除，见 §3 T1-C）；③ **§4 T2-G MCP 健康自检/状态面板升格为 Slice 11**（三件套+记忆后的首要方向）；④ **§3 T1-D 原生 Anthropic 双规范 + 推理流式升格为 Slice 12**，§6.4 具体方案已写出待签，见 [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)；⑤ **§6 D-1 forge add / D-2 eval / D-3 presets 列入 Slice 13+ v1+ backlog**（forge add 仍为头号差异化，先做 Phase 1）。本文 §7 优先级表为当时建议，实际排期以 `02-development/00-overview.md §2` 为准。
+> **排期更新（人 2026-06-07 定向，本文建议已被采纳并细化排期）**：在三件套之外又排定了几项——① **跨会话记忆**紧接 Slice 8 记为 **Slice 8B**；② **Slice 10 HITL 交互确认**独立做（复用 `before_tool` + Web 审批管道；原与 Slice 9 Checkpoints 配对的"工具护栏对"已因 **Slice 9 于 2026-06-08 撤销**而解除，见 §3 T1-C）；③ **§4 T2-G MCP 健康自检/状态面板升格为 Slice 11**（三件套+记忆后的首要方向）；④ **§3 T1-D 原生 Anthropic 双规范 + 推理流式升格为 Slice 12**，§6.4 具体方案已写出待签，见 [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)；⑤ **§6 D-1 forge add / D-2 eval / D-3 presets 列入 Slice 14+ v1+ backlog**（forge add 仍为头号差异化，先做 Phase 1）。本文 §7 优先级表为当时建议，实际排期以 `02-development/00-overview.md §2` 为准。
 > 立项定位 / 红线以 `01-project-plan.md` 为准；切片门禁与 backlog 以 `02-development/00-overview.md` 为准。本文凡触及 `01 §6` 红线的，都显式标注"守红线"。
 >
-> **补充（2026-06-10）**：沿本文方法对 **LLM 支持线**（上下文策略工程正确性 + 调用鲁棒性）再做了一轮聚焦对标，新发现的未登记差距（工具结果截断上限、真实 usage 驱动压缩触发、`context_window`/溢出自救、超时/重试/fallback、cached/reasoning usage 细分计费等）已逐项写入 [`06-llm-robustness-and-context.md`](./06-llm-robustness-and-context.md) 并登记 Slice 13+ backlog。
+> **补充（2026-06-10）**：沿本文方法对 **LLM 支持线**（上下文策略工程正确性 + 调用鲁棒性）再做了一轮聚焦对标，新发现的未登记差距（工具结果截断上限、真实 usage 驱动压缩触发、`context_window`/溢出自救、超时/重试/fallback、cached/reasoning usage 细分计费等）已逐项写入 [`06-llm-robustness-and-context.md`](./06-llm-robustness-and-context.md) 并登记 Slice 14+ backlog。
 >
 > **基准时间**：2026-06。MVP 已走到 Slice 7（向导 + 范式 + MCP + Skills + 产物 Web/`/config` + 全局 rule + 可组合上下文压缩）。
 > **判断口径**：一个特性"值不值得做"在本项目里有四条独立的尺子——① 是不是 2026 的事实标配；② 和"无框架 + own-your-code + 薄"契不契合；③ 触不触红线；④ 薄不薄（能否压进 spec 开关式可选模块、默认零痕迹）。四条都过才进 Tier 1。
@@ -178,7 +178,7 @@
 | **观望** | T2-H sandbox wrapper、T3 全部 | 易触红线或边际收益低，先文档/缓做 |
 | **不做** | #20 云托管/后台 multi-agent、通用编排框架、在线 registry、真沙箱、生产级权限 | `01 §6` 红线 |
 
-> **给人的决策点（2026-06-07 已拍板，结论见下）**：① 三件套立为独立切片 Slice 8/9/10（人 2026-06-07）；**其中 Slice 9 Checkpoints 于 2026-06-08 评估撤销**（见 §3 T1-C），剩 Slice 8 会话持久化 + Slice 10 HITL（独立做）、**跨会话记忆紧接为 Slice 8B**（人 2026-06-07）。② `forge add`/upgrade **确认为头号差异化、列入 Slice 13+ 先做 Phase 1 安全子集**（人 2026-06-07；详设 `04-forge-add`）。③ **Anthropic 双规范排为 Slice 12**，§6.4 具体方案**已写出待签** [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)（人 2026-06-07）。④ 三件套+记忆后的首要方向**确认为 Slice 11 MCP 健康/管理**（人 2026-06-07）。
+> **给人的决策点（2026-06-07 已拍板，结论见下）**：① 三件套立为独立切片 Slice 8/9/10（人 2026-06-07）；**其中 Slice 9 Checkpoints 于 2026-06-08 评估撤销**（见 §3 T1-C），剩 Slice 8 会话持久化 + Slice 10 HITL（独立做）、**跨会话记忆紧接为 Slice 8B**（人 2026-06-07）。② `forge add`/upgrade **确认为头号差异化、列入 Slice 14+ 先做 Phase 1 安全子集**（人 2026-06-07；详设 `04-forge-add`）。③ **Anthropic 双规范排为 Slice 12**，§6.4 具体方案**已写出待签** [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)（人 2026-06-07）。④ 三件套+记忆后的首要方向**确认为 Slice 11 MCP 健康/管理**（人 2026-06-07）。
 
 ---
 

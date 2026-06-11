@@ -105,6 +105,6 @@
 - **核心克制**:MCP 工具注册进**既有** `registry`、走**既有** `loop`/`trace`,**不改 `loop.py`、不改 `tools.Registry` 核心**;所有 MCP 特定逻辑(双传输 + 同步桥 + 注册 + 生命周期)收在 `mcp.py`。若被迫改 loop/registry 核心,先停问人(`CLAUDE.md §6.8/§6.10`)。
 - **不绑框架**:`mcp` 是协议 SDK,**不是 agent 编排框架**,不违反定位红线(`01 §1`);但仅在 `mcp.enabled` 时进产物。
 - **密钥红线**(`CLAUDE.md §6.5`):stdio 的 `env` 与远程的 `auth_env`/header **只存 env 变量名**,真值经 `.env`/进程环境用既有 `resolve_env` 解析后注入子进程 / 请求头;**绝不把真值写进 spec/catalog/config.yaml/trace/日志**。高风险工具默认关,仅 allowlist 显式开(沿用 Slice 1)。MCP 工具的参数/结果进 trace 时与现有 `tool_call`/`tool_result` 同路径,注意不把含密钥的实参回显(由用户对自带 server 负责)。
-- **传输**:stdio + 远程 HTTP/SSE 都做(人 2026-06-03 定向);**`/config` 改 server 热重连**已排 **Slice 11 MCP 健康/管理**;**联网 MCP registry、`forge add` 增量接 server** 仍为 v1+,不在本片(`00-overview §2` Slice 11 / Slice 13+ / `01 §3` L3)。
+- **传输**:stdio + 远程 HTTP/SSE 都做(人 2026-06-03 定向);**`/config` 改 server 热重连**已排 **Slice 11 MCP 健康/管理**;**联网 MCP registry、`forge add` 增量接 server** 仍为 v1+,不在本片(`00-overview §2` Slice 11 / Slice 14+ / `01 §3` L3)。
 - **配方 vs 活旋钮**(决策④,`01 §4`):MCP 能力有无 = 结构性(spec,重新生成);server/tool/传输 = 行为性(运行期 `config.yaml` / `/config`)。MCP 配置面属**产物自持**,HarnessForge 不做中心化配置/托管。
 - **catalog 漂移**(Slice 5 再细化):server 经 `npx`/`uvx` 拉取时注意 pin 版本(`01 §10` 依赖漂移与平台兼容)。
