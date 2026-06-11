@@ -80,11 +80,7 @@
       </div>
       <div class="flex items-center gap-2 border-t border-slate-200 px-3 py-2 text-sm">
         <button id="tab-chat" type="button" class="hidden" data-i18n="nav_chat">Chat</button>
-        <button id="tab-config" type="button" class="flex-1 rounded-lg px-2 py-1 text-left text-slate-600 hover:bg-slate-100">⚙ <span data-i18n="nav_config">Config</span></button>
-        <select id="lang" class="rounded-lg border px-1 py-1 text-xs" title="语言 / Language">
-          <option value="en">EN</option>
-          <option value="zh">中文</option>
-        </select>
+        <button id="tab-config" type="button" class="flex-1 cursor-pointer rounded-lg px-2 py-1 text-left text-slate-600">⚙ <span data-i18n="nav_config">Config</span></button>
       </div>
     </aside>
 
@@ -536,7 +532,6 @@
 
     function applyI18n() {
       document.documentElement.lang = lang;
-      $("lang").value = lang;
       const _sysLang = $("sys-lang");
       if (_sysLang) _sysLang.value = lang;
       document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
@@ -546,9 +541,7 @@
       renderSessionList();
       updateMainTitle();
     }
-    $("lang").addEventListener("change", () => {
-      lang = $("lang").value; localStorage.setItem("hf_lang", lang); applyI18n();
-    });
+    // Language is chosen on the System tab (#sys-lang); see its handler below.
 
     // ---- chat (unchanged behavior) -------------------------------------
     function line(text, cls) {
@@ -2207,7 +2200,8 @@
     function show(which) {
       $("view-chat").classList.toggle("hidden", which !== "chat");
       $("view-config").classList.toggle("hidden", which !== "config");
-      $("tab-config").classList.toggle("bg-slate-100", which === "config");
+      // Active = bold text only (no filled box), so the Config row stays visually
+      // consistent with the Theme row above it (especially in dark mode).
       $("tab-config").classList.toggle("font-medium", which === "config");
       updateMainTitle();
       // Don't reload over unsaved edits when coming back to Config — that silent

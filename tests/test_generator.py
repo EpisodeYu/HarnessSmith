@@ -412,7 +412,7 @@ def test_web_index_has_paged_config_and_language_switch(tmp_path, preset_spec):
     idx = (out / "src" / "coding_assistant" / "interfaces" / "web_index.html").read_text(
         encoding="utf-8"
     )
-    assert 'id="lang"' in idx and "中文" in idx  # language switch (en/zh)
+    assert 'id="sys-lang"' in idx and "中文" in idx  # language switch (en/zh), on the System tab
     assert 'id="cfg-tabs"' in idx  # config is paged by function
     for sub in (
         "subtab_llm", "subtab_context", "subtab_budget", "subtab_tools",
