@@ -643,7 +643,7 @@ def test_llm(
     client path as the loop, so PASSED means a real turn would connect too.
     """
     from ..harness.config import ConfigError
-    from ..harness.llm import OpenAIClient
+    from ..harness.llm import _client_for_profile
 
     config = load_config(config_path)
     try:
@@ -664,7 +664,7 @@ def test_llm(
         typer.secho(error, fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
     try:
-        OpenAIClient(target).complete([{"role": "user", "content": "ping"}], None)
+        _client_for_profile(target).complete([{"role": "user", "content": "ping"}], None)
     except Exception as exc:  # network / auth / model error — report cleanly
         typer.secho(f"FAILED: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)

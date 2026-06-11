@@ -132,6 +132,7 @@ def _client_for_profile(profile):
 - 映射纯函数（`to_anthropic_messages` / `to_anthropic_tools` / `from_anthropic_content` / `from_anthropic_usage`）+ 流式拼装（含 `input_json_delta` 累积、thinking/text 双通道、cancel 关流）由产物自带 `tests/test_llm_anthropic.py` 覆盖，不需真 key。
 - 分发：`llm._client_for_profile(profile)` 按 `provider` 选实现（`make_client` + `ClientRouter` 共用）；未渲染 anthropic 模块的产物若手改 `provider: anthropic`，报带指引的 `RuntimeError` 而非裸 ImportError。
 - 门禁记录：生成器快测 171 全绿 + golden 13 全绿（含新增 anthropic golden、Docker 2、uvx 冒烟）。wizard 不露出 provider（行为性/llm 配置本就烤默认，沿用 Slice 7 口径）。
+- **补遗（2026-06-11，人定向"面板加下拉、与 name/model 并列"）**：产物 `/config` 面板的 LLM 卡片在 **anthropic-enabled 产物**里露出 `provider` 下拉（name/model/provider 三列，默认产物不渲染、零痕迹）；修复面板保存整组替换 `llms` 时**静默丢 `provider`** 的回传 bug（产物自带 `test_config_post_round_trips_profile_provider` 回归）；Web `/test-llm` 与 CLI `test-llm` 原硬编码 `OpenAIClient`，改为按 `provider` 走 `_client_for_profile` 分发（真实 MiMo anthropic 端点实测 `{"ok": true}` / PASSED）。provider 的运行期切换语义：anthropic-enabled 产物里两个客户端都在、面板/配置随时切；默认产物没有 anthropic 客户端，故不提供选项（手改 yaml 会得到带指引的 RuntimeError）。
 
 ### 真实端点验收（2026-06-11，人提供 key，已通过）
 

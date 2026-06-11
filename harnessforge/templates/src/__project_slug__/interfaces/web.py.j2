@@ -47,7 +47,7 @@ from ..harness.interaction import (
     using_asker,
     using_confirmer,
 )
-from ..harness.llm import ClientRouter, LLMResponse, OpenAIClient, ToolCall
+from ..harness.llm import ClientRouter, LLMResponse, ToolCall, _client_for_profile
 from ..harness.loop import run as run_loop
 from ..harness.paradigms import PARADIGMS
 from ..harness import session as session_store
@@ -833,7 +833,7 @@ def create_app(
             )}
 
         def _probe() -> None:
-            OpenAIClient(profile).complete([{"role": "user", "content": "ping"}], None)
+            _client_for_profile(profile).complete([{"role": "user", "content": "ping"}], None)
 
         try:
             await run_in_threadpool(_probe)

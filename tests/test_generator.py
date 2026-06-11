@@ -1003,6 +1003,7 @@ def test_launch_script_web_runs_serve_open(tmp_path, spec):
 
 def test_default_provider_has_zero_anthropic_footprint(tmp_path, spec):
     """All-default specs (provider: openai) keep zero anthropic footprint."""
+    spec.interfaces.web = True
     out = tmp_path / "noanthropic"
     generate(spec, out, git_init=False)
     pkg = out / "src" / "agent_harness"
@@ -1014,6 +1015,9 @@ def test_default_provider_has_zero_anthropic_footprint(tmp_path, spec):
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
     assert "provider:" not in config_yaml and "anthropic" not in config_yaml
     assert "provider" not in (out / "harness.spec.yaml").read_text(encoding="utf-8")
+    # the /config panel shows no provider dropdown (nothing to switch to)
+    html = (pkg / "interfaces" / "web_index.html").read_text(encoding="utf-8")
+    assert "p-provider" not in html and "anthropic" not in html
 
 
 def test_anthropic_profile_generates_client_dep_and_config(tmp_path, spec):
@@ -1027,6 +1031,7 @@ def test_anthropic_profile_generates_client_dep_and_config(tmp_path, spec):
             api_key_env="ANTHROPIC_API_KEY",
         )
     )
+    spec.interfaces.web = True
     out = tmp_path / "anthropic"
     generate(spec, out, git_init=False)
     pkg = out / "src" / "agent_harness"
@@ -1056,3 +1061,9 @@ def test_anthropic_profile_generates_client_dep_and_config(tmp_path, spec):
     assert reloaded.llms[-1].provider == "anthropic"
     # the default profile stays implicit (openai is never written out)
     assert "provider: openai" not in snapshot
+
+    # the /config panel exposes a provider dropdown that round-trips the field
+    html = (pkg / "interfaces" / "web_index.html").read_text(encoding="utf-8")
+    assert "p-provider" in html
+    assert 'provOpt("anthropic")' in html
+    assert 'o.provider = g("p-provider")' in html

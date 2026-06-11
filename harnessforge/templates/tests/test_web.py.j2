@@ -455,6 +455,20 @@ def test_config_post_updates_runtime_config():
     assert client.get("/config").json()["prompts"]["system"] == "NEW SYSTEM PROMPT"
 
 
+def test_config_post_round_trips_profile_provider():
+    """Saving the LLM panel must not silently drop a profile's ``provider`` —
+    the panel replaces ``llms`` wholesale, so the field has to survive the trip
+    (a dropped value would flip an anthropic profile back to the openai client)."""
+    client = _client()
+    resp = client.post(
+        "/config",
+        json={"llms": [{"name": "default", "model": "mock-model", "provider": "anthropic"}]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["llms"][0]["provider"] == "anthropic"
+    assert client.get("/config").json()["llms"][0]["provider"] == "anthropic"
+
+
 def test_config_post_toggles_debug_log_live(tmp_path):
     """Flipping observability.debug on the /config page re-arms the local debug
     log immediately (no restart) — and turning it off detaches it again."""

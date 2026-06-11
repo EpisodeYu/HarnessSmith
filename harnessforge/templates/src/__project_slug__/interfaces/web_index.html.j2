@@ -223,7 +223,7 @@
         role_title: "title (session naming)",
 {% if spec.memory.enabled %}        role_memory: "memory (long-term memory manager)",
 {% endif %}        role_use_first: "(first profile)",
-        profile_name: "name", profile_model: "model",
+        profile_name: "name", profile_model: "model",{% if anthropic_enabled %} profile_provider: "provider",{% endif %}
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "env var name",
         adv_section: "Advanced (sampling)", stats_section: "Pricing (cost tracking)",
@@ -310,7 +310,7 @@
         role_title: "title(会话命名)",
 {% if spec.memory.enabled %}        role_memory: "memory(长期记忆管理)",
 {% endif %}        role_use_first: "(用第一个配置)",
-        profile_name: "名称", profile_model: "model",
+        profile_name: "名称", profile_model: "model",{% if anthropic_enabled %} profile_provider: "provider",{% endif %}
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "环境变量名",
         adv_section: "高级(采样)", stats_section: "定价(成本统计)",
@@ -1018,13 +1018,20 @@
       const reasoning = p.reasoning_effort || "";
       const reOpt = (v, label) =>
         "<option value='" + v + "'" + (reasoning === v ? " selected" : "") + ">" + (label || v) + "</option>";
+{% if anthropic_enabled %}
+      const provider = p.provider || "openai";
+      const provOpt = (v) => "<option value='" + v + "'" + (provider === v ? " selected" : "") + ">" + v + "</option>";
+{% endif %}
       const div = document.createElement("div");
       div.className = "profile rounded-lg border p-3 space-y-2";
       div.innerHTML =
         "<div class='flex items-start justify-between gap-2'>" +
-          "<div class='grid grid-cols-2 gap-2 flex-1'>" +
+          "<div class='grid {% if anthropic_enabled %}grid-cols-3{% else %}grid-cols-2{% endif %} gap-2 flex-1'>" +
             "<label class='text-xs'>" + t("profile_name") + "<input class='p-name mt-1 w-full rounded border px-2 py-1' value='" + esc(p.name) + "'/></label>" +
             "<label class='text-xs'>" + t("profile_model") + "<input class='p-model mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc(p.model) + "'/></label>" +
+{% if anthropic_enabled %}
+            "<label class='text-xs'>" + t("profile_provider") + "<select class='p-provider mt-1 w-full rounded border px-2 py-1'>" + provOpt("openai") + provOpt("anthropic") + "</select></label>" +
+{% endif %}
           "</div>" +
           "<button type='button' class='p-remove text-xs text-red-600'>" + t("profile_remove") + "</button>" +
         "</div>" +
@@ -1064,6 +1071,9 @@
     function cardToProfile(w) {
       const g = (cls) => { const el = w.querySelector("." + cls); return el ? el.value.trim() : ""; };
       const o = { name: g("p-name"), model: g("p-model") };
+{% if anthropic_enabled %}
+      o.provider = g("p-provider") || "openai";
+{% endif %}
       if (g("p-key")) o.api_key_env = g("p-key");
       if (g("p-baseurl")) o.base_url_env = g("p-baseurl");
       const temp = numOrNull(g("p-temp")); if (temp != null) o.temperature = temp;
