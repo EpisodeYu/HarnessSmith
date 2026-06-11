@@ -248,7 +248,8 @@
         bud_clear: "Clear", bud_clear_all: "Clear all usage",
         bud_clear_all_confirm: "Reset accrued cost / usage for ALL LLMs?",
         bud_limit: "limit", bud_no_limit: "no limit",
-        bud_used: "used (in / out / cached)", bud_cost: "cost", bud_over: "limit reached",
+        bud_used: "used", bud_in: "in", bud_out: "out", bud_cached: "cached",
+        bud_cost: "cost", bud_over: "limit reached",
         bud_none: "Configure an LLM on the LLM tab first.",
         bud_extend_hint: "Counts the main generation + context compaction per LLM. Stored in .harness/usage.json; never holds secrets.",
         tools_hint: "Allowlist — only enabled tools are offered to the model.",
@@ -345,7 +346,8 @@
         bud_clear: "清空", bud_clear_all: "清空全部用量",
         bud_clear_all_confirm: "重置所有 LLM 的累计 cost / 用量?",
         bud_limit: "限额", bud_no_limit: "不限",
-        bud_used: "已用(输入/输出/缓存)", bud_cost: "费用", bud_over: "已达限额",
+        bud_used: "已用", bud_in: "输入", bud_out: "输出", bud_cached: "缓存",
+        bud_cost: "费用", bud_over: "已达限额",
         bud_none: "请先在 LLM 标签页配置一个 LLM。",
         bud_extend_hint: "按 LLM 统计主 generation + 上下文压缩。用量持久化在 .harness/usage.json,绝不含密钥。",
         tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
@@ -1243,14 +1245,13 @@
               "<span class='font-mono text-xs text-slate-500'>" + esc(p.model || "") + "</span></div>" +
             "<button type='button' class='b-clear text-xs text-red-600'>" + t("bud_clear") + "</button>" +
           "</div>" +
-          "<div class='grid grid-cols-4 gap-2 text-xs'>" +
+          "<div class='b-cost text-3xl font-bold tracking-tight'></div>" +
+          "<div class='b-used flex flex-wrap gap-x-4 gap-y-1 text-lg text-slate-600'></div>" +
+          "<div class='grid grid-cols-4 gap-2 text-xs pt-1'>" +
             "<label>" + t("profile_input_cost") + "<input class='b-input mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(pv.input != null ? pv.input : p.input_cost_per_million) + "'/></label>" +
             "<label>" + t("profile_output_cost") + "<input class='b-output mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(pv.output != null ? pv.output : p.output_cost_per_million) + "'/></label>" +
             "<label>" + t("profile_cached_cost") + "<input class='b-cached mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(pv.cached != null ? pv.cached : p.cached_input_cost_per_million) + "'/></label>" +
             "<label>" + t("bud_limit") + "<input class='b-limit mt-1 w-full rounded border px-2 py-1' placeholder='" + t("bud_no_limit") + "' value='" + escNum(pv.limit != null ? pv.limit : p.cost_limit) + "'/></label>" +
-          "</div>" +
-          "<div class='flex items-center justify-between text-xs text-slate-500'>" +
-            "<span class='b-used'></span><span class='b-cost font-medium'></span>" +
           "</div>";
         box.appendChild(div);
         updateBudCost(div);
@@ -1269,11 +1270,17 @@
       const cost = fresh / 1e6 * inp + (u.cached_prompt_tokens || 0) / 1e6 * cachedPrice +
         (u.completion_tokens || 0) / 1e6 * out;
       const over = limit > 0 && cost >= limit;
-      div.querySelector(".b-used").textContent =
-        t("bud_used") + ": " + (u.prompt_tokens || 0) + " / " + (u.completion_tokens || 0) + " / " + (u.cached_prompt_tokens || 0);
+      // 已用 输入 N 输出 N 缓存 N — separate spans so the line wraps cleanly.
+      const pair = (label, val) =>
+        "<span><span class='text-slate-400'>" + label + "</span> " + val + "</span>";
+      div.querySelector(".b-used").innerHTML =
+        "<span class='font-medium text-slate-700'>" + t("bud_used") + "</span>" +
+        pair(t("bud_in"), u.prompt_tokens || 0) +
+        pair(t("bud_out"), u.completion_tokens || 0) +
+        pair(t("bud_cached"), u.cached_prompt_tokens || 0);
       const c = div.querySelector(".b-cost");
-      c.textContent = t("bud_cost") + ": " + cost.toFixed(4) + (over ? "  \u26a0 " + t("bud_over") : "");
-      c.className = "b-cost font-medium" + (over ? " text-red-600" : "");
+      c.textContent = t("bud_cost") + " " + cost.toFixed(4) + (over ? "  \u26a0 " + t("bud_over") : "");
+      c.className = "b-cost text-3xl font-bold tracking-tight" + (over ? " text-red-600" : "");
     }
 
     // The default dropdown only offers currently-checked paradigms.
