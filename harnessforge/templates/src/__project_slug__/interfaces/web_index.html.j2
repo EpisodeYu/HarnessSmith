@@ -59,6 +59,18 @@
     html.dark .border-indigo-300 { border-color: #6366f1 !important; }
     html.dark .border-red-300 { border-color: #b91c1c !important; }
     html.dark .border-red-500 { border-color: #ef4444 !important; }
+
+    /* Collapsible reasoning / tool blocks: hide the native triangle, drive a small
+       chevron that rotates open. Used by the chat's thinking box + tool-call cards. */
+    details.hf-block > summary { list-style: none; }
+    details.hf-block > summary::-webkit-details-marker { display: none; }
+    .hf-chevron { display: inline-block; transition: transform .15s ease; }
+    details.hf-block[open] > summary .hf-chevron { transform: rotate(90deg); }
+    /* Animated "…" for the live "thinking" indicator (three blinking dots). */
+    .hf-dots span { animation: hf-blink 1.2s infinite both; }
+    .hf-dots span:nth-child(2) { animation-delay: .2s; }
+    .hf-dots span:nth-child(3) { animation-delay: .4s; }
+    @keyframes hf-blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
   </style>
 </head>
 <body class="h-screen overflow-hidden bg-slate-50 text-slate-800">
@@ -301,6 +313,9 @@
         chat_untitled: "New chat", chat_sessions_empty: "No conversations yet",
         chat_stopped: "stopped — send again to continue",
         chat_thinking: "thinking …",
+        reasoning_thinking: "Thinking", reasoning_prefix: "Thought for", reasoning_sec: "s",
+        reasoning_label: "Reasoning",
+        tool_args_label: "arguments", tool_result_label: "result",
         session_rename: "Rename", session_delete: "Delete", session_cancel: "Cancel",
         reask_edit: "Edit this question", reask_send: "Resend",
         reask_warn: "This discards the conversation after this point.", reask_confirm: "Regenerate",
@@ -419,6 +434,9 @@
         chat_untitled: "新会话", chat_sessions_empty: "还没有会话",
         chat_stopped: "已停止 —— 再次发送即可继续",
         chat_thinking: "思考中 …",
+        reasoning_thinking: "思考中", reasoning_prefix: "已思考", reasoning_sec: " 秒",
+        reasoning_label: "思考过程",
+        tool_args_label: "参数", tool_result_label: "结果",
         session_rename: "重命名", session_delete: "删除", session_cancel: "取消",
         reask_edit: "编辑此问题", reask_send: "重新发送",
         reask_warn: "这会丢弃此处之后的对话。", reask_confirm: "重新生成",
@@ -543,7 +561,7 @@
     }
     // Language is chosen on the System tab (#sys-lang); see its handler below.
 
-    // ---- chat (unchanged behavior) -------------------------------------
+    // ---- chat -----------------------------------------------------------
     function line(text, cls) {
       const el = document.createElement("div");
       el.className = cls || "text-slate-700";
@@ -551,6 +569,110 @@
       log.appendChild(el);
       log.scrollTop = log.scrollHeight;
       return el;
+    }
+
+    const prettyJSON = (s) => {
+      if (!s) return "";
+      try { return JSON.stringify(JSON.parse(s), null, 2); } catch (e) { return s; }
+    };
+
+    // A collapsible reasoning ("thinking") block: dim and small, secondary to the
+    // answer. Live, it streams the model's reasoning and shows an animated
+    // "Thinking…"; when the answer begins it collapses to "Thought for Ns" (click
+    // to reread). On reload it renders collapsed as "Reasoning". Appended to the
+    // log on creation.
+    function reasoningBox() {
+      const box = document.createElement("details");
+      box.className = "hf-block rounded-md border border-slate-200 bg-slate-50 px-2 py-1";
+      box.open = true;
+      const summary = document.createElement("summary");
+      summary.className = "flex cursor-pointer select-none items-center gap-1 text-xs text-slate-400";
+      const chevron = document.createElement("span");
+      chevron.className = "hf-chevron"; chevron.textContent = "▸";
+      const label = document.createElement("span");
+      label.textContent = t("reasoning_thinking");
+      const dots = document.createElement("span");
+      dots.className = "hf-dots"; dots.innerHTML = "<span>.</span><span>.</span><span>.</span>";
+      summary.append(chevron, label, dots);
+      const body = document.createElement("div");
+      body.className = "mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-slate-400";
+      box.append(summary, body);
+      log.appendChild(box);
+      log.scrollTop = log.scrollHeight;
+      const started = Date.now();
+      let hasText = false;
+      return {
+        el: box,
+        hasText: () => hasText,
+        append(text) {
+          if (!text) return;
+          hasText = true;
+          body.textContent += text;
+          body.scrollTop = body.scrollHeight;
+          log.scrollTop = log.scrollHeight;
+        },
+        // End of a live thinking phase: swap the animated label for the elapsed
+        // time and collapse (the body stays behind the chevron).
+        finishLive() {
+          const sec = Math.max(1, Math.round((Date.now() - started) / 1000));
+          dots.remove();
+          label.textContent = t("reasoning_prefix") + " " + sec + t("reasoning_sec");
+          box.open = false;
+        },
+        // Reload: a static collapsed box (no duration was persisted).
+        finishReload() { dots.remove(); label.textContent = t("reasoning_label"); box.open = false; },
+        remove() { box.remove(); },
+      };
+    }
+
+    // A collapsible tool-call block: one summary line (status dot + tool name +
+    // a one-line arg/command preview), expandable to full arguments + result.
+    // Dim/secondary to the answer, matching Cursor/Claude/Zed tool rendering.
+    function toolBlock(name, argsStr) {
+      const box = document.createElement("details");
+      box.className = "hf-block rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs";
+      const summary = document.createElement("summary");
+      summary.className = "flex cursor-pointer select-none items-center gap-1.5 text-slate-500";
+      const chevron = document.createElement("span");
+      chevron.className = "hf-chevron text-slate-400"; chevron.textContent = "▸";
+      const dot = document.createElement("span");
+      dot.className = "text-amber-600 animate-pulse"; dot.textContent = "●";  // running
+      const nm = document.createElement("span");
+      nm.className = "font-mono text-slate-600"; nm.textContent = name;
+      const preview = document.createElement("span");
+      preview.className = "min-w-0 flex-1 truncate text-slate-400";
+      preview.textContent = (argsStr || "").replace(/\s+/g, " ").trim();
+      summary.append(chevron, dot, nm, preview);
+      const wrap = document.createElement("div");
+      wrap.className = "mt-1 space-y-1";
+      const section = (key) => {
+        const cap = document.createElement("div");
+        cap.className = "text-[10px] uppercase tracking-wide text-slate-400";
+        cap.textContent = t(key);
+        const pre = document.createElement("pre");
+        pre.className = "whitespace-pre-wrap break-all text-xs text-slate-500";
+        return { cap, pre };
+      };
+      const argsSec = section("tool_args_label");
+      argsSec.pre.textContent = prettyJSON(argsStr);
+      const resSec = section("tool_result_label");
+      resSec.cap.classList.add("hidden"); resSec.pre.classList.add("hidden");
+      wrap.append(argsSec.cap, argsSec.pre, resSec.cap, resSec.pre);
+      box.append(summary, wrap);
+      log.appendChild(box);
+      log.scrollTop = log.scrollHeight;
+      return {
+        el: box,
+        setResult(result) {
+          const isErr = typeof result === "string" && result.startsWith("ERROR");
+          dot.className = isErr ? "text-red-700" : "text-emerald-600";
+          resSec.cap.classList.remove("hidden");
+          resSec.pre.classList.remove("hidden");
+          resSec.pre.textContent = result;
+          if (isErr) resSec.pre.classList.add("text-red-700");
+          log.scrollTop = log.scrollHeight;
+        },
+      };
     }
 
     // Render the inline interaction card for an `event: ask` (a model
@@ -930,13 +1052,31 @@
       return row;
     }
 
+    // Replay a stored conversation body. Mirrors the live rendering: a stored
+    // assistant reasoning carrier (reasoning_content on a tool-calling turn,
+    // reasoning_display on the final answer) becomes a collapsed reasoning box,
+    // and each tool call becomes a collapsed tool block whose result is filled in
+    // from the matching `tool` message (by tool_call_id).
     function renderHistory(messages) {
       log.innerHTML = "";
       let turn = -1;
+      const toolMap = {};  // tool_call_id -> tool block awaiting its result
       for (const m of messages || []) {
         if (m.role === "user") { turn += 1; addUserLine(m.content || "", turn); }
-        else if (m.role === "assistant") { if (m.content) line(m.content, "text-slate-900 whitespace-pre-wrap"); }
-        else if (m.role === "tool") line("← " + (m.content || ""), "text-emerald-700");
+        else if (m.role === "assistant") {
+          const reasoning = m.reasoning_content || m.reasoning_display;
+          if (reasoning) { const rb = reasoningBox(); rb.append(reasoning); rb.finishReload(); }
+          if (m.content) line(m.content, "text-slate-900 whitespace-pre-wrap");
+          for (const call of m.tool_calls || []) {
+            const fn = call.function || {};
+            if (fn.name === "ask_question") continue;  // shown inline, not as a tool block
+            toolMap[call.id] = toolBlock(fn.name || "", fn.arguments || "");
+          }
+        } else if (m.role === "tool") {
+          const tb = toolMap[m.tool_call_id];
+          if (tb) tb.setResult(m.content || "");
+          else line("← " + (m.content || ""), "text-emerald-700");
+        }
       }
     }
 
@@ -1071,7 +1211,9 @@
       const stream = streamEnabled();  // System tab toggle (default enabled)
       line("you" + (mode ? " (" + mode + ")" : "") + ": " + message, "font-semibold");
 
-      let answer = null;
+      let answer = null;        // the live answer text element (null until first token)
+      let thinkBox = null;      // the live reasoning box for the current thinking phase
+      const toolQueue = [];     // tool blocks awaiting their result (FIFO; calls run sequentially)
       let url = "/chat?message=" + encodeURIComponent(message) + "&stream=" + stream;
       if (mode) url += "&mode=" + encodeURIComponent(mode);
       if (currentSession) url += "&session=" + encodeURIComponent(currentSession);
@@ -1079,6 +1221,19 @@
       const es = new EventSource(url);
       activeES = es;
       setStreaming(true);
+      // Immediate "thinking …" so the page reacts the instant you send — before the
+      // first event arrives. It becomes the live reasoning box if the model streams
+      // reasoning, or is dropped (empty) the moment real output begins.
+      thinkBox = reasoningBox();
+
+      // End the current thinking phase: collapse it to "Thought for Ns" if it
+      // streamed anything, else drop the empty placeholder. Called when real output
+      // (answer text / tool call / ask / end) begins.
+      function closeThinking() {
+        if (!thinkBox) return;
+        if (thinkBox.hasText()) thinkBox.finishLive(); else thinkBox.remove();
+        thinkBox = null;
+      }
 
       es.addEventListener("run", (ev) => {
         const d = JSON.parse(ev.data);
@@ -1099,57 +1254,52 @@
         const meta = sessionsCache.find((s) => s.id === d.id);
         if (meta) { meta.title = currentTitle; renderSessionList(); }
       });
-      // The thinking channel: a reasoning model can sit silent before the first
-      // token — one dim "thinking …" line per turn shows it's alive. The line is
-      // removed once real output (or the final/stopped event) arrives.
-      let thinkingLine = null;
-      function clearThinking() {
-        if (thinkingLine) { thinkingLine.remove(); thinkingLine = null; }
-      }
-      es.addEventListener("thinking", () => {
-        if (!thinkingLine) {
-          thinkingLine = line(t("chat_thinking"), "text-xs text-slate-400 italic animate-pulse");
-          log.scrollTop = log.scrollHeight;
-        }
+      // Thinking channel: reasoning streams into a dim, collapsible box (one per
+      // thinking phase). A phase after a tool result opens a fresh box.
+      es.addEventListener("thinking", (ev) => {
+        if (!thinkBox) thinkBox = reasoningBox();
+        thinkBox.append(JSON.parse(ev.data).text);
       });
       es.addEventListener("token", (ev) => {
-        clearThinking();
+        closeThinking();  // the answer has begun -> collapse the reasoning box
         if (answer === null) answer = line("", "text-slate-900 whitespace-pre-wrap");
         answer.textContent += JSON.parse(ev.data).text;
         log.scrollTop = log.scrollHeight;
       });
       es.addEventListener("ask", (ev) => {
-        clearThinking();
+        closeThinking();
         answer = null;  // a later text run starts a NEW line BELOW the card
         renderAskCard(JSON.parse(ev.data));  // inline card; answer POSTs to /respond
       });
       es.addEventListener("tool_call", (ev) => {
-        clearThinking();
+        closeThinking();
         const d = JSON.parse(ev.data);
         answer = null;  // close the current text run so the next one lands below this
         if (d.name === "ask_question") return;  // shown as the ask card instead
-        line("→ tool " + d.name + " " + d.arguments, "text-amber-700");
+        toolQueue.push(toolBlock(d.name, d.arguments));
       });
       es.addEventListener("tool_result", (ev) => {
         const d = JSON.parse(ev.data);
-        answer = null;  // next streamed text gets a fresh line below the tool output
+        answer = null;  // next streamed text gets a fresh line below the tool block
         if (d.name === "ask_question") return;  // the answer is already on the card
-        line("← " + d.name + ": " + d.result, "text-emerald-700");
+        const tb = toolQueue.shift();
+        if (tb) tb.setResult(d.result);
+        else line("← " + d.name + ": " + d.result, "text-emerald-700");
       });
       es.addEventListener("error", (ev) => {
-        clearThinking();
+        closeThinking();
         if (ev.data) line("error: " + ev.data, "text-red-600");
         endStream(es);
       });
       es.addEventListener("stopped", (ev) => {
-        clearThinking();
+        closeThinking();
         const d = JSON.parse(ev.data);
         line(t("chat_stopped") + " · steps=" + d.steps, "text-xs text-amber-600");
         endStream(es);
         loadSessions();  // the partial turn is saved — refresh the picker
       });
       es.addEventListener("final", (ev) => {
-        clearThinking();
+        closeThinking();
         const d = JSON.parse(ev.data);
         if (answer === null) line(d.answer, "text-slate-900 whitespace-pre-wrap");
         line("[" + d.mode + "] [" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=" + d.cost_usd, "text-xs text-slate-400");

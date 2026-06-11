@@ -701,6 +701,36 @@ def test_session_round_trips_reasoning_content(tmp_path):
     assert asst["reasoning_content"] == "why"
 
 
+def test_final_assistant_message_keeps_reasoning_display_only_when_present():
+    """The final answer carries its reasoning under the display-only key
+    ``reasoning_display``; with no reasoning it is byte-identical to before."""
+    from {{ project_slug }}.harness.paradigms import final_assistant_message
+
+    with_reasoning = final_assistant_message("the answer", "because")
+    assert with_reasoning["reasoning_display"] == "because"
+    assert "reasoning_content" not in with_reasoning  # never the echoed key
+
+    plain = final_assistant_message("the answer")
+    assert plain == {"role": "assistant", "content": "the answer"}
+
+
+def test_wire_messages_drops_display_only_reasoning():
+    """``reasoning_display`` (a final answer's thinking, kept only for reload) is
+    NEVER put on the wire: stripped and never re-emitted, even under the default
+    passback field — echoing a finished turn's reasoning could 400 the endpoint."""
+    from {{ project_slug }}.harness.config import LLMProfileConfig
+    from {{ project_slug }}.harness.llm import OpenAIClient
+
+    hist = [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "a", "reasoning_display": "private cot"},
+    ]
+    wired = OpenAIClient(LLMProfileConfig(name="d", model="m"))._wire_messages(hist)[1]
+    assert wired == {"role": "assistant", "content": "a"}  # display key gone, not renamed
+    assert not any("private cot" == v for v in wired.values())
+    assert hist[1]["reasoning_display"] == "private cot"  # original history untouched
+
+
 # --- LLM call robustness (overflow rescue / fallback / SDK reliability) -----
 
 

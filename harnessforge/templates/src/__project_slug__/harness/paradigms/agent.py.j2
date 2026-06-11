@@ -34,6 +34,7 @@ from ..usage import LLMBudgetExceeded, UsageLedger
 from . import (
     RunResult,
     assistant_message,
+    final_assistant_message,
     generate,
     register_paradigm,
     run_tool,
@@ -102,6 +103,7 @@ def run(
     step = 0
     stop_reason = "final"
     answer = ""
+    final_reasoning: str | None = None  # the thinking behind the final answer (display-only)
     while True:
         # Cooperative cancel at the step boundary: a Stop / Ctrl-C between steps
         # ends the turn cleanly here, leaving messages on a legal boundary (last
@@ -169,6 +171,7 @@ def run(
 
         if not response.tool_calls:
             answer, stop_reason = response.content or "", "final"
+            final_reasoning = response.reasoning  # kept for display on reload, never re-sent
             break
 
         messages.append(assistant_message(response))
@@ -198,7 +201,7 @@ def run(
     # Record the final answer in the body so a resumed session sees this reply.
     # Budget-stop notices are synthetic, so they stay out of the saved history.
     if stop_reason == "final" and answer:
-        messages.append({"role": "assistant", "content": answer})
+        messages.append(final_assistant_message(answer, final_reasoning))
     return RunResult(
         answer=answer,
         steps=step,

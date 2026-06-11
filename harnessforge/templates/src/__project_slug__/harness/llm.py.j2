@@ -159,19 +159,18 @@ class OpenAIClient:
         endpoint that rejects the field — and drop the Anthropic-only signature so
         it never leaks to an OpenAI-compatible endpoint. Only what the endpoint
         itself produced is echoed, so plain (non-reasoning) models never see it.
+
+        ``reasoning_display`` (a final answer's thinking, kept only so a reloaded
+        session can show it) is always dropped here: the turn is over, so it must
+        never be re-sent — echoing it back could trip a reasoning endpoint's 400.
         """
         field_name = self.reasoning_history_field
+        carrier_keys = ("reasoning_content", "reasoning_signature", "reasoning_display")
         out: list[dict] = []
         for message in messages:
-            if message.get("role") == "assistant" and (
-                "reasoning_content" in message or "reasoning_signature" in message
-            ):
+            if message.get("role") == "assistant" and any(k in message for k in carrier_keys):
                 reasoning = message.get("reasoning_content")
-                message = {
-                    k: v
-                    for k, v in message.items()
-                    if k not in ("reasoning_content", "reasoning_signature")
-                }
+                message = {k: v for k, v in message.items() if k not in carrier_keys}
                 if field_name and reasoning:
                     message[field_name] = reasoning
             out.append(message)

@@ -105,6 +105,10 @@ def _client_for_profile(profile):
 - **两规范统一**：Anthropic 原生 thinking blocks → thinking 事件；OpenAI 兼容端点的 `reasoning_content`(若有) → 同一事件。**这层是 provider-neutral 的**：`LLMResponse`/回调约定加一个"思考流"通道，两个 client 都往里灌。
 - **薄**：不解析/不存思考内容做检索，只做"有动静"的 UX 提示。default 行为不变（无 thinking 模型时零效果）。
 
+> **实现说明（2026-06-11，Web reasoning/工具可视化升级，Agent 自主 + 人定向 UX 选型）**：初版 Web 思考通道只是一行灰色 `思考中 …` 脉冲、答案到来即删，且工具调用是两行裸文本（`→ tool …` / `← …`）。本次把产物 Web 聊天页（纯前端 `web_index.html`，**零新增依赖、不改 spec/SSE 事件契约/后端**）升级为对标 Cursor/Claude/Zed 的四态可视化：① 发送即出现带**动画省略号**的"思考中"占位（治"无反应等待"，非推理模型则首 token 即移除空占位）；② reasoning 流入**独立折叠框**（小号灰字、思考时展开实时滚动）；③ 最终答案首 token 到达即**折叠**为一行 `已思考 · N 秒`（可点开重读；每个思考阶段只折叠一次、不与用户手动展开打架）；④ 工具调用 = **合一折叠块**（折叠态一行：工具名 + 命令/参数预览 + 运行中/完成/出错状态点，展开看完整参数 + 结果）。多步轮里"思考框→工具块→思考框→…→答案"按序交织；历史会话重开经 `renderHistory` 用同款组件还原（工具块由 `assistant.tool_calls` 配对 `tool` 结果重建）。人定向选型：Web-only（CLI 维持一行 `· thinking …`）、折叠带用时、工具调用合一块、**reasoning 持久化**、不加显示开关（固定行为）。
+>
+> **配套 reasoning 持久化（2026-06-11，与 `f1f8ba9` 互补）**：`f1f8ba9` 已把**工具调用轮**的 reasoning 落 `reasoning_content`（API 必须回喂、由各 client 映射上线）。本次补**最终答案轮**的 reasoning：经 `paradigms.final_assistant_message(answer, reasoning)` 落**纯显示键 `reasoning_display`**，使无工具的"思考+回答"轮重开也能展开思考。该键**绝不上线**——`OpenAIClient._wire_messages` 把它与 `reasoning_content`/`reasoning_signature` 一并从 wire 剥离（最终轮 turn 已结束，回喂可能 400），Anthropic 映射只读已知键天然忽略。agent/plan/ask 三范式统一调 helper。不改 spec / LLM API 面 / `LLMClient` Protocol 签名 → 不触 `CLAUDE.md §6`。
+
 ## 6. 分阶段落地（薄优先、风险递增）
 
 - **Phase 1 — 非流式映射**：`AnthropicClient.complete()`（§3 全套映射）+ spec `provider` 字段 + 依赖门控 + 关闭零痕迹断言。映射纯函数单测 + mock 黄金路径。**最先做、价值已兑现大半**（thinking/effort/caching 可用）。
@@ -136,6 +140,8 @@ def _client_for_profile(profile):
 - 门禁记录：生成器快测 171 全绿 + golden 13 全绿（含新增 anthropic golden、Docker 2、uvx 冒烟）。wizard 不露出 provider（行为性/llm 配置本就烤默认，沿用 Slice 7 口径）。
 - **补遗 1（2026-06-11，人定向"面板加下拉、与 name/model 并列"）**：产物 `/config` 面板的 LLM 卡片露出 `provider` 下拉（name/model/provider 三列）；修复面板保存整组替换 `llms` 时**静默丢 `provider`** 的回传 bug（产物自带 `test_config_post_round_trips_profile_provider` 回归）；Web `/test-llm` 与 CLI `test-llm` 原硬编码 `OpenAIClient`，改为按 `provider` 走 `_client_for_profile` 分发（真实 MiMo anthropic 端点实测 `{"ok": true}` / PASSED）。
 - **补遗 2（2026-06-11，人定向，同日推翻门控）**：人审后明确产品口径为"**产物自带双协议，默认 openai，用户可选变更**"——下拉初版仅在 anthropic-enabled 产物渲染，现改为**所有产物恒有**；生成器删除 `CONDITIONAL_TEMPLATES` 门控与 `anthropic_enabled` 上下文变量。端到端实测：默认 openai 产物 → 面板把 profile 切到 anthropic（MiMo）→ 写回 config.yaml → 真实流式 + thinking + 工具调用一次通过。wizard 仍不需要任何 anthropic 选项（产物天生双协议，切换是运行期配置）。
+
+- **补遗 3（2026-06-11，Web reasoning/工具可视化 + reasoning 持久化）**：见 §5 实现说明。人定向 UX 选型：Web-only / 折叠带用时 / 工具调用合一折叠块 / reasoning 持久化（最终轮经 `reasoning_display` 显示专用键，wire 剥离不回喂）/ 不加显示开关。门禁全绿：生成器快测 182 + 全量非 docker golden 11 + docker golden 2 + `uvx` 冒烟；新增产物测试 `test_harness.py::test_final_assistant_message_keeps_reasoning_display_only_when_present` / `test_wire_messages_drops_display_only_reasoning`；浏览器实测（mock `serve --mock`）四态 + 展开 + 重开还原均通过；`ReadLints` clean。
 
 ### 真实端点验收（2026-06-11，人提供 key，已通过）
 
