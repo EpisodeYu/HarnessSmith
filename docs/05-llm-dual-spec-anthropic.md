@@ -135,11 +135,11 @@ def _client_for_profile(profile):
 
 ### 真实端点验收（2026-06-11，人提供 key，已通过）
 
-用人配置的 `.env`（仅本地，已加 `.gitignore`）对两家 Anthropic 兼容端点做真实冒烟，全部通过：
+用人配置的 `.env`（仅本地，已加 `.gitignore`）对三家 Anthropic 兼容端点做真实冒烟，全部通过：
 
 - **MiMo `mimo-v2.5`**（token-plan Anthropic 端点）：非流式 complete + 真实 `tool_use` 往返（calculator，trace 确认 `tool_call`/`tool_result` 事件与 usage 映射）；流式 `input_json_delta` 累积出合法工具参数；CLI `· thinking …` 与 Web SSE `event: thinking` 均收到真实思考增量；`reasoning_effort: low`（`thinking: adaptive` + `output_config.effort`）端点接受。
 - **DashScope `qwen3.6-flash`**（apps/anthropic 端点）：流式 + thinking + 工具调用交叉验证通过，确认映射非单端点兼容。
-- DeepSeek 官方 anthropic 端点 401（`.env` 里 `DEEPSEEK_API_KEY` 是 token-plan 的 key，DeepSeek 官方不认）——验证了 401 错误能干净上抛，非本切片问题。
+- **DeepSeek `deepseek-v4-flash`**（api.deepseek.com/anthropic）：流式 + thinking + 工具调用通过（首测 401 系 `.env` 误放 token-plan key，人当日修正后复测通过；401 期间也验证了认证错误能干净上抛）。
 - 已知模型怪癖（非映射缺陷）：mimo-v2.5 对 Web 会话自动标题的 prompt 不遵从，直接回答了消息里嵌的算术（`{"result": "1452"}`）；title 调用本身不带工具、链路正确，换遵循指令的模型即正常。
 
 ---
