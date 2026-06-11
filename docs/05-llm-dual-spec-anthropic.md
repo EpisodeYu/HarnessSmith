@@ -133,6 +133,15 @@ def _client_for_profile(profile):
 - 分发：`llm._client_for_profile(profile)` 按 `provider` 选实现（`make_client` + `ClientRouter` 共用）；未渲染 anthropic 模块的产物若手改 `provider: anthropic`，报带指引的 `RuntimeError` 而非裸 ImportError。
 - 门禁记录：生成器快测 171 全绿 + golden 13 全绿（含新增 anthropic golden、Docker 2、uvx 冒烟）。wizard 不露出 provider（行为性/llm 配置本就烤默认，沿用 Slice 7 口径）。
 
+### 真实端点验收（2026-06-11，人提供 key，已通过）
+
+用人配置的 `.env`（仅本地，已加 `.gitignore`）对两家 Anthropic 兼容端点做真实冒烟，全部通过：
+
+- **MiMo `mimo-v2.5`**（token-plan Anthropic 端点）：非流式 complete + 真实 `tool_use` 往返（calculator，trace 确认 `tool_call`/`tool_result` 事件与 usage 映射）；流式 `input_json_delta` 累积出合法工具参数；CLI `· thinking …` 与 Web SSE `event: thinking` 均收到真实思考增量；`reasoning_effort: low`（`thinking: adaptive` + `output_config.effort`）端点接受。
+- **DashScope `qwen3.6-flash`**（apps/anthropic 端点）：流式 + thinking + 工具调用交叉验证通过，确认映射非单端点兼容。
+- DeepSeek 官方 anthropic 端点 401（`.env` 里 `DEEPSEEK_API_KEY` 是 token-plan 的 key，DeepSeek 官方不认）——验证了 401 错误能干净上抛，非本切片问题。
+- 已知模型怪癖（非映射缺陷）：mimo-v2.5 对 Web 会话自动标题的 prompt 不遵从，直接回答了消息里嵌的算术（`{"result": "1452"}`）；title 调用本身不带工具、链路正确，换遵循指令的模型即正常。
+
 ---
 
 > 一句话：双规范不是替换，是给推理模型补上"原生才有"的 thinking/effort——靠 loop 已有的 provider-neutral `LLMClient` 扩展点，加一个映射客户端 + 一个 spec 开关，关掉零痕迹。**已实现并过全部门禁（2026-06-10）。**
