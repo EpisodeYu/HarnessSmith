@@ -2,7 +2,7 @@
 
 The wizard is a generator-side tool behind the ``harnessforge[wizard]`` extra.
 Its UI collects only *structural* choices (what to generate); behavioral fields
-(llms/prompts/budget/context) are baked with working defaults and edited later in
+(llms/prompts/tools/context) are baked with working defaults and edited later in
 the generated product. These drive it with ``fastapi.testclient`` (no real
 browser). They are skipped if FastAPI isn't installed (``uv sync --extra dev``).
 """
@@ -144,8 +144,9 @@ def test_baked_defaults_fill_behavioral_fields(client):
     assert "gpt-4o-mini" not in y              # no guessed model
     assert "api_key_env: OPENAI_API_KEY" in y  # env NAME only
     assert "You are a helpful assistant." in y  # default system prompt
-    # default budget guardrail (new shape: combine + named conditions)
-    assert "combine: or" in y and "max_steps:" in y and "threshold: 8" in y
+    # Cost accounting / limits are runtime-only (config.yaml's Budget page), never
+    # in the spec — so the baked spec has no budget block.
+    assert "budget:" not in y
 
 
 def test_explicit_behavioral_fields_win_over_defaults(client):

@@ -36,7 +36,7 @@ def test_slugify_mirrors_web_derive_slug(display, expected):
 
 def test_build_spec_bakes_behavioral_defaults_from_structural_answers():
     """Structural-only answers -> a validated spec with the same baked LLM /
-    prompt / budget defaults the web form produces (runnable out of the box)."""
+    prompt defaults the web form produces (runnable out of the box)."""
     spec, servers = build_spec(
         {
             "display_name": "My Coding Assistant",
@@ -58,7 +58,6 @@ def test_build_spec_bakes_behavioral_defaults_from_structural_answers():
     assert spec.llms and spec.llms[0].name == "default" and spec.llms[0].model == ""
     assert spec.llms[0].api_key_env == "OPENAI_API_KEY"
     assert spec.prompts.system == "You are a helpful assistant."
-    assert spec.budget.conditions["max_steps"].threshold == 8
     assert servers == []
 
 

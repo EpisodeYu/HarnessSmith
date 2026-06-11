@@ -3,8 +3,9 @@
 Generated only when ``interfaces.web`` is enabled. ``/chat`` streams the loop's
 progress over Server-Sent Events by listening on the existing :class:`Hooks`
 extension point — the loop itself is untouched. ``/config`` reads and edits the
-*runtime behavioral* config (prompts, budget, enabled tools, context, sampling)
-and never exposes secrets: profiles only carry env-var NAMES. A Save applies the
+*runtime behavioral* config (prompts, enabled tools, context, sampling, per-LLM
+pricing + cost limits) and never exposes secrets: profiles only carry env-var
+NAMES. A Save applies the
 edit to the running process AND persists it back to ``config.yaml`` (comments
 preserved, via ruamel.yaml), so a restart keeps it instead of reverting to the
 file. Structural config (which interfaces / modules exist) is not editable here.
@@ -33,8 +34,8 @@ from ..harness.config import (
     save_config,
     set_env_value,
 )
-from ..harness.budget import BUDGET_CONDITIONS
 from ..harness.context import CONDITIONS, STRATEGIES
+from ..harness.usage import UsageLedger
 {% if spec.memory.enabled %}from ..harness.memory import BACKENDS as _MEMORY_BACKENDS
 {% endif %}from ..harness.debuglog import log, setup as setup_debug_log
 from ..harness.extensions import import_extensions, load_hooks
@@ -59,7 +60,7 @@ _INDEX_HTML = (Path(__file__).parent / "web_index.html").read_text(encoding="utf
 # editable or returned, so a real key value can never enter the panel.
 _EDITABLE_FIELDS = (
     "llms", "roles", "prompts", "tools", "context", "paradigms",
-    "observability", "budget",
+    "observability",
 {% if spec.memory.enabled %}    "memory",
 {% endif %})
 
@@ -617,18 +618,40 @@ def create_app(
     def registries() -> dict:
         """What's registered in code — the extension universe behind the config
         dropdowns. A custom ``@register_paradigm`` / ``@register_strategy`` /
-        ``@register_condition`` / ``@register_budget_condition`` shows up here once
-        its module is imported, so the panel can offer it (and flag a config name
-        that isn't registered). ``/config`` holds what's currently *selected*; this
-        holds what *exists*.
+        ``@register_condition`` shows up here once its module is imported, so the
+        panel can offer it (and flag a config name that isn't registered).
+        ``/config`` holds what's currently *selected*; this holds what *exists*.
         """
         return {
             "paradigms": list(PARADIGMS),
             "strategies": list(STRATEGIES),
             "conditions": list(CONDITIONS),
-            "budget_conditions": list(BUDGET_CONDITIONS),
 {% if spec.memory.enabled %}            "memory": list(_MEMORY_BACKENDS),
 {% endif %}        }
+
+    @app.get("/usage")
+    def usage() -> dict:
+        """Per-LLM accrued cost + token usage for the Budget page. Cost is derived
+        from each profile's CURRENT per-1M prices (so editing a price re-prices the
+        history); ``limit`` / ``over`` come from the profile's ``cost_limit``. One
+        row per current profile (orphaned names are hidden)."""
+        return {"profiles": UsageLedger().snapshot(app.state.config)}
+
+    @app.post("/usage/clear")
+    async def clear_usage(request: Request):
+        """Reset one LLM's accrued usage (``{"profile": name}``) or all of them
+        (``{"all": true}``). Manual only — usage never auto-clears, not even when a
+        profile's model changes."""
+        body = await request.json()
+        ledger = UsageLedger()
+        if body.get("all"):
+            ledger.clear_all()
+        else:
+            name = str(body.get("profile", "")).strip()
+            if not name:
+                return JSONResponse({"error": "profile or all required"}, status_code=400)
+            ledger.clear(name)
+        return {"ok": True, "profiles": ledger.snapshot(app.state.config)}
 {% if spec.mcp.enabled %}
     @app.get("/mcp/status")
     async def mcp_status() -> dict:

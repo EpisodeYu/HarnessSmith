@@ -72,14 +72,20 @@ class LLMProfileConfig(BaseModel):
     # Merged verbatim into the request (OpenAI SDK ``extra_body`` / Anthropic
     # ``extra_body``). Values only — NEVER put secrets here (keys belong in .env).
     extra_body: dict[str, Any] = Field(default_factory=dict)
-    # Optional cost accounting (price per 1,000,000 tokens, in your own currency —
-    # fill in your local price). Set these to track spend in the trace and to
-    # enable a cost-based budget stop; defaults to free. ``cached_input_cost_per_million``
+    # Cost accounting (price per 1,000,000 tokens, in your own currency — fill in
+    # your local price). These drive the per-LLM spend shown on the Budget page and
+    # the ``cost_limit`` stop; left 0 cost stays 0. ``cached_input_cost_per_million``
     # prices provider-cached (prompt-prefix) input tokens, usually much cheaper; left
     # 0 those tokens are billed at the full input price (no spurious discount).
     input_cost_per_million: float = 0.0
     output_cost_per_million: float = 0.0
     cached_input_cost_per_million: float = 0.0
+    # Per-LLM cost ceiling (same currency as the prices above; 0 = no limit). Once
+    # this profile's accrued cost across runs (see harness/usage.py — generation +
+    # compaction) reaches it, the loop stops USING this LLM and tells the user to
+    # clear its usage or raise the limit on the Budget page. Usage persists in
+    # ``.harness/usage.json`` and only resets when you clear it by hand.
+    cost_limit: float = Field(default=0.0, ge=0)
     # The model's total context window (input+output budget) in tokens. Optional:
     # set it to enable accurate ``window_pct`` compaction (compact at a fraction of
     # the window — see ``ContextConfig``). Left unset, percentage compaction is
@@ -186,49 +192,6 @@ class SessionsConfig(BaseModel):
     enabled: bool = True
     dir: str = ".harness/sessions"
     auto_title: bool = True
-
-
-class BudgetConditionSpec(BaseModel):
-    """One budget limit: a threshold, optionally over a tumbling time window.
-
-    With ``window_seconds`` it is a RATE (the metric accumulated within the
-    current window must reach ``threshold``); without it the threshold is
-    cumulative over the run. A bare scalar in config.yaml (``max_steps: 8``) is
-    coerced to ``{threshold: 8}``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    threshold: float = Field(gt=0)
-    window_seconds: float | None = Field(default=None, gt=0)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_scalar(cls, data: Any) -> Any:
-        if isinstance(data, (int, float)) and not isinstance(data, bool):
-            return {"threshold": data}
-        return data
-
-
-class BudgetConfig(BaseModel):
-    """Per-run guardrails as named conditions combined by ``combine`` (or/and).
-
-    The loop stops when the combination fires: ``or`` (default, safe) stops at
-    the first limit reached; ``and`` stops only when ALL configured conditions
-    fire. Built-in conditions live in ``harness/budget.py``: ``max_steps`` /
-    ``max_seconds`` / ``max_tokens`` / ``max_cost`` (the last only works if the
-    active LLM profile has non-zero per-1M-token prices). Each condition may
-    carry ``window_seconds`` to become a rate over a tumbling window; without it
-    the threshold is cumulative over the run. Add your own with
-    ``@register_budget_condition`` and reference it by name here. Scope is per-run
-    (resets each turn) — persistent periodic quotas are a v1+ add-on. Empty
-    ``conditions`` = no budget (the loop runs unbounded).
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    combine: Literal["or", "and"] = "or"
-    conditions: dict[str, BudgetConditionSpec] = Field(default_factory=dict)
 
 
 class ParadigmsConfig(BaseModel):
@@ -397,10 +360,9 @@ class Config(BaseModel):
     paradigms: ParadigmsConfig = Field(default_factory=ParadigmsConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)
-    budget: BudgetConfig = Field(default_factory=BudgetConfig)
     # Runtime extension points (no spec field). ``extensions`` lists dotted module
     # paths imported at startup so their ``@register_*`` run (custom tools /
-    # paradigms / budget & context conditions / memory backends living outside the
+    # paradigms / context conditions / memory backends living outside the
     # built-in files). ``hooks`` names a Hooks subclass ("package.module:ClassName")
     # the CLI/web mount automatically — logging / guardrails / redaction / HITL
     # without editing the loop. See ``harness/extensions.py``.
@@ -432,7 +394,7 @@ class Config(BaseModel):
             empties: dict[str, Any] = {
                 "llms": [], "roles": {}, "tools": [],
                 "prompts": {}, "context": {}, "paradigms": {},
-                "observability": {}, "sessions": {}, "budget": {},
+                "observability": {}, "sessions": {},
                 "extensions": [],
             }
             for key, default in empties.items():

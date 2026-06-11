@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ..budget import BudgetTracker
 from ..config import Config
 from ..context import fit as fit_context, make_summarizer
 from ..hooks import Hooks
@@ -27,6 +26,7 @@ from ..prompts import build_system_prompt
 from ..tools import Registry
 from ..tools import registry as default_registry
 from ..trace import Trace
+from ..usage import LLMBudgetExceeded, UsageLedger
 from . import (
     RunResult,
     assistant_message,
@@ -77,6 +77,10 @@ def run(
     if trace is None:
         obs = config.observability
         trace = Trace(trace_dir=obs.trace_dir if obs.trace else None, enabled=obs.trace)
+    # Attach the persistent per-LLM cost ledger (cross-run spend + cost limits)
+    # unless a caller already wired one (e.g. a test injecting an isolated ledger).
+    if trace.ledger is None:
+        trace.ledger = UsageLedger()
 
     context_cfg = config.context
     # Summarization usage is recorded to the trace (and counts toward the budget).
@@ -86,7 +90,6 @@ def run(
     last_prompt_tokens = 0
     context_window = profile.context_window
 
-    tracker = BudgetTracker(config.budget)
     # Read-only: high-risk tools are never offered, and ``run_tool`` refuses any
     # call outside this ``active`` set, so the model cannot mutate even off-script.
     active = registry.active_names(config.enabled_tool_names(), allow_high_risk=False)
@@ -104,26 +107,29 @@ def run(
     stop_reason = "final"
     answer = ""
     while True:
-        # One budget check per step (so combine: and/or stays coherent). steps and
-        # elapsed are current; tokens/cost reflect responses so far, so a
-        # token/cost stop lands at the start of the next step (off by one).
-        tracker.update(step=step, total_tokens=trace.total_tokens, cost_usd=trace.cost_usd)
-        stop = tracker.check()
-        if stop is not None:
-            stop_reason, answer = stop
-            break
-
-        # Cooperative cancel at the step boundary (next to the budget check): a
-        # Stop / Ctrl-C between steps ends the turn cleanly here, leaving messages
-        # on a legal boundary (last tool result / user message).
+        # Cooperative cancel at the step boundary: a Stop / Ctrl-C between steps
+        # ends the turn cleanly here, leaving messages on a legal boundary (last
+        # tool result / user message).
         if cancel is not None and cancel():
             stop_reason = "interrupted"
             break
 
-        messages = fit_context(
-            messages, context_cfg, summarizer=summarizer,
-            last_prompt_tokens=last_prompt_tokens, context_window=context_window, config=config,
-        )
+        # Per-LLM cost limit (block_stop): refuse to call an over-budget LLM and
+        # stop cleanly with a notice naming it. The generation profile is checked
+        # here; the compaction profile is checked inside the summarizer, which
+        # raises the same exception from fit_context — so either LLM crossing its
+        # cost_limit ends the turn. Accrued cost drives it, so a stop lands at the
+        # start of the next step (off by one, like any post-hoc count).
+        try:
+            if trace.ledger is not None:
+                trace.ledger.ensure_within(profile)
+            messages = fit_context(
+                messages, context_cfg, summarizer=summarizer,
+                last_prompt_tokens=last_prompt_tokens, context_window=context_window, config=config,
+            )
+        except LLMBudgetExceeded as exc:
+            stop_reason, answer = "llm_budget", exc.message()
+            break
         hooks.before_step(step, messages)
         try:
             # One call with context-overflow auto-rescue + optional profile fallback
@@ -135,6 +141,10 @@ def run(
                 last_prompt_tokens=last_prompt_tokens, context_window=context_window,
                 config=config, fallback_name=profile.fallback,
             )
+        except LLMBudgetExceeded as exc:
+            # An overflow rescue's compaction hit the compaction LLM's cost limit.
+            stop_reason, answer = "llm_budget", exc.message()
+            break
         except Exception as exc:
             hooks.on_error("llm", exc)
             trace.event("error", where="llm", error=str(exc))

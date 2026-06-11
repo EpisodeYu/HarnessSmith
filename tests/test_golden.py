@@ -216,7 +216,7 @@ def test_golden_wizard_spec_generates_and_smoke_passes(tmp_path):
 
     client = TestClient(create_app())
     # Structural-only form (what the slimmed wizard sends): the backend bakes the
-    # behavioral defaults (llms/prompts/budget/tools) that make it runnable.
+    # behavioral defaults (llms/prompts/tools) that make it runnable.
     spec_data = {
         "display_name": "Wizard Bot",
         "project_slug": "wizard_bot",

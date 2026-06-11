@@ -6,9 +6,10 @@ paradigms, web/MCP/skills/memory, catalog servers):
 - the web form (``harnessforge/wizard/app.py``, ``[wizard]`` extra), and
 - the interactive CLI wizard (``harnessforge new`` with no ``--spec``/``--preset``).
 
-Behavioral fields (llms/prompts/budget/tools) are baked here with working
-defaults so the generated product is runnable out of the box and tuned later in
-the product's own config page. Secrets are env-var NAMES only, never values.
+Behavioral fields (llms/prompts/tools) are baked here with working defaults so
+the generated product is runnable out of the box and tuned later in the product's
+own config page (LLM pricing + cost limits live on its Budget page). Secrets are
+env-var NAMES only, never values.
 
 This module deliberately does NOT import FastAPI/uvicorn: it is reachable from
 the core CLI (``uvx harnessforge new``), which must stay free of the ``wizard``
@@ -76,7 +77,6 @@ BAKED_DEFAULTS: dict = {
         {"name": "get_current_time", "enabled": True},
         {"name": "calculator", "enabled": True},
     ],
-    "budget": {"conditions": {"max_steps": 8}},
 }
 
 _SLUG_SUB = re.compile(r"[^a-z0-9]+")

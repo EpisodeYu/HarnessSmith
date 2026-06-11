@@ -24,7 +24,6 @@ def _config():
             # Off here so the streaming-chat tests don't litter the cwd; the
             # session tests below opt in with their own tmp dir (_session_client).
             "sessions": {"enabled": False},
-            "budget": {"conditions": {"max_steps": 4}},
         }
     )
 
@@ -432,16 +431,15 @@ def test_registries_lists_registered_extensions():
     assert "agent" in data["paradigms"]
     assert {"truncate", "summarize", "none"} <= set(data["strategies"])
     assert {"max_tokens", "max_turns"} <= set(data["conditions"])
-    assert {"max_steps", "max_seconds", "max_tokens", "max_cost"} <= set(
-        data["budget_conditions"]
-    )
+    assert "budget_conditions" not in data  # per-run budget conditions are gone
 
 
 def test_config_get_exposes_names_not_secrets():
     resp = _client().get("/config")
     assert resp.status_code == 200
     data = resp.json()
-    assert "prompts" in data and "budget" in data
+    assert "prompts" in data and "llms" in data
+    assert "budget" not in data  # no per-run budget block anymore
     assert data["llms"][0]["api_key_env"] == "OPENAI_API_KEY"  # env NAME only
     assert "sk-" not in resp.text  # never a secret value
 
@@ -498,28 +496,67 @@ def test_config_post_toggles_debug_log_live(tmp_path):
 
 def test_config_post_rejects_invalid_value():
     resp = _client().post(
-        "/config", json={"budget": {"conditions": {"max_steps": -1}}}
+        "/config",
+        json={"llms": [{"name": "default", "model": "m", "cost_limit": -1}]},
     )
     assert resp.status_code == 400
     assert "error" in resp.json()
 
 
-def test_config_post_updates_budget_conditions():
+def test_config_post_updates_llm_pricing_and_limit():
+    """Pricing + per-LLM cost_limit (edited on the Budget tab) ride in the llms
+    patch and round-trip through /config."""
     client = _client()
     resp = client.post(
         "/config",
         json={
-            "budget": {
-                "combine": "and",
-                "conditions": {"max_tokens": {"threshold": 5000, "window_seconds": 60}},
-            }
+            "llms": [
+                {
+                    "name": "default",
+                    "model": "mock-model",
+                    "input_cost_per_million": 1.5,
+                    "output_cost_per_million": 3.0,
+                    "cached_input_cost_per_million": 0.5,
+                    "cost_limit": 10.0,
+                }
+            ]
         },
     )
     assert resp.status_code == 200
-    bud = resp.json()["budget"]
-    assert bud["combine"] == "and"
-    assert bud["conditions"]["max_tokens"]["threshold"] == 5000
-    assert bud["conditions"]["max_tokens"]["window_seconds"] == 60
+    prof = resp.json()["llms"][0]
+    assert prof["input_cost_per_million"] == 1.5
+    assert prof["output_cost_per_million"] == 3.0
+    assert prof["cost_limit"] == 10.0
+
+
+def test_usage_endpoint_lists_profiles():
+    """GET /usage returns one row per current LLM with tokens + derived cost +
+    limit (the Budget page's data)."""
+    client = _client()
+    client.post("/usage/clear", json={"all": True})  # deterministic start
+    data = client.get("/usage").json()
+    row = next(p for p in data["profiles"] if p["name"] == "default")
+    assert {"prompt_tokens", "completion_tokens", "cached_prompt_tokens",
+            "cost", "limit", "over"} <= set(row)
+
+
+def test_usage_accrues_after_chat_then_clears():
+    """A chat turn accrues per-LLM usage; clearing one profile resets it."""
+    client = _client()
+    client.post("/usage/clear", json={"all": True})
+    client.get("/chat", params={"message": "hi", "stream": "false"})  # mock run
+    after = {p["name"]: p for p in client.get("/usage").json()["profiles"]}
+    assert after["default"]["prompt_tokens"] > 0
+
+    resp = client.post("/usage/clear", json={"profile": "default"})
+    assert resp.status_code == 200
+    cleared = {p["name"]: p for p in resp.json()["profiles"]}
+    assert cleared["default"]["prompt_tokens"] == 0
+
+
+def test_usage_clear_requires_target():
+    resp = _client().post("/usage/clear", json={})
+    assert resp.status_code == 400
 
 
 def test_config_post_ignores_structural_and_secret_keys():

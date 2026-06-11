@@ -130,48 +130,6 @@ class Prompts(BaseModel):
     rules_files: list[str] = Field(default_factory=list)
 
 
-class BudgetCondition(BaseModel):
-    """One budget limit: a threshold, optionally over a tumbling time window.
-
-    With ``window_seconds`` set it is a RATE — the metric accumulated within the
-    current window must reach ``threshold`` (e.g. 50000 tokens / 60s). Without a
-    window the threshold is cumulative over the run. A bare scalar in YAML
-    (``max_steps: 8``) is coerced to ``{threshold: 8}`` for terseness.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    threshold: float = Field(gt=0)
-    window_seconds: float | None = Field(default=None, gt=0)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_scalar(cls, data: Any) -> Any:
-        if isinstance(data, (int, float)) and not isinstance(data, bool):
-            return {"threshold": data}
-        return data
-
-
-class Budget(BaseModel):
-    """Per-run guardrails: named conditions combined by ``combine`` (or/and).
-
-    Built-in condition names: ``max_steps`` / ``max_seconds`` / ``max_tokens`` /
-    ``max_cost``. ``combine`` decides when to stop — ``or`` (the safe guardrail
-    default) stops at the first limit hit; ``and`` stops only when all fire. This
-    only *seeds* the product's runtime ``config.yaml`` ``budget`` block; behavior
-    is runtime-authoritative there (and the product can add its own conditions via
-    ``@register_budget_condition``). Scope is per-run (resets each turn);
-    persistent day/week/month quotas are a v1+ add-on.
-
-    Declared in Slice 0; enforcement (budget-stop) is wired in Slice 1.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    combine: Literal["or", "and"] = "or"
-    conditions: dict[str, BudgetCondition] = Field(default_factory=dict)
-
-
 class HarnessSpec(BaseModel):
     """Minimal HarnessSpec for Slice 0.
 
@@ -216,7 +174,9 @@ class HarnessSpec(BaseModel):
     skills: Skills = Field(default_factory=Skills)
     memory: Memory = Field(default_factory=Memory)
     observability: Observability = Field(default_factory=Observability)
-    budget: Budget = Field(default_factory=Budget)
+    # Per-LLM cost accounting and limits are runtime-only knobs on each profile in
+    # config.yaml (``input/output/cached_input_cost_per_million`` + ``cost_limit``),
+    # edited on the product's Budget page — there is no spec-level budget block.
 
     # Context-window management seed (runtime-authoritative — this only seeds the
     # product's config.yaml `context` block). Optional keys: `strategy`

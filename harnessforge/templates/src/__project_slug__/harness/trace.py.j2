@@ -48,6 +48,11 @@ class Trace:
     completion_tokens: int = 0
     cached_prompt_tokens: int = 0
     cost_usd: float = 0.0
+    # Optional persistent per-LLM cost ledger (``harness/usage.py``). When set,
+    # every ``add_usage`` also records the response's tokens under its profile
+    # name so cost accrues across runs (the Budget page / cost limits read it).
+    # The entry points (CLI / web) attach one; left None there's no persistence.
+    ledger: Any = None
     _path: Path | None = field(default=None, init=False, repr=False)
     _fh: Any = field(default=None, init=False, repr=False)
 
@@ -82,6 +87,11 @@ class Trace:
         self.cached_prompt_tokens += usage.cached_prompt_tokens
         cost = compute_cost(usage, profile)
         self.cost_usd += cost
+        # Persist this call's tokens under its profile so per-LLM cost accrues
+        # across runs (generation + compaction both reach here). No-op when no
+        # ledger is attached (e.g. a bare unit-test Trace).
+        if self.ledger is not None:
+            self.ledger.record(profile.name, usage)
         return cost
 
     def close(self) -> None:

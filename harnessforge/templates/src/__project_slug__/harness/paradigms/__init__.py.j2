@@ -32,9 +32,9 @@ from ..trace import Trace
 class RunResult:
     answer: str
     steps: int
-    # "final", or a fired budget condition name from harness/budget.py (e.g.
-    # "max_steps" / "max_tokens", or a combined "max_tokens+max_cost" under
-    # combine: and).
+    # "final" (the model answered), "interrupted" (Stop / Ctrl-C / disconnect), or
+    # "llm_budget" (an LLM hit its per-LLM cost_limit, so the loop stopped using it
+    # — see harness/usage.py).
     stop_reason: str
     trace: Trace
     mode: str = "agent"  # which paradigm produced this result

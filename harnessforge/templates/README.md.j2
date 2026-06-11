@@ -118,8 +118,9 @@ and the conversation regenerates from that point (the rest is discarded).
 ## Web chat + config panel
 
 A thin FastAPI app: a token-by-token streaming (SSE) chat plus a live `/config`
-panel for the runtime behavioral config (prompts, budget, enabled tools,
-context, sampling). Streaming is toggleable; secrets are never shown or editable.
+panel for the runtime behavioral config (prompts, enabled tools, context,
+sampling) and a **Budget** page showing per-LLM accrued cost + cost limits.
+Streaming is toggleable; secrets are never shown or editable.
 Panel edits only take effect when you hit **Save** — the panel marks unsaved
 changes and warns before you switch tabs or reload, so a configured LLM profile
 isn't lost by forgetting to save. **Save** both applies the edit live and writes
@@ -220,7 +221,8 @@ src/{{ project_slug }}/
 ## Configuration
 
 `config.yaml` holds everything non-secret (models, roles, prompts, enabled
-tools, budget, tracing). Secrets are referenced by **env-var name** only; the
+tools, per-LLM pricing + cost limits, tracing). Secrets are referenced by
+**env-var name** only; the
 real values live in `.env` (gitignored) or the process environment — they never
 touch git, the trace, or `harness.spec.yaml`.
 

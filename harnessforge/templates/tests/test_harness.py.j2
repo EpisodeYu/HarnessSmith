@@ -34,7 +34,6 @@ def _config(tmp_path, **overrides):
             {"name": "calculator", "enabled": True},
         ],
         "observability": {"trace": True, "trace_dir": str(tmp_path / "traces")},
-        "budget": {},
     }
     data.update(overrides)
     return Config.model_validate(data)
@@ -146,156 +145,100 @@ def test_high_risk_tool_is_off_unless_allowlisted(tmp_path):
     assert registry.active_names(on.enabled_tool_names()) == ["danger"]
 
 
-class _AlwaysToolLLM:
-    """Always asks for a tool call (never finishes) so budgets must stop it."""
+def _ledger(tmp_path):
+    """An isolated on-disk usage ledger (so a limit test never reads/clobbers the
+    real .harness/usage.json or another test's counts)."""
+    from {{ project_slug }}.harness.usage import UsageLedger
 
-    def __init__(self, sleep: float = 0.0) -> None:
-        self._sleep = sleep
-
-    def complete(self, messages, tools=None, *, cancel=None) -> LLMResponse:
-        if self._sleep:
-            import time
-
-            time.sleep(self._sleep)
-        return LLMResponse(
-            tool_calls=[ToolCall(id="c", name="get_current_time", arguments="{}")],
-            usage=Usage(1000, 1000, 2000),
-        )
+    return UsageLedger(str(tmp_path / "usage.json"))
 
 
-def test_budget_stop_on_max_steps(tmp_path):
-    config = _config(tmp_path, budget={"conditions": {"max_steps": 2}})
-    result = run("x", client=_AlwaysToolLLM(), config=config)
-    assert result.stop_reason == "max_steps"
-    assert result.steps == 2
-
-
-def test_budget_stop_on_max_seconds(tmp_path):
-    config = _config(tmp_path, budget={"conditions": {"max_seconds": 0.01}})
-    result = run("x", client=_AlwaysToolLLM(sleep=0.02), config=config)
-    assert result.stop_reason == "max_seconds"
-
-
-def test_budget_stop_on_max_tokens(tmp_path):
-    config = _config(tmp_path, budget={"conditions": {"max_tokens": 1500}})
-    result = run("x", client=_AlwaysToolLLM(), config=config)
-    assert result.stop_reason == "max_tokens"
-    assert result.trace.total_tokens >= 1500
-
-
-def test_budget_stop_on_max_cost(tmp_path):
-    config = _config(tmp_path, budget={"conditions": {"max_cost": 0.5}})
+def test_usage_ledger_accumulates_across_runs(tmp_path):
+    """Per-LLM spend persists across runs (the Budget page's source of truth)."""
+    config = _config(tmp_path)
     config.llms[0].input_cost_per_million = 1000.0
     config.llms[0].output_cost_per_million = 1000.0
-    result = run("x", client=_AlwaysToolLLM(), config=config)
-    assert result.stop_reason == "max_cost"
-    assert result.trace.cost_usd >= 0.5
+    ledger = _ledger(tmp_path)
+
+    run("hi", client=MockLLM(), config=config, trace=Trace(enabled=False, ledger=ledger))
+    after_one = ledger.snapshot(config)[0]
+    run("hi", client=MockLLM(), config=config, trace=Trace(enabled=False, ledger=ledger))
+    after_two = ledger.snapshot(config)[0]
+
+    assert after_one["prompt_tokens"] > 0 and after_one["cost"] > 0
+    assert after_two["prompt_tokens"] == 2 * after_one["prompt_tokens"]  # accrued, not reset
+    assert after_two["name"] == "default"
 
 
-def test_budget_scalar_shorthand_equals_threshold(tmp_path):
-    """A bare number is coerced to {threshold: N} (the terse common case)."""
-    config = _config(tmp_path, budget={"conditions": {"max_steps": 3}})
-    assert config.budget.conditions["max_steps"].threshold == 3
-    assert config.budget.conditions["max_steps"].window_seconds is None
+def test_llm_cost_limit_blocks_an_over_budget_llm(tmp_path):
+    """block_stop: an LLM already over its cost_limit is not called at all — the
+    run ends immediately with stop_reason 'llm_budget' naming it."""
+    config = _config(tmp_path)
+    config.llms[0].input_cost_per_million = 1_000_000.0  # 1 unit / token
+    config.llms[0].cost_limit = 1.0
+    ledger = _ledger(tmp_path)
+    ledger.record("default", Usage(prompt_tokens=5, completion_tokens=0, total_tokens=5))  # cost 5 >= 1
+
+    result = run("hi", client=MockLLM(), config=config, trace=Trace(enabled=False, ledger=ledger))
+    assert result.stop_reason == "llm_budget"
+    assert result.steps == 0  # never called the LLM
+    assert "default" in result.answer
 
 
-def test_budget_combine_or_stops_at_first(tmp_path):
-    # or (the default): the reachable limit stops the run, the other is moot.
-    config = _config(
-        tmp_path,
-        budget={"combine": "or", "conditions": {"max_steps": 2, "max_tokens": 10_000_000}},
+def test_llm_cost_limit_stops_mid_run(tmp_path):
+    """Cost accrues over steps; once it crosses the limit the loop stops using the
+    LLM at the next step boundary (off by one) instead of spending more."""
+    config = _config(tmp_path)
+    config.llms[0].output_cost_per_million = 1_000_000.0  # 1 unit / completion token (5/call)
+    config.llms[0].cost_limit = 7.0
+    ledger = _ledger(tmp_path)
+    # Finite script so a broken limit fails the assertion instead of looping forever.
+    client = MockLLM(
+        script=[
+            ScriptedCall("get_current_time", {}),
+            ScriptedCall("get_current_time", {}),
+            ScriptedCall("get_current_time", {}),
+            "done",
+        ]
     )
-    result = run("x", client=_AlwaysToolLLM(), config=config)
-    assert result.stop_reason == "max_steps"
+    result = run("x", client=client, config=config, trace=Trace(enabled=False, ledger=ledger))
+    assert result.stop_reason == "llm_budget"
+    assert "default" in result.answer
 
 
-def test_budget_combine_and_requires_all(tmp_path):
-    # and: one exceeded condition must NOT stop — max_tokens fires immediately but
-    # max_steps never does, so the run finishes on its own.
-    config = _config(
-        tmp_path,
-        budget={"combine": "and", "conditions": {"max_steps": 999, "max_tokens": 1}},
-    )
-    client = MockLLM(script=[ScriptedCall("get_current_time", {}), "done"])
-    result = run("x", client=client, config=config)
+def test_no_cost_limit_runs_unbounded(tmp_path):
+    """cost_limit defaults to 0 (no limit), so a normal run finishes as usual."""
+    result = run("hi", client=MockLLM(), config=_config(tmp_path))
     assert result.stop_reason == "final"
-    assert result.answer == "done"
 
 
-def test_budget_combine_and_stops_when_all_fire(tmp_path):
-    config = _config(
-        tmp_path,
-        budget={"combine": "and", "conditions": {"max_steps": 2, "max_tokens": 1500}},
-    )
-    result = run("x", client=_AlwaysToolLLM(), config=config)
-    assert "max_steps" in result.stop_reason and "max_tokens" in result.stop_reason
+def test_usage_clear_resets_one_and_all(tmp_path):
+    config = _config(tmp_path)
+    config.llms[0].input_cost_per_million = 1000.0
+    ledger = _ledger(tmp_path)
+    ledger.record("default", Usage(prompt_tokens=100, completion_tokens=10, total_tokens=110))
+    assert ledger.snapshot(config)[0]["cost"] > 0
+
+    ledger.clear("default")
+    assert ledger.snapshot(config)[0]["prompt_tokens"] == 0
+    assert ledger.snapshot(config)[0]["cost"] == 0
+
+    ledger.record("default", Usage(prompt_tokens=5, completion_tokens=0, total_tokens=5))
+    ledger.clear_all()
+    assert ledger.snapshot(config)[0]["prompt_tokens"] == 0
 
 
-def test_unknown_budget_condition_is_skipped(tmp_path):
-    # A typo / not-imported condition name is ignored, not fatal.
-    config = _config(
-        tmp_path, budget={"conditions": {"max_steps": 2, "bogus": 1}}
-    )
-    result = run("x", client=_AlwaysToolLLM(), config=config)
-    assert result.stop_reason == "max_steps"
-
-
-def test_unknown_budget_condition_does_not_tighten_and(tmp_path):
-    """BUD-1: under combine=and an unknown/typo'd condition is fail-open — it can
-    never silently make the AND stop earlier. max_steps would fire at step 1, but
-    the unknown name never does, so the run finishes on its own."""
-    config = _config(
-        tmp_path,
-        budget={"combine": "and", "conditions": {"max_steps": 1, "max_typo": 1}},
-    )
-    client = MockLLM(script=[ScriptedCall("get_current_time", {}), "done"])
-    result = run("x", client=client, config=config)
-    assert result.stop_reason == "final"
-    assert result.answer == "done"
-
-
-def test_budget_cumulative_without_window():
-    from {{ project_slug }}.harness.budget import BudgetTracker
-    from {{ project_slug }}.harness.config import BudgetConfig
-
-    tracker = BudgetTracker(BudgetConfig())
-    assert tracker.amount("m", 1234, None) == 1234  # no window -> running total
-
-
-def test_budget_tumbling_window_resets_each_period():
-    import time
-
-    from {{ project_slug }}.harness.budget import BudgetTracker
-    from {{ project_slug }}.harness.config import BudgetConfig
-
-    tracker = BudgetTracker(BudgetConfig())
-    # Pretend the run started long ago so the first window has already expired.
-    tracker.started = time.monotonic() - 100.0
-    # window=10s expired -> a fresh window anchors now with baseline=current, so
-    # the in-window amount resets to 0 even though cumulative is 500...
-    assert tracker.amount("max_tokens", 500, window=10.0) == 0.0
-    # ...and subsequent growth within the same window counts from that baseline.
-    assert tracker.amount("max_tokens", 800, window=10.0) == 300.0
-
-
-def test_custom_budget_condition_registers_and_stops(tmp_path):
-    """Add a budget condition like a tool: a function + @register_budget_condition,
-    then reference its name in config.budget.conditions. No core file is edited."""
-    from {{ project_slug }}.harness.budget import (
-        BUDGET_CONDITIONS,
-        register_budget_condition,
-    )
-
-    @register_budget_condition("max_my_steps")
-    def _max_my_steps(tracker, threshold, window):
-        return tracker.step >= threshold
-
-    try:
-        config = _config(tmp_path, budget={"conditions": {"max_my_steps": 1}})
-        result = run("x", client=_AlwaysToolLLM(), config=config)
-        assert result.stop_reason == "max_my_steps"
-    finally:
-        BUDGET_CONDITIONS.pop("max_my_steps", None)
+def test_usage_keyed_by_profile_name(tmp_path):
+    """Renaming an LLM starts a fresh counter (the old name becomes an orphan, not
+    shown in the snapshot); a model change keeps the same name's tally."""
+    config = _config(tmp_path)
+    ledger = _ledger(tmp_path)
+    ledger.record("default", Usage(prompt_tokens=50, completion_tokens=0, total_tokens=50))
+    config.llms[0].name = "renamed"
+    config.roles = {"generation": "renamed"}
+    rows = {r["name"]: r for r in ledger.snapshot(config)}
+    assert "default" not in rows  # orphan hidden
+    assert rows["renamed"]["prompt_tokens"] == 0  # fresh counter
 
 
 def test_trace_records_tokens_and_cost(tmp_path):
@@ -1276,16 +1219,17 @@ def test_context_summarize_injects_summary():
     assert len(fitted) < len(messages)
 
 
-def test_summarize_usage_is_traced_and_budgeted(tmp_path):
-    """RT-2: a summarize compaction call's tokens/cost land in the trace (so they
-    count toward the token/cost budget) and emit a `compaction` event — they don't
-    silently escape the run totals."""
+def test_summarize_usage_is_traced_and_ledgered(tmp_path):
+    """RT-2: a summarize compaction call's tokens/cost land in the trace and emit a
+    `compaction` event — and also accrue in the per-LLM usage ledger (under the
+    compaction profile), so per-LLM cost includes compaction."""
     from {{ project_slug }}.harness.context import make_summarizer
 
     config = _config(tmp_path)
     config.llms[0].input_cost_per_million = 1000.0
     config.llms[0].output_cost_per_million = 1000.0
-    trace = Trace(trace_dir=str(tmp_path / "t"), enabled=True)
+    ledger = _ledger(tmp_path)
+    trace = Trace(trace_dir=str(tmp_path / "t"), enabled=True, ledger=ledger)
     router = ClientRouter(config, mock=True)
     ctx = ContextConfig(strategy="summarize", triggers={"max_tokens": 50}, keep_last_turns=2)
     summarizer = make_summarizer(router.client_for, config, ctx, trace)
@@ -1296,6 +1240,7 @@ def test_summarize_usage_is_traced_and_budgeted(tmp_path):
     assert trace.total_tokens > 0 and trace.cost_usd > 0  # accounted, not dropped
     events = [json.loads(line) for line in trace.path.read_text().splitlines()]
     assert any(e["event"] == "compaction" for e in events)
+    assert ledger.snapshot(config)[0]["prompt_tokens"] > 0  # compaction counted per-LLM
     trace.close()
 
 
@@ -1548,20 +1493,20 @@ def test_cli_run_unknown_role_is_a_clean_error(tmp_path):
     assert "bogus" in text and "role" in text.lower()
 
 
-def test_cli_run_warns_on_unknown_budget_condition(tmp_path):
-    """BUD-2: a typo'd budget condition is no longer a silent runtime no-op — run
-    warns at startup (the guardrail isn't silently dropped), but still runs."""
+def test_cli_run_warns_on_uncosted_limit(tmp_path):
+    """A cost_limit on a profile with no prices can never fire (cost stays 0); run
+    warns at startup so it isn't a silent no-op, but still runs."""
     from typer.testing import CliRunner
 
     from {{ project_slug }}.interfaces.cli import app
 
     cfg = _config(tmp_path).model_dump(mode="json")
-    cfg["budget"] = {"combine": "or", "conditions": {"max_stpes": 5}}
+    cfg["llms"][0]["cost_limit"] = 5.0  # but no input/output prices
     cfg_file = _write_config(tmp_path, cfg)
 
     result = CliRunner().invoke(app, ["run", "--config", str(cfg_file), "--mock", "hi"])
     assert result.exit_code == 0, _cli_text(result)
-    assert "max_stpes" in _cli_text(result)
+    assert "cost_limit" in _cli_text(result)
 
 
 def test_config_extensions_import_and_hooks_mount(tmp_path, monkeypatch):

@@ -3,14 +3,14 @@
 The single place the CLI / web call right after ``load_config`` to:
 
 - **import your extension modules** so their ``@register_*`` decorators run
-  (``config.extensions`` — the documented spot for tools / paradigms / budget &
-  context conditions / memory backends that live OUTSIDE the built-in files);
+  (``config.extensions`` — the documented spot for tools / paradigms / context
+  conditions / memory backends that live OUTSIDE the built-in files);
 - **mount a Hooks subclass** named in ``config.hooks`` (logging / guardrails /
   redaction / human-in-the-loop) without editing ``cli.py`` / ``web.py``;
 - **diagnose config names** that don't resolve: hard errors for references that
   MUST resolve (a role's profile, a paradigm, the context strategy) and soft
   warnings for the open registries where an unknown name might just be a
-  not-yet-imported custom extension (budget / context conditions, memory backend).
+  not-yet-imported custom extension (context conditions, memory backend).
 
 Thin and dependency-free — plain ``importlib`` over the same registries
 ``{{ project_slug }} info`` already prints.
@@ -73,10 +73,9 @@ def check_config(config: Config) -> tuple[list[str], list[str]]:
     Call AFTER :func:`import_extensions` so custom registrations are visible.
     *errors* are references that MUST resolve (fail-fast); *warnings* are the open
     registries where an unknown name might be a custom extension you forgot to
-    import (fail-open at runtime — the budget/context condition is simply skipped,
-    memory injects nothing).
+    import (fail-open at runtime — the context condition is simply skipped, memory
+    injects nothing).
     """
-    from .budget import BUDGET_CONDITIONS
     from .context import CONDITIONS, STRATEGIES
     from .paradigms import PARADIGMS
 
@@ -111,26 +110,16 @@ def check_config(config: Config) -> tuple[list[str], list[str]]:
                 "(typo, or import its module via extensions?)"
             )
 
-    for name in config.budget.conditions:
-        if name not in BUDGET_CONDITIONS:
+    # A per-LLM cost_limit set on a profile with no per-token prices can never fire
+    # (cost stays 0) — easy to misconfigure, so flag it.
+    for profile in config.llms:
+        if profile.cost_limit and not (
+            profile.input_cost_per_million or profile.output_cost_per_million
+        ):
             warnings.append(
-                f"budget condition {name!r} is not registered — it will be skipped "
-                "(typo, or import its module via extensions?)"
-            )
-
-    # A cost budget that can never fire because the active profile has no
-    # per-token prices (cost stays 0) — easy to misconfigure, so flag it.
-    if "max_cost" in config.budget.conditions:
-        try:
-            profile = config.profile_for("generation")
-            priced = bool(profile.input_cost_per_million or profile.output_cost_per_million)
-        except Exception:
-            priced = True  # can't resolve a profile -> don't nag here
-        if not priced:
-            warnings.append(
-                "budget.max_cost is set but the generation profile has no "
-                "input_cost_per_million / output_cost_per_million, so cost stays 0 "
-                "and max_cost never triggers"
+                f"llm {profile.name!r} sets cost_limit but has no "
+                "input_cost_per_million / output_cost_per_million, so its cost stays "
+                "0 and the limit never triggers (set prices on the Budget page)"
             )
 {% if spec.memory.enabled %}
     from .memory import BACKENDS as _MEMORY_BACKENDS

@@ -45,13 +45,16 @@ llms:
     # timeout_seconds: 600
     # max_retries: 2
     # fallback: backup
-    # Optional cost accounting. Required if you use the budget max_cost condition —
-    # otherwise cost stays 0 and the cost limit never triggers. Price per 1,000,000 tokens,
-    # in your own currency (fill in your local price). cached_input_cost_per_million
-    # prices provider-cached prompt tokens (cheaper); unset = billed at the input price.
-    # input_cost_per_million: 0.0
-    # output_cost_per_million: 0.0
-    # cached_input_cost_per_million: 0.0
+    # Cost accounting (price per 1,000,000 tokens, in your own currency — fill in
+    # your local price). Drives the per-LLM spend on the Budget page; left 0 cost
+    # stays 0. cached_input_cost_per_million prices provider-cached prompt tokens
+    # (cheaper); left 0 they bill at the input price. cost_limit (same currency,
+    # 0 = no limit) stops USING this LLM once its accrued cost reaches it — edit it
+    # all on the Budget page. Usage persists in .harness/usage.json (clear it there).
+    input_cost_per_million: 0.0
+    output_cost_per_million: 0.0
+    cached_input_cost_per_million: 0.0
+    cost_limit: 0.0
 {% endfor %}
 # Map roles to profile names above. `generation` is the main loop; `compaction`
 # (optional) is used by context summarize; `title` (optional) names sessions in
@@ -158,24 +161,13 @@ sessions:
   dir: .harness/sessions
   auto_title: true
 
-# Per-run guardrails (reset each turn). Each entry in `conditions` is a limit;
-# `combine` decides when to stop: or = any limit hit (safe default), and = all
-# must hit. Built-ins (harness/budget.py): max_steps (rounds), max_seconds,
-# max_tokens (prompt+completion), max_cost (needs per-1M prices on the profile).
-# A bare number is a cumulative threshold; use {threshold, window_seconds} to make
-# it a RATE over a tumbling window. Add your own with @register_budget_condition.
-# Empty conditions = no budget. Persistent day/week/month quotas are a v1+ add-on.
-budget:
-  combine: {{ spec.budget.combine }}   # or = stop at first limit; and = stop only when all fire
-{% if spec.budget.conditions %}  conditions:
-{% for name, cond in spec.budget.conditions.items() %}{% set thr = (cond.threshold | int) if cond.threshold == (cond.threshold | int) else cond.threshold %}{% if cond.window_seconds is not none %}{% set wnd = (cond.window_seconds | int) if cond.window_seconds == (cond.window_seconds | int) else cond.window_seconds %}    {{ name }}: {threshold: {{ thr }}, window_seconds: {{ wnd }}}
-{% else %}    {{ name }}: {{ thr }}
-{% endif %}{% endfor %}{% else %}  conditions: {}
-{% endif %}    # max_tokens: {threshold: 50000, window_seconds: 60}   # rate: 50k tokens / 60s
-    # max_cost: 1.00       # cumulative; needs per-1M-token prices on the profile above
+# Per-LLM cost limits live on each profile above (cost_limit), edited on the
+# product's Budget page. There is no per-run budget block: once an LLM's accrued
+# cost (across runs, see harness/usage.py) reaches its cost_limit the loop stops
+# using that LLM and tells the user. Usage persists in .harness/usage.json.
 
 # Runtime extension points (optional). `extensions` imports your own modules at
-# startup so their @register_* run (custom tools / paradigms / budget & context
+# startup so their @register_* run (custom tools / paradigms / context
 # conditions / memory backends that live outside the built-in files). `hooks`
 # mounts a Hooks subclass (logging / guardrails / redaction / HITL) by dotted
 # path — the CLI and web load it automatically. See harness/extensions.py + AGENTS.md.

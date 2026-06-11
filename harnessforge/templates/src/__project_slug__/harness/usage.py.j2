@@ -1,0 +1,179 @@
+"""Per-LLM cost ledger: persistent spend tracked per profile across runs.
+
+Unlike the trace (one run) this is a small JSON file under ``.harness/`` that
+accumulates token usage **per LLM profile name** across every run, so the web
+Budget page can show "cost used so far" per LLM, you can clear one, and a
+per-LLM ``cost_limit`` stops using that LLM once its accrued cost reaches it.
+
+What counts: the two LLM calls that go through ``Trace.add_usage`` — the main
+generation loop and context compaction (summarize). Each call is attributed to
+whichever profile made it, so generation and compaction count separately when
+they use different profiles. title / memory calls don't go through ``add_usage``
+and are not counted (matching the trace).
+
+Cost is DERIVED from the stored token counts and the profile's current per-1M
+prices (``input/output/cached_input_cost_per_million``), so editing a price (or
+the limit) on the Budget page re-prices the whole history at once. The ledger is
+keyed by profile name: renaming a profile starts a fresh row (the old name
+lingers as an orphan, hidden from the page); changing a profile's model keeps
+accumulating under the same name — clear it by hand to reset. No secrets ever
+touch this file: only profile names and token counts.
+
+Storage is a plain read-modify-write JSON under an in-process lock with an atomic
+replace; concurrent processes (a CLI run while the web server is up) accumulate
+best-effort. A persistent day/week/month quota layer would build on the same file
+(v1+).
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .llm import Usage
+from .trace import compute_cost
+
+if TYPE_CHECKING:
+    from .config import Config, LLMProfileConfig
+
+DEFAULT_USAGE_PATH = ".harness/usage.json"
+
+
+class LLMBudgetExceeded(Exception):
+    """Raised just before an LLM call when that profile's accrued cost is at/over
+    its ``cost_limit``. The loop turns it into a clean stop (``stop_reason
+    "llm_budget"``) with a message naming the LLM, instead of calling it."""
+
+    def __init__(self, name: str, cost: float, limit: float) -> None:
+        self.name = name
+        self.cost = cost
+        self.limit = limit
+        super().__init__(f"LLM {name!r} reached its cost limit ({cost:.4f} >= {limit:.4f})")
+
+    def message(self) -> str:
+        return (
+            f"Stopped: LLM {self.name!r} reached its cost limit "
+            f"({self.cost:.4f} / {self.limit:.4f}). Clear its usage or raise the "
+            "limit on the Budget page to continue."
+        )
+
+
+def _row_to_usage(row: dict | None) -> Usage:
+    row = row or {}
+    prompt = int(row.get("prompt_tokens", 0) or 0)
+    completion = int(row.get("completion_tokens", 0) or 0)
+    return Usage(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        total_tokens=prompt + completion,
+        cached_prompt_tokens=int(row.get("cached_prompt_tokens", 0) or 0),
+    )
+
+
+class UsageLedger:
+    """A small JSON ledger of accumulated tokens per profile name.
+
+    ``path=None`` keeps it in memory only (no file) — handy for tests.
+    """
+
+    def __init__(self, path: "str | Path | None" = DEFAULT_USAGE_PATH) -> None:
+        self._path = Path(path) if path is not None else None
+        self._lock = threading.Lock()
+        self._mem: dict = {}  # in-memory store used only when path is None
+
+    def _load(self) -> dict:
+        if self._path is None:
+            return dict(self._mem)
+        if not self._path.exists():
+            return {}
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _store(self, data: dict) -> None:
+        if self._path is None:
+            self._mem = data
+            return
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.parent / (self._path.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(self._path)
+
+    def record(self, name: str, usage: Usage) -> None:
+        """Add one response's tokens to ``name``'s running totals (read-modify-write)."""
+        if not name:
+            return
+        with self._lock:
+            data = self._load()
+            row = dict(data.get(name) or {})
+            row["prompt_tokens"] = int(row.get("prompt_tokens", 0) or 0) + int(usage.prompt_tokens)
+            row["completion_tokens"] = (
+                int(row.get("completion_tokens", 0) or 0) + int(usage.completion_tokens)
+            )
+            row["cached_prompt_tokens"] = (
+                int(row.get("cached_prompt_tokens", 0) or 0) + int(usage.cached_prompt_tokens)
+            )
+            data[name] = row
+            self._store(data)
+
+    def usage_for(self, name: str) -> Usage:
+        return _row_to_usage(self._load().get(name))
+
+    def cost_for(self, profile: "LLMProfileConfig") -> float:
+        """Cost of this profile's accrued usage at its CURRENT prices."""
+        return compute_cost(self.usage_for(profile.name), profile)
+
+    def over_limit(self, profile: "LLMProfileConfig") -> "tuple[float, float] | None":
+        """``(cost, limit)`` if the profile is at/over its ``cost_limit``, else None.
+        A non-positive limit means "no limit" (never stops)."""
+        limit = profile.cost_limit
+        if not limit or limit <= 0:
+            return None
+        cost = self.cost_for(profile)
+        return (cost, limit) if cost >= limit else None
+
+    def ensure_within(self, profile: "LLMProfileConfig") -> None:
+        """Raise :class:`LLMBudgetExceeded` if ``profile`` is over its cost limit."""
+        over = self.over_limit(profile)
+        if over is not None:
+            raise LLMBudgetExceeded(profile.name, over[0], over[1])
+
+    def clear(self, name: str) -> None:
+        """Reset one profile's accrued usage (manual reset; usage never auto-clears)."""
+        with self._lock:
+            data = self._load()
+            if name in data:
+                data.pop(name, None)
+                self._store(data)
+
+    def clear_all(self) -> None:
+        with self._lock:
+            self._store({})
+
+    def snapshot(self, config: "Config") -> list[dict]:
+        """One row per CURRENT profile (orphaned names are hidden): tokens, derived
+        cost, the configured limit, and whether it is reached. For the Budget page
+        and ``{{ project_slug }} usage``."""
+        data = self._load()
+        rows: list[dict] = []
+        for profile in config.llms:
+            usage = _row_to_usage(data.get(profile.name))
+            cost = compute_cost(usage, profile)
+            limit = profile.cost_limit or 0.0
+            rows.append(
+                {
+                    "name": profile.name,
+                    "model": profile.model,
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "cached_prompt_tokens": usage.cached_prompt_tokens,
+                    "cost": round(cost, 6),
+                    "limit": limit,
+                    "over": bool(limit > 0 and cost >= limit),
+                }
+            )
+        return rows

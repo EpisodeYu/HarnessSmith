@@ -242,9 +242,9 @@ hook, so a guardrail you mount here also runs under `serve`.)
 ## Load standalone extension modules
 
 Every registry above (`@registry.tool` / `@register_paradigm` /
-`@register_budget_condition` / `@register_condition` / `@register_strategy`{% if spec.memory.enabled %} /
+`@register_condition` / `@register_strategy`{% if spec.memory.enabled %} /
 `@register_memory`{% endif %}) only runs when its module is imported. Editing a built-in file
-(`tools.py`, `budget.py`, `context.py`{% if spec.memory.enabled %}, `memory.py`{% endif %}) is imported for free. To keep
+(`tools.py`, `context.py`{% if spec.memory.enabled %}, `memory.py`{% endif %}) is imported for free. To keep
 your extensions in a **separate module** instead, list it in `config.yaml` so it's
 imported at startup:
 
@@ -257,7 +257,7 @@ The CLI, `serve`, and `{{ project_slug }} info` import these first, so your
 registrations show up in `info`{% if interfaces.web %} / `GET /registries`{% endif %} and are selectable by name. A
 config name that still doesn't resolve is reported: hard errors for a role's
 profile / a paradigm / the context strategy (fail-fast), and a warning for a
-budget/context condition{% if spec.memory.enabled %} / memory backend{% endif %} that isn't registered (skipped at runtime —
+context condition{% if spec.memory.enabled %} / memory backend{% endif %} that isn't registered (skipped at runtime —
 likely a typo or a module you forgot to list here).
 
 ## Add a paradigm
@@ -372,52 +372,45 @@ def run(user_input, *, config, **kwargs):
 (Importing `agent.run` here is fine — that's reusing the base loop, not two
 built-in paradigms importing each other.)
 
-## Budgets & tracing
+## Per-LLM cost limits & tracing
 
-`config.yaml`'s `budget` stops a runaway loop. It's a thin name→condition
-registry (same shape as tools / paradigms / context — a written-out dispatch, not
-an engine): `conditions` maps a registered condition name to its threshold, and
-`combine` decides when to stop (`or` = any limit hit, the safe default; `and` =
-all must fire):
+Spend is tracked **per LLM profile** in a small persistent ledger
+(`harness/usage.py` → `.harness/usage.json`) that accumulates token usage across
+runs. It covers the two LLM calls that go through `Trace.add_usage`: the main
+generation loop and context compaction (each attributed to whichever profile made
+it — generation and compaction count separately when they use different
+profiles). It never holds secrets — only profile names and token counts.
+
+Cost is *derived* from each profile's per-1M prices in `config.yaml`, so editing a
+price re-prices the whole history at once:
 
 ```yaml
-budget:
-  combine: or
-  conditions:
-    max_steps: 8                                         # max tool-using rounds
-    max_seconds: 30                                      # wall-clock seconds
-    max_tokens: {threshold: 50000, window_seconds: 60}   # RATE: 50k tokens / 60s
-    max_cost: 1.00                                       # spend, profile's currency
+llms:
+  - name: default
+    model: gpt-4o-mini
+    input_cost_per_million: 0.15      # price / 1M tokens, your currency
+    output_cost_per_million: 0.60
+    cached_input_cost_per_million: 0.0   # 0 = bill cached prompt tokens at the input price
+    cost_limit: 5.00                  # 0 = no limit
 ```
 
-Built-in conditions live in `harness/budget.py`: `max_steps`, `max_seconds`,
-`max_tokens` (prompt + completion), and `max_cost`. A bare number is a
-*cumulative* threshold over the run; add `window_seconds` to make it a **rate**
-over a tumbling window (reset every `window_seconds`). `max_cost` only works if
-the active LLM profile has non-zero `input_cost_per_million` /
-`output_cost_per_million` — otherwise cost stays `0` and the limit never triggers.
-Budgets and pricing are runtime knobs (they live in `config.yaml`, not the spec),
-so you can change them without regenerating. Scope is per-run (reset each turn);
-persistent day/week/month quotas are a v1+ add-on.
+When a profile's accrued cost reaches its `cost_limit`, the loop **stops using
+that LLM**: it refuses the next call to it and ends the turn with
+`stop_reason="llm_budget"` and a notice naming the LLM, instead of spending more.
+Set prices for the limit to mean anything (with all prices `0` cost stays `0` and
+the limit never fires). Usage is keyed by profile **name** and only resets when
+you clear it by hand — renaming a profile starts a fresh counter; changing its
+model keeps accumulating under the same name.
 
-Add your own condition the same way you add a tool — write a function, decorate
-it, reference it by name in `conditions`. It reads the live `BudgetTracker`
-(`step` / `elapsed()` / `total_tokens` / `cost_usd`, plus `amount()` for
-windowing):
+Manage it all on the web **Budget** page (per-LLM prices, limit, accrued cost,
+and a Clear button) or from the CLI:
 
-```python
-# in harness/budget.py (or your own module, imported at startup)
-from .budget import register_budget_condition
-
-@register_budget_condition("max_tokens_per_second")
-def _max_tps(tracker, threshold, window):
-    return tracker.total_tokens / (tracker.elapsed() or 1e-9) >= threshold
+```bash
+{{ project_slug }} usage              # show per-LLM accrued cost + limits
+{{ project_slug }} usage clear -n default   # reset one LLM (omit -n for all)
 ```
 
-It then appears in the web Config → Budget panel automatically (via
-`GET /registries`).
-
-Every run writes a JSONL trace under the configured `trace_dir` with per-step
+Every run also writes a JSONL trace under the configured `trace_dir` with per-step
 token counts and cost. Inspect a run with `cat traces/run-*.jsonl`.
 
 For troubleshooting there is also an opt-in **local debug log**

@@ -22,7 +22,6 @@ def test_coding_assistant_preset_is_a_valid_spec():
     assert spec.project_slug == "coding_assistant"
     assert spec.roles == {"generation": "default"}
     assert {tool.name for tool in spec.tools} == {"get_current_time", "calculator"}
-    assert spec.budget.conditions["max_steps"].threshold == 8
     # Slice 6: the coding-assistant is an MCP capability baseline.
     assert spec.mcp.enabled is True
 

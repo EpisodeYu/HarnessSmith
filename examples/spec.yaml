@@ -29,8 +29,6 @@ observability:
   trace: true
   trace_dir: traces
 
-budget:
-  # Per-run guardrails as named conditions combined by `combine` (or/and). A bare
-  # number is a cumulative threshold; add `window_seconds` to make it a rate.
-  conditions:
-    max_steps: 8
+# Per-LLM cost accounting (prices) and cost limits are runtime knobs on each
+# profile in the generated config.yaml — edited on the product's Budget page.
+# There is no spec-level budget block.

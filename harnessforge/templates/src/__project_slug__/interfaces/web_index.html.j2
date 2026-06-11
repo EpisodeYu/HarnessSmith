@@ -85,16 +85,10 @@
       </div>
 
       <div data-cfg="budget" class="hidden space-y-3">
-        <p class="text-xs text-gray-500" data-i18n="bud_hint">Stop a run when its conditions fire.</p>
-        <label class="block text-sm"><span data-i18n="bud_combine_label">combine</span>
-          <select id="cfg-bud-combine" class="mt-1 block rounded-lg border px-3 py-2">
-            <option value="or">or</option><option value="and">and</option>
-          </select></label>
-        <div>
-          <p class="text-sm" data-i18n="bud_conditions_label">Conditions (threshold; optional window = rate)</p>
-          <div id="cfg-bud-conditions" class="mt-1 space-y-2"></div>
-        </div>
-        <p class="text-xs text-gray-500" data-i18n="bud_extend_hint">Define your own with @register_budget_condition in harness/budget.py — they appear here once imported. See AGENTS.md.</p>
+        <p class="text-xs text-gray-500" data-i18n="bud_hint">Cost used per LLM, from the prices you set. Set a limit to stop using an LLM once it's reached; Clear resets a counter.</p>
+        <div id="cfg-bud-rows" class="space-y-3"></div>
+        <button id="cfg-bud-clearall" type="button" class="rounded-lg border px-3 py-1 text-sm text-red-600" data-i18n="bud_clear_all">Clear all usage</button>
+        <p class="text-xs text-gray-500" data-i18n="bud_extend_hint">Counts the main generation + context compaction per LLM. Usage persists across runs in .harness/usage.json; it never holds secrets.</p>
       </div>
 
       <div data-cfg="tools" class="hidden space-y-2">
@@ -229,7 +223,7 @@
         profile_name: "name", profile_model: "model", profile_provider: "provider",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "env var name",
-        adv_section: "Advanced", stats_section: "Pricing (cost tracking)",
+        adv_section: "Advanced",
         profile_temp: "temperature", profile_maxtok: "max_tokens", profile_reasoning: "reasoning effort",
         temp_ph: "model default (≈1)", reasoning_default: "(model default)",
         profile_top_p: "top_p", profile_freq_pen: "frequency_penalty",
@@ -250,11 +244,13 @@
         ctx_extend_hint: "Add your own: @register_strategy / @register_condition in harness/context.py — they appear here once imported (see AGENTS.md).",
         cfg_unregistered: "not registered in code — import its module?",
         ctx_hint: "Compact the history when a trigger fires (combine: or = any, and = all), using the chosen strategy.",
-        bud_hint: "Stop a run when its conditions fire (combine: or = any, and = all). Blank threshold = off; add a window to make it a rate.",
-        bud_combine_label: "combine (or/and)",
-        bud_conditions_label: "Conditions (threshold; optional window seconds = rate)",
-        bud_window_ph: "window s (rate)",
-        bud_extend_hint: "Add your own: @register_budget_condition in harness/budget.py — it appears here once imported (see AGENTS.md).",
+        bud_hint: "Cost used per LLM, computed from the prices you fill in. Set a limit to stop using an LLM once its cost reaches it; Clear resets a counter (usage persists across runs).",
+        bud_clear: "Clear", bud_clear_all: "Clear all usage",
+        bud_clear_all_confirm: "Reset accrued cost / usage for ALL LLMs?",
+        bud_limit: "limit", bud_no_limit: "no limit",
+        bud_used: "used (in / out / cached)", bud_cost: "cost", bud_over: "limit reached",
+        bud_none: "Configure an LLM on the LLM tab first.",
+        bud_extend_hint: "Counts the main generation + context compaction per LLM. Stored in .harness/usage.json; never holds secrets.",
         tools_hint: "Allowlist — only enabled tools are offered to the model.",
         tools_group_custom: "Your tools", tools_group_builtin: "Built-in tools", tools_group_mcp: "MCP",
         tools_scan: "Scan MCP", tools_scanning: "scanning servers…", tools_scanned: "discovered", tools_none: "no tools",
@@ -324,7 +320,7 @@
         profile_name: "名称", profile_model: "model", profile_provider: "provider",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "环境变量名",
-        adv_section: "高级", stats_section: "定价(成本统计)",
+        adv_section: "高级",
         profile_temp: "temperature", profile_maxtok: "max_tokens", profile_reasoning: "思考深度",
         temp_ph: "模型默认(≈1)", reasoning_default: "(模型默认)",
         profile_top_p: "top_p", profile_freq_pen: "frequency_penalty",
@@ -345,11 +341,13 @@
         ctx_extend_hint: "可自定义:在 harness/context.py 用 @register_strategy / @register_condition 注册,import 后即在此出现(见 AGENTS.md)。",
         cfg_unregistered: "代码中未注册 —— 是否忘了 import 其模块?",
         ctx_hint: "命中触发条件时按所选策略压缩历史(组合方式:or=任一命中,and=全部命中)。",
-        bud_hint: "命中条件即停止本轮(组合方式:or=任一,and=全部)。阈值留空=不启用;填窗口秒数即变为速率。",
-        bud_combine_label: "组合方式 (or/and)",
-        bud_conditions_label: "条件(阈值;可选窗口秒数=速率)",
-        bud_window_ph: "窗口秒(速率)",
-        bud_extend_hint: "可自定义:在 harness/budget.py 用 @register_budget_condition 注册,import 后即在此出现(见 AGENTS.md)。",
+        bud_hint: "按 LLM 列出已用 cost(由你填写的单价算出)。设置限额后,该 LLM 用量达到即停止使用;清空可重置某个计数(用量跨多次运行累计)。",
+        bud_clear: "清空", bud_clear_all: "清空全部用量",
+        bud_clear_all_confirm: "重置所有 LLM 的累计 cost / 用量?",
+        bud_limit: "限额", bud_no_limit: "不限",
+        bud_used: "已用(输入/输出/缓存)", bud_cost: "费用", bud_over: "已达限额",
+        bud_none: "请先在 LLM 标签页配置一个 LLM。",
+        bud_extend_hint: "按 LLM 统计主 generation + 上下文压缩。用量持久化在 .harness/usage.json,绝不含密钥。",
         tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
         tools_group_custom: "你的工具", tools_group_builtin: "内置工具", tools_group_mcp: "MCP",
         tools_scan: "扫描 MCP", tools_scanning: "正在连接服务器…", tools_scanned: "已发现", tools_none: "无工具",
@@ -1000,7 +998,10 @@
     let ruleFiles = [];
     // What's registered in code (GET /registries): the universe the Context +
     // Paradigms dropdowns are built from. A configured name missing here is flagged.
-    let reg = { paradigms: [], strategies: [], conditions: [], budget_conditions: []{% if spec.memory.enabled %}, memory: [] {% endif %} };
+    let reg = { paradigms: [], strategies: [], conditions: []{% if spec.memory.enabled %}, memory: [] {% endif %} };
+    // Per-LLM accrued usage from GET /usage ([{name, model, prompt_tokens, ...,
+    // cost, limit, over}]); drives the Budget tab's used-tokens + derived cost.
+    let usageRows = [];
     const UNREG = " \u26a0";  // appended to a name selected in config but not registered
 
     function buildCfgTabs() {
@@ -1020,6 +1021,9 @@
       cfgTab = name;
       document.querySelectorAll("[data-cfg]").forEach((p) => p.classList.toggle("hidden", p.dataset.cfg !== name));
       buildCfgTabs();
+      // Refresh accrued usage each time the Budget tab opens (a run since the last
+      // view may have spent more); preserves the price/limit inputs being edited.
+      if (name === "budget") loadUsage().then(buildBudget);
 {% if spec.mcp.enabled %}      // Auto-discover MCP tools the first time the Tools tab opens (cached after).
       if (name === "tools" && (mcpDiscovered === null || mcpDiscovered.pending)) discoverMcp();
       // Refresh live server status every time the MCP tab opens ("refresh promptly").
@@ -1076,13 +1080,7 @@
             "<label>" + t("profile_fallback") + "<input class='p-fallback mt-1 w-full rounded border px-2 py-1' placeholder='\u2014' value='" + esc(p.fallback || "") + "'/></label>" +
           "</div>" +
           "<label class='mt-2 block'>" + t("profile_extra") + "<textarea class='p-extra mt-1 w-full rounded border px-2 py-1 font-mono' rows='2' placeholder='" + t("extra_ph") + "'>" + esc(extraVal) + "</textarea></label>" +
-        "</details>" +
-        "<details class='text-xs'><summary class='cursor-pointer text-slate-600'>" + t("stats_section") + "</summary>" +
-          "<div class='mt-2 grid grid-cols-3 gap-2'>" +
-            "<label>" + t("profile_input_cost") + "<input class='p-pcost mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(p.input_cost_per_million) + "'/></label>" +
-            "<label>" + t("profile_output_cost") + "<input class='p-ccost mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(p.output_cost_per_million) + "'/></label>" +
-            "<label>" + t("profile_cached_cost") + "<input class='p-cachedcost mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(p.cached_input_cost_per_million) + "'/></label>" +
-          "</div></details>";
+        "</details>";
       return div;
     }
     // An env-var row: NAME input + write-only VALUE input that posts to /env.
@@ -1119,9 +1117,8 @@
       // Invalid / non-object JSON is dropped silently (the field is flagged red live).
       const ex = g("p-extra");
       if (ex) { try { const v = JSON.parse(ex); if (v && typeof v === "object" && !Array.isArray(v)) o.extra_body = v; } catch (e) {} }
-      o.input_cost_per_million = numOrNull(g("p-pcost")) ?? 0;
-      o.output_cost_per_million = numOrNull(g("p-ccost")) ?? 0;
-      o.cached_input_cost_per_million = numOrNull(g("p-cachedcost")) ?? 0;
+      // Pricing + cost_limit are edited on the Budget tab and merged into the llms
+      // patch by name in collectConfig (so they survive a Save from any tab).
       return o;
     }
     // Options come from the LIVE profile-name inputs (so renaming/adding a profile
@@ -1212,39 +1209,71 @@
       });
     }
 
-    // Build the Budget tab from the registries (same shape as Context): a combine
-    // selector plus one row per registered budget condition (built-ins + anything
-    // you @register and import), each with a threshold and an optional window
-    // (seconds) that turns it into a rate. A configured-but-unregistered name is
-    // still shown, flagged, so it round-trips instead of vanishing.
+    // Build the Budget tab: one card per CURRENT LLM profile (aligned with the LLM
+    // tab, by profile name). Each card edits the per-1M prices + a cost limit (saved
+    // into the llms config on Save) and shows the accrued tokens + derived cost from
+    // GET /usage (recomputed live as you edit a price). Clear resets one counter.
+    // Price/limit inputs are preserved across a rebuild (e.g. after a Clear) so an
+    // unsaved edit isn't lost.
     function buildBudget() {
-      const bud = cfg.budget || {};
-      $("cfg-bud-combine").value = bud.combine || "or";
-      const conds = bud.conditions || {};
-      const names = reg.budget_conditions.slice();
-      Object.keys(conds).forEach((n) => { if (!names.includes(n)) names.push(n); });
-      const box = $("cfg-bud-conditions"); box.innerHTML = "";
-      names.forEach((name) => {
-        const ok = reg.budget_conditions.includes(name);
-        const cur = conds[name] || {};
-        const row = document.createElement("div");
-        row.className = "flex items-center gap-2 text-sm";
-        const span = document.createElement("span");
-        span.className = "w-44 font-mono"; span.textContent = name + (ok ? "" : UNREG);
-        if (!ok) span.title = t("cfg_unregistered");
-        const thr = document.createElement("input");
-        thr.type = "number"; thr.min = "0"; thr.step = "any"; thr.placeholder = "\u2014";
-        thr.className = "cfg-bud-threshold w-32 rounded border px-2 py-1";
-        thr.dataset.cond = name;
-        thr.value = cur.threshold ?? "";
-        const wnd = document.createElement("input");
-        wnd.type = "number"; wnd.min = "0"; wnd.step = "any"; wnd.placeholder = t("bud_window_ph");
-        wnd.className = "cfg-bud-window w-32 rounded border px-2 py-1";
-        wnd.dataset.cond = name;
-        wnd.value = cur.window_seconds ?? "";
-        row.appendChild(span); row.appendChild(thr); row.appendChild(wnd);
-        box.appendChild(row);
+      const box = $("cfg-bud-rows");
+      const prev = {};
+      box.querySelectorAll(".bud-row").forEach((r) => {
+        prev[r.dataset.name] = {
+          input: r.querySelector(".b-input").value,
+          output: r.querySelector(".b-output").value,
+          cached: r.querySelector(".b-cached").value,
+          limit: r.querySelector(".b-limit").value,
+        };
       });
+      box.innerHTML = "";
+      const profiles = cfg.llms || [];
+      if (!profiles.length) {
+        box.innerHTML = "<p class='text-sm text-slate-500'>" + t("bud_none") + "</p>";
+        return;
+      }
+      profiles.forEach((p) => {
+        const pv = prev[p.name] || {};
+        const div = document.createElement("div");
+        div.className = "bud-row rounded-lg border p-3 space-y-2";
+        div.dataset.name = p.name;
+        div.innerHTML =
+          "<div class='flex items-center justify-between gap-2'>" +
+            "<div class='text-sm'><span class='font-medium'>" + esc(p.name) + "</span> " +
+              "<span class='font-mono text-xs text-slate-500'>" + esc(p.model || "") + "</span></div>" +
+            "<button type='button' class='b-clear text-xs text-red-600'>" + t("bud_clear") + "</button>" +
+          "</div>" +
+          "<div class='grid grid-cols-4 gap-2 text-xs'>" +
+            "<label>" + t("profile_input_cost") + "<input class='b-input mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(pv.input != null ? pv.input : p.input_cost_per_million) + "'/></label>" +
+            "<label>" + t("profile_output_cost") + "<input class='b-output mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(pv.output != null ? pv.output : p.output_cost_per_million) + "'/></label>" +
+            "<label>" + t("profile_cached_cost") + "<input class='b-cached mt-1 w-full rounded border px-2 py-1' placeholder='" + t("cost_ph") + "' value='" + escNum(pv.cached != null ? pv.cached : p.cached_input_cost_per_million) + "'/></label>" +
+            "<label>" + t("bud_limit") + "<input class='b-limit mt-1 w-full rounded border px-2 py-1' placeholder='" + t("bud_no_limit") + "' value='" + escNum(pv.limit != null ? pv.limit : p.cost_limit) + "'/></label>" +
+          "</div>" +
+          "<div class='flex items-center justify-between text-xs text-slate-500'>" +
+            "<span class='b-used'></span><span class='b-cost font-medium'></span>" +
+          "</div>";
+        box.appendChild(div);
+        updateBudCost(div);
+      });
+    }
+
+    // Recompute one budget card's used-tokens line + derived cost (and the
+    // limit-reached flag) from its current price inputs and the cached usage.
+    function updateBudCost(div) {
+      const u = usageRows.find((x) => x.name === div.dataset.name) ||
+        { prompt_tokens: 0, completion_tokens: 0, cached_prompt_tokens: 0 };
+      const num = (cls) => Number(div.querySelector(cls).value) || 0;
+      const inp = num(".b-input"), out = num(".b-output"), cached = num(".b-cached"), limit = num(".b-limit");
+      const cachedPrice = cached || inp;
+      const fresh = Math.max(0, (u.prompt_tokens || 0) - (u.cached_prompt_tokens || 0));
+      const cost = fresh / 1e6 * inp + (u.cached_prompt_tokens || 0) / 1e6 * cachedPrice +
+        (u.completion_tokens || 0) / 1e6 * out;
+      const over = limit > 0 && cost >= limit;
+      div.querySelector(".b-used").textContent =
+        t("bud_used") + ": " + (u.prompt_tokens || 0) + " / " + (u.completion_tokens || 0) + " / " + (u.cached_prompt_tokens || 0);
+      const c = div.querySelector(".b-cost");
+      c.textContent = t("bud_cost") + ": " + cost.toFixed(4) + (over ? "  \u26a0 " + t("bud_over") : "");
+      c.className = "b-cost font-medium" + (over ? " text-red-600" : "");
     }
 
     // The default dropdown only offers currently-checked paradigms.
@@ -1637,16 +1666,24 @@
         const v = numOrNull(el.value); if (v != null) triggers[el.dataset.cond] = v;
       });
       patch.context.triggers = triggers;
-      const budConditions = {};
-      document.querySelectorAll("#cfg-bud-conditions .cfg-bud-threshold").forEach((el) => {
-        const v = numOrNull(el.value);
-        if (v == null) return;  // blank threshold = condition off
-        const name = el.dataset.cond;
-        const wEl = document.querySelector("#cfg-bud-conditions .cfg-bud-window[data-cond='" + name + "']");
-        const w = wEl ? numOrNull(wEl.value) : null;
-        budConditions[name] = w != null ? { threshold: v, window_seconds: w } : { threshold: v };
+      // Pricing + per-LLM cost limit are edited on the Budget tab; merge them into
+      // the llms patch by name so a Save from any tab keeps them (a profile with no
+      // Budget row — e.g. just added — defaults to free / no limit).
+      const budByName = {};
+      document.querySelectorAll("#cfg-bud-rows .bud-row").forEach((row) => {
+        budByName[row.dataset.name] = {
+          input_cost_per_million: numOrNull(row.querySelector(".b-input").value) ?? 0,
+          output_cost_per_million: numOrNull(row.querySelector(".b-output").value) ?? 0,
+          cached_input_cost_per_million: numOrNull(row.querySelector(".b-cached").value) ?? 0,
+          cost_limit: numOrNull(row.querySelector(".b-limit").value) ?? 0,
+        };
       });
-      patch.budget = { combine: $("cfg-bud-combine").value, conditions: budConditions };
+      patch.llms.forEach((p) => {
+        Object.assign(p, budByName[p.name] || {
+          input_cost_per_million: 0, output_cost_per_million: 0,
+          cached_input_cost_per_million: 0, cost_limit: 0,
+        });
+      });
       // Collect from the live checkboxes: a previously-listed tool always
       // round-trips (unchecking just disables it); a discovered tool is written to
       // the allowlist only when ticked, so config isn't bloated with every tool a
@@ -1724,9 +1761,14 @@
       $("cfg-save").classList.toggle("ring-amber-400", v);
     }
 
+    async function loadUsage() {
+      try { usageRows = (await (await fetch("/usage")).json()).profiles || []; }
+      catch (e) { usageRows = []; }
+    }
     async function loadConfig() {
       cfg = await (await fetch("/config")).json();
       try { reg = await (await fetch("/registries")).json(); } catch (e) { /* keep last */ }
+      await loadUsage();  // per-LLM accrued cost/tokens for the Budget tab
       await loadRules();  // rule files (explicit + auto-recognized) for the Prompts tab
 {% if spec.memory.enabled %}      await loadMemory();  // the long-term memory note for the Memory tab
 {% endif %}      renderConfig();
@@ -1799,6 +1841,33 @@
     // change the serialized form, so the view still reads as saved.
     $("view-config").addEventListener("input", refreshDirty);
     $("view-config").addEventListener("change", refreshDirty);
+
+    // Budget tab: recompute a card's derived cost live as a price/limit is edited
+    // (refreshDirty already fires via the view-config input listener above).
+    $("cfg-bud-rows").addEventListener("input", (e) => {
+      const div = e.target.closest(".bud-row");
+      if (div) updateBudCost(div);
+    });
+    // Per-LLM "Clear" resets that counter on the server immediately (no Save), then
+    // refreshes the usage figures (the price/limit inputs are preserved).
+    $("cfg-bud-rows").addEventListener("click", async (e) => {
+      const btn = e.target.closest(".b-clear");
+      if (!btn) return;
+      const div = btn.closest(".bud-row");
+      await fetch("/usage/clear", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: div.dataset.name }),
+      });
+      await loadUsage(); buildBudget();
+    });
+    $("cfg-bud-clearall").addEventListener("click", async () => {
+      if (!confirm(t("bud_clear_all_confirm"))) return;
+      await fetch("/usage/clear", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true }),
+      });
+      await loadUsage(); buildBudget();
+    });
 
     $("cfg-reload").addEventListener("click", () => {
       if (!dirty || confirm(t("cfg_reload_confirm"))) loadConfig();

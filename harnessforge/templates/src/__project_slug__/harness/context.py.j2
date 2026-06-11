@@ -204,10 +204,20 @@ class _AccountingSummarizer:
             )
         return response
 
+    def _check_budget(self) -> None:
+        # Per-LLM cost limit: refuse to compact with an over-budget compaction LLM.
+        # Raises LLMBudgetExceeded (the paradigm turns it into a clean llm_budget
+        # stop) — same gate the generation profile gets before its own call.
+        ledger = getattr(self._trace, "ledger", None) if self._trace is not None else None
+        if ledger is not None and self._profile is not None:
+            ledger.ensure_within(self._profile)
+
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> "LLMResponse":
+        self._check_budget()
         return self._account(self._client.complete(messages, tools))
 
     def stream(self, messages, tools=None, *, on_delta=None) -> "LLMResponse":
+        self._check_budget()
         return self._account(self._client.stream(messages, tools, on_delta=on_delta))
 
 

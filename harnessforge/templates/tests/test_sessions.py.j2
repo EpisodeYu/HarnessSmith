@@ -20,7 +20,6 @@ def _config(tmp_path, **overrides):
         "tools": [{"name": "get_current_time", "enabled": True}],
         "observability": {"trace": False},
         "sessions": {"enabled": True, "dir": str(tmp_path / "sessions")},
-        "budget": {},
     }
     data.update(overrides)
     return Config.model_validate(data)
