@@ -36,6 +36,10 @@ def test_coding_assistant_mcp_prefill_is_the_baseline():
     assert ddg.safe_tools == ["search", "fetch_content"]  # keyless web search, read-only
     git = next(s for s in servers if s.name == "git")
     assert "git_status" in git.safe_tools and "git_commit" not in git.safe_tools
+    # Not pinned to --repository: pinning makes mcp-server-git exit at startup when
+    # the cwd isn't a git repo (server goes "unreachable"); unpinned it stays
+    # healthy and the agent targets any repo via each tool's repo_path arg.
+    assert "--repository" not in git.args
 
 
 def test_preset_without_prefill_returns_empty():

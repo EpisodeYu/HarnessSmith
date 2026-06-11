@@ -536,7 +536,7 @@ mcp:
   servers:
     - name: git
       command: uvx
-      args: ["mcp-server-git", "--repository", "."]
+      args: ["mcp-server-git"]   # no --repository pin: the agent passes repo_path per call, so the server stays up in any cwd
       safe_tools: ["git_status", "git_log", "git_diff"]   # read-only -> risk=safe
     - name: remote-example
       url: https://mcp.example.com/sse

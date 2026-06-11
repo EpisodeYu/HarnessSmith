@@ -90,7 +90,7 @@
 ## 4. 必须人审的决策点
 
 - [x] **① MCP 预设做基线(不自写 built-in)——人 2026-06-05 定稿**:`fetch` 默认开 + Desktop Commander 预填默认关;离线靠生成期预热 + Docker 烤镜像;海量扩展走 marketplace 文档 + Composio 式 remote MCP。
-- [x] **② 官方 `git` 预置——人 2026-06-05**:`uvx mcp-server-git` 进基线;读类默认开、写类(commit/push)默认关。
+- [x] **② 官方 `git` 预置——人 2026-06-05**:`uvx mcp-server-git` 进基线;读类默认开、写类(commit/push)默认关。**实现说明(2026-06-11)**:catalog 里 git **不带 `--repository` 钉死**。每个 git 工具的 `repo_path` 都是必填参数,`--repository` 只是个沙箱限制、不提供默认值;一旦钉死,`mcp-server-git` 在非 git 目录启动会**直接退出**,整个 server 在 MCP 状态页变红("unreachable: …Connection closed")。MCP 状态应反映**工具好坏**而非某次执行结果,故去掉该参数——server 在任意 cwd 都健康,agent 用 `repo_path` 指向任意仓库;调用到非仓库路径只是该次 `isError`,不影响 server 健康。
 - [x] **③ 标准 SKILL 支持放本片(与工具基线一起)——人 2026-06-05**:Agent Skills 开放标准(`SKILL.md` + 渐进披露),`skills.py` 发现+注入 + `read_skill`/文件工具读正文 + 脚本经工具跑;`spec.skills.enabled` 门控。
 - [x] **④ `spec.skills` 字段最终签字(`CLAUDE.md §6.1`)——人 2026-06-05 选 B**:spec **只加结构性开关 `skills.enabled: bool = False`**(对齐 `mcp.enabled` 先例);**技能目录是运行期行为旋钮**,落 `config.yaml skills.dirs`(默认 `["skills"]`,可加 `.claude/skills`/`.cursor/skills`/`.agents/skills`),**不进 spec**。
 - [x] **⑤ MCP 工具风险分级——人 2026-06-05 选 B**:不再"一律 HIGH",改**按工具风险标注**——catalog 标 `fetch` 与 `git` 读类(status/log/diff/show…)为 `safe`、写类(commit/add/push…)为 `high`;`McpServerConfig` 增 `safe_tools` 字段,`register_mcp_tools` 据此设 `risk`。这样**只读范式 plan/ask(`allow_high_risk=False`)也能用 fetch/git 读**,"低风险默认开"有据。未列入 `safe_tools` 的发现工具一律按 `high`(fail-safe)。

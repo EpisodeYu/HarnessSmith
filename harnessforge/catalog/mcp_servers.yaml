@@ -47,10 +47,16 @@ servers:
       - {name: fetch_content, risk: safe, default_enabled: true}
 
   git:
-    description: Inspect and operate on a local Git repository (read tools on; write tools off).
+    description: Inspect and operate on local Git repositories (read tools on; write tools off).
     transport: stdio
     command: uvx
-    args: [mcp-server-git, --repository, "."]
+    # No --repository pin on purpose: every git tool already takes a required
+    # `repo_path` arg, so pinning adds no default — it ONLY restricts which repo is
+    # reachable, AND makes mcp-server-git EXIT at startup when launched outside a
+    # git repo (it surfaces as the server going "unreachable: Connection closed").
+    # The server's health should reflect the tool, not the cwd; unpinned it stays
+    # up and the agent operates on whatever repo it points `repo_path` at.
+    args: [mcp-server-git]
     requires: uv
     source: https://pypi.org/project/mcp-server-git/
     updated: "2026-06-04"

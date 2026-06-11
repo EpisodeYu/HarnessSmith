@@ -140,14 +140,29 @@ def test_golden_mcp_baseline_prefill_smoke(tmp_path):
     spec = load_spec(preset_spec_path("coding-assistant"))
     servers = preset_mcp_servers("coding-assistant")
     out = tmp_path / "ca_baseline"
-    # git_init so the git MCP server has a real repository to connect to.
-    result = generate(spec, out, git_init=True, mcp_servers=servers)
+    # git_init=False on purpose: the git server is NOT pinned to --repository, so it
+    # must stay healthy even when the cwd is not a git repo (regression: pinning made
+    # mcp-server-git exit at startup -> "unreachable: Connection closed").
+    result = generate(spec, out, git_init=False, mcp_servers=servers)
 
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
     assert "fetch__*" in config_yaml and "mcp-server-git" in config_yaml
+    assert "--repository" not in config_yaml  # not pinned -> healthy in any cwd
 
     lock_dependencies(out)
     prewarm_mcp_servers(servers)  # warm uvx cache so the smoke launch is fast
+
+    # The git server connects from a non-repo cwd (its health reflects the tool, not
+    # the cwd). `mcp status` prints "unreachable: <err>" for a server that didn't come
+    # up; git must not be among them.
+    status = subprocess.run(
+        ["uv", "run", "--quiet", result.project_slug, "mcp", "status"],
+        cwd=out, capture_output=True, text=True, timeout=300,
+    )
+    git_lines = [ln for ln in status.stdout.splitlines() if "git " in ln and "[stdio]" in ln]
+    assert git_lines, status.stdout + status.stderr
+    assert "unreachable" not in git_lines[0], status.stdout + status.stderr
+
     # smoke runs `<pkg> run --mock` which starts fetch+git; a slow/failing server
     # is skipped (connect timeout + failure isolation), never hangs the run.
     smoke_check(out, result.project_slug)
