@@ -109,6 +109,23 @@ def assistant_message(response: LLMResponse) -> dict:
     return message
 
 
+def final_assistant_message(answer: str, reasoning: str | None = None) -> dict:
+    """The final answer message saved to the conversation body.
+
+    A thinking model's reasoning for THIS answer rides under a display-only key
+    (``reasoning_display``) so a reloaded session can show the thinking that led to
+    the answer (the live UI streamed it; this is what survives a reload). Unlike a
+    tool-calling turn's ``reasoning_content``, it is NEVER echoed back to the model
+    (the turn is over): each client strips ``reasoning_display`` from the wire, so a
+    reasoning endpoint can't 400 on it and a plain model never sees it. Empty
+    reasoning ⇒ a byte-identical ``{"role","content"}`` message (no new key).
+    """
+    message = {"role": "assistant", "content": answer}
+    if reasoning:
+        message["reasoning_display"] = reasoning
+    return message
+
+
 def _truncate_result(result: str, max_chars: int | None) -> str:
     """Cap one tool result so a single huge observation can't blow the window.
 

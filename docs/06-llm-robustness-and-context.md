@@ -2,7 +2,7 @@
 
 > **状态(2026-06-11,人定向后实现完成 + 真实端点验收通过)**:LLM 配置丰富化 + 本文 **P0 + P1 六项已全部实现并过门禁**(生成器快测 + 全量 golden + Docker + uvx 全绿),并经 **MiMo 真实双端点(OpenAI 兼容 + Anthropic 原生)端到端验收 29/29 通过**(人提供 key,详见文末 §8)。**P2 / P3 仍为 backlog**(`02-development/00-overview.md §2` Slice 14+)。落定的关键决策见下方各节 ✅ 标注与本节末"实现决策落定"。
 >
-> **增补(2026-06-11,缘起 MiMo 公告)**:新增 **§2.5 reasoning_content 多轮回传**(思考模式 + 工具调用时历史须带回 reasoning,否则 400)——已实现并过生成器快测 + 全量 golden(含 Docker/uvx);真实 MiMo 双端点验收待人给 key 触发。
+> **增补(2026-06-11,缘起 MiMo 公告)**:新增 **§2.5 reasoning_content 多轮回传**(思考模式 + 工具调用时历史须带回 reasoning,否则 400)——已实现并过生成器快测 + 全量 golden(含 Docker/uvx),并经 **MiMo 双端点真实验收**(人提供 key:多步 + 跨轮 + DeepSeek/GLM 交叉验证 + wire 证明全过;现网端点尚未强制 400,修复为预防性,详见 §2.5)。
 >
 > 本文原是 2026-06-10 一次"对标成熟 harness、聚焦 LLM 支持"探索的落地待办——逐项登记**此前 backlog 尚未出现**的 LLM 相关差距。
 > 性质同 [`03-feature-landscape-and-proposals.md`](./03-feature-landscape-and-proposals.md)(对标分析 + 建议);与已实现的 [`05-llm-dual-spec-anthropic.md`](./05-llm-dual-spec-anthropic.md)(Slice 12)互补不重叠。
@@ -58,7 +58,13 @@ API 报 `context_length_exceeded`(400)时 `paradigms/agent.py` 直接 raise、�
 - **设计原则**:**只回显端点自己产出的 reasoning + 只挂在带 `tool_calls` 的 assistant 上**——对 OpenAI 官方 / 非推理模型零痕迹(它们不吐 reasoning,`LLMResponse.reasoning` 恒空,什么都不挂),顺带修了 DeepSeek/Qwen/Kimi 同款 bug;最终无工具的答复消息不挂(避开"无工具却带 reasoning → 老 DeepSeek 400 / Qwen 忽略")。
 - **实现**:`LLMResponse` 加 `reasoning`/`reasoning_signature`;两 client 的 `complete`/`stream` 捕获(OpenAI `reasoning_content`→`reasoning` 兜底;Anthropic thinking 文本 + `signature_delta`);`assistant_message()` 在带工具调用时写中性键 `reasoning_content`(+ `reasoning_signature`);`OpenAIClient` 发请求层按 `reasoning_history_field`(默认 `reasoning_content`,`""`=关,vLLM 可设 `reasoning`)重命名/开关并 **strip 掉 Anthropic 专属 `reasoning_signature`**;`to_anthropic_messages` 在带工具调用 assistant 前补带 signature 的 thinking block(无 signature 则跳过,避免裸 thinking block 反而 400)。压缩/持久化天然安全(整条 dict 保留/原样存),仅加回归测试 + 不变量注释钉死;`estimate_tokens` 计入 `reasoning_content`。
 - **风险与残留**:① 字段名分歧靠 `reasoning_history_field` 旋钮兜底(web `/config` 按名保留,不新增可见 UI);② Anthropic `redacted_thinking`(罕见、加密打码)暂不保留——代码注释标注的已知限制;③ 压缩需保持"整条 dict 不 strip",已加注释 + 测试守护。
-- **门禁**:生成器快测 182 + 全量 golden 13(含 Docker build+run、uvx)全绿;新增产物单测覆盖 OpenAI 捕获/wire 翻译(字段名/off/strip signature)、Anthropic signature 往返、loop 往返、压缩与 session 保留 reasoning;`ReadLints` 无新增。**真实 MiMo 双端点端到端验收需人提供 key(§0.1),待人触发**。
+- **门禁**:生成器快测 182 + 全量 golden 13(含 Docker build+run、uvx)全绿;新增产物单测覆盖 OpenAI 捕获/wire 翻译(字段名/off/strip signature)、Anthropic signature 往返、loop 往返、压缩与 session 保留 reasoning;`ReadLints` 无新增。
+- **真实端点验收(2026-06-11,人提供 key,允许 token 消耗)**:生成 `coding-assistant` 产物 `uv sync` 后跑产物自身的 loop/client 对 MiMo 双端点真实验证:
+  - **MiMo OpenAI(`mimo-v2.5`,thinking on)**:多步工具 turn(calculator,答案 42)+ Turn‑2 跨轮(答案 142)均**通过**,reasoning 真实被捕获(75 字符)并回传到带工具调用的 assistant 历史,**无 400**。
+  - **MiMo Anthropic(adaptive thinking)**:多步工具 turn 通过(答案 42);探针确认该端点**返回思考文本(477 字符)但不带 `signature`** → 无可往返的签名块,代码据"无 signature 就跳过"正确处理(不误造 400);真 Claude 的签名往返由离线单测覆盖(`signature_delta`)。
+  - **泛化 + 无副作用**:DeepSeek(`deepseek-v4-flash`)同款工具 turn 通过(reasoning 真实回传);GLM(`glm-4.7`)通过且"reasoning_content 键 present ⇔ 端点真有产出"(零误加)。
+  - **确定性"上线"证明**:`OpenAIClient._wire_messages`/`_request_kwargs` 实测把 `reasoning_content` 放入发往 MiMo 的请求体,且**不改原历史 dict**——这是修复 load‑bearing 的硬证据。
+  - **诚实记录(端点策略,非代码缺陷)**:MiMo 与 DeepSeek 当前端点**去掉 `reasoning_content` 也未返回 400**(公告为前瞻性通知,这些端点尚未强制)。故 400 反向对照暂无法在当前端点演示;本修复是**预防性**的——一旦端点开启强制即合规,且当前"带回 reasoning"对这些端点已被接受、无任何退化。
 - **红线复核**:不改 spec schema(`reasoning_history_field` 是运行期 `LLMProfileConfig` 字段)、零新依赖、不引框架、不改 LLM API 面(仍 Chat Completions / Anthropic Messages,未改 `LLMClient` Protocol 方法签名 → 不触 §6.4)、reasoning 非密钥(随会话文本走既有持久化纪律,debug 日志不记内容)→ 不触 `CLAUDE.md §6`。
 
 ## 3. P2 · structured outputs 提前到默认路径
