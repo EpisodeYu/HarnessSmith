@@ -42,6 +42,11 @@ if TYPE_CHECKING:
 
 DEFAULT_USAGE_PATH = ".harness/usage.json"
 
+# Platform flag read by ``_atomic_replace`` (kept as a patchable module global so a
+# test can force the Windows retry path WITHOUT patching ``os.name``, which would
+# flip pathlib to WindowsPath and break on a POSIX host).
+_IS_WINDOWS = os.name == "nt"
+
 
 class LLMBudgetExceeded(Exception):
     """Raised just before an LLM call when that profile's accrued cost is at/over
@@ -70,7 +75,7 @@ def _atomic_replace(src: Path, dst: Path) -> None:
     momentarily holds the destination open, so retry briefly there. On POSIX it
     takes the plain single-call path — no retry, behavior unchanged.
     """
-    if os.name != "nt":
+    if not _IS_WINDOWS:
         os.replace(src, dst)
         return
     for attempt in range(10):

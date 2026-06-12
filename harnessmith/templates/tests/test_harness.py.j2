@@ -177,7 +177,9 @@ def test_usage_store_retries_transient_replace_lock(tmp_path, monkeypatch):
     is exercised on any OS (POSIX takes the plain single-call path unchanged)."""
     from {{ project_slug }}.harness import usage as usage_mod
 
-    monkeypatch.setattr(usage_mod.os, "name", "nt")
+    # Force the Windows retry branch via the module flag — NOT by patching
+    # os.name (that flips pathlib to WindowsPath and breaks on a POSIX host).
+    monkeypatch.setattr(usage_mod, "_IS_WINDOWS", True)
     monkeypatch.setattr(usage_mod.time, "sleep", lambda _s: None)  # no real backoff wait
     real_replace = usage_mod.os.replace
     calls = {"n": 0}
