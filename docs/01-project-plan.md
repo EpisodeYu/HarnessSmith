@@ -182,7 +182,7 @@ flowchart LR
 
 目标:让生成产物在用户各异的环境中**开箱即跑**,把环境配置负担降到最低,并由生成器**主动验证**可运行性。原则:**复用 uv + 容器两条成熟路径,不自造环境/依赖/版本管理层,也不为减依赖而手写 Web/SSE 轮子**。
 
-1. **uv 作为唯一环境契约**:产物随仓库带 `pyproject.toml` + `uv.lock` + `.python-version`。uv 自动下载匹配的托管 Python(用户无需预装 3.11)、自动建隔离 venv(不污染全局)、`uv sync` 一键就绪。README 首条命令即 `uv sync` → `uv run <pkg> run`;生成器本体走 `uvx harnessforge new`,全链路 uv 一致。
+1. **uv 作为唯一环境契约**:产物随仓库带 `pyproject.toml` + `uv.lock` + `.python-version`。uv 自动下载匹配的托管 Python(用户无需预装 3.14)、自动建隔离 venv(不污染全局)、`uv sync` 一键就绪。README 首条命令即 `uv sync` → `uv run <pkg> run`;生成器本体走 `uvx harnessforge new`,全链路 uv 一致。
 2. **依赖最小化由 spec 决定**:默认产物只含纯 Python / 通用 wheel 依赖(`openai` / `pydantic` / `pydantic-settings` / `pyyaml` / `typer`),零编译、任意 OS 可装。Web(`fastapi`/`uvicorn`)、MCP(`mcp`)、RAG(`sqlite-vec`)、keyring 等按 spec 开关进 `optional-dependencies`,未启用则不安装——"生成什么才依赖什么"。
 3. **生成期锁定**:生成器写完仓库后跑 `uv lock`(universal resolution,跨平台),用户拿到已解析好的确定依赖集,避免解析漂移。
 4. **生成后冒烟自检(默认开)**:生成器对新仓库执行 `uv sync` → import 自检 → mock LLM 跑一步 function-calling → `pytest -q`,全绿才报"可运行",失败给可读错误与修复建议;`--no-verify` 可关。另提供 `harnessforge doctor` 预检(uv 是否在、网络是否通、磁盘/权限)。

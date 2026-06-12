@@ -2,7 +2,7 @@
 #   docker build -t {{ project_slug }} .
 #   docker run --rm {{ project_slug }}                      # mock one step, no key
 #   docker run --rm -e OPENAI_API_KEY=sk-... {{ project_slug }} run "hello"
-FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \

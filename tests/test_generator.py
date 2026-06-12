@@ -144,7 +144,7 @@ def test_generates_runnability_files(tmp_path, preset_spec):
         out / "AGENTS.md",
     ):
         assert path.is_file(), path
-    assert (out / ".python-version").read_text().strip() == "3.11"
+    assert (out / ".python-version").read_text().strip() == "3.14"
 
 
 def test_rendered_python_modules_compile(tmp_path, preset_spec):
