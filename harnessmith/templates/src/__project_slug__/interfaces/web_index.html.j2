@@ -1144,6 +1144,7 @@
 
     async function openSession(id) {
       if (!id) return;
+      abandonStream();
       try {
         const data = await (await fetch("/sessions/" + encodeURIComponent(id))).json();
         currentSession = id;
@@ -1160,6 +1161,7 @@
     // Point 3: a fresh empty draft — clicking "New chat" again is a no-op, and an
     // empty draft is never persisted (the server only saves on a completed turn).
     $("chat-new").addEventListener("click", () => {
+      abandonStream();
       if (chatIsEmpty()) { show("chat"); return; }
       currentSession = null; currentTitle = ""; log.innerHTML = "";
       resetCtxMeter();
@@ -1200,6 +1202,15 @@
     function stopChat() {
       if (!currentRunId) return;
       fetch("/chat/" + encodeURIComponent(currentRunId) + "/stop", { method: "POST" }).catch(() => {});
+    }
+    // Leaving the current conversation mid-stream (New chat / opening another
+    // session) stops the in-flight run first — same semantics as closing the tab:
+    // the partial turn is saved resumable, and the old run's events can't leak
+    // into the view of the conversation being switched to.
+    function abandonStream() {
+      if (!streaming) return;
+      stopChat();
+      endStream(activeES);
     }
 
     // Run one turn over SSE. `opts.editTurn` (re-ask) regenerates from a past user

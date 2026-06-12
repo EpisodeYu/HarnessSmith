@@ -424,6 +424,18 @@ def test_index_has_sidebar_session_layout():
     assert "window.prompt" not in body and "window.confirm" not in body
 
 
+def test_index_stops_stream_on_session_switch():
+    """Leaving the current conversation mid-stream (New chat / opening another
+    session) stops the in-flight run and closes its EventSource first, so the old
+    run's events can't leak into the newly shown conversation (the partial turn is
+    saved resumable server-side — same semantics as closing the tab)."""
+    body = _client().get("/").text
+    assert "function abandonStream()" in body
+    assert "stopChat();" in body and "endStream(activeES);" in body
+    # both leave-the-conversation paths go through it: openSession + New chat
+    assert body.count("abandonStream();") >= 2
+
+
 def test_registries_lists_registered_extensions():
     """/registries reports what's registered in code (the extension universe) so
     the panel can offer custom strategies/conditions/paradigms once imported."""
