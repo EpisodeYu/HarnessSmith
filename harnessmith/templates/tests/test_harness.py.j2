@@ -170,6 +170,36 @@ def test_usage_ledger_accumulates_across_runs(tmp_path):
     assert after_two["name"] == "default"
 
 
+def test_usage_store_retries_transient_replace_lock(tmp_path, monkeypatch):
+    """On Windows os.replace can transiently fail with PermissionError when an
+    AV/indexer momentarily holds the file open; _atomic_replace retries so the
+    write still lands. Force the Windows path + a one-shot failure so the retry
+    is exercised on any OS (POSIX takes the plain single-call path unchanged)."""
+    from {{ project_slug }}.harness import usage as usage_mod
+
+    monkeypatch.setattr(usage_mod.os, "name", "nt")
+    monkeypatch.setattr(usage_mod.time, "sleep", lambda _s: None)  # no real backoff wait
+    real_replace = usage_mod.os.replace
+    calls = {"n": 0}
+
+    def flaky_replace(src, dst):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise PermissionError("simulated WinError 5: file in use")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(usage_mod.os, "replace", flaky_replace)
+
+    ledger = _ledger(tmp_path)
+    ledger.record("default", Usage(prompt_tokens=7, completion_tokens=3, total_tokens=10))
+
+    assert calls["n"] >= 2  # retried past the first transient failure
+    # the write actually persisted despite the first failed replace
+    reread = _ledger(tmp_path).snapshot(_config(tmp_path))
+    row = next(r for r in reread if r["name"] == "default")
+    assert row["prompt_tokens"] == 7
+
+
 def test_llm_cost_limit_blocks_an_over_budget_llm(tmp_path):
     """block_stop: an LLM already over its cost_limit is not called at all — the
     run ends immediately with stop_reason 'llm_budget' naming it."""

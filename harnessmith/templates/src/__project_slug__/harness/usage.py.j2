@@ -28,7 +28,9 @@ best-effort. A persistent day/week/month quota layer would build on the same fil
 from __future__ import annotations
 
 import json
+import os
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -58,6 +60,27 @@ class LLMBudgetExceeded(Exception):
             f"({self.cost:.4f} / {self.limit:.4f}). Clear its usage or raise the "
             "limit on the Budget page to continue."
         )
+
+
+def _atomic_replace(src: Path, dst: Path) -> None:
+    """Atomically move ``src`` onto ``dst``.
+
+    ``os.replace`` is atomic on every platform. On Windows it can transiently
+    raise ``PermissionError`` (WinError 5) when an antivirus/search indexer
+    momentarily holds the destination open, so retry briefly there. On POSIX it
+    takes the plain single-call path — no retry, behavior unchanged.
+    """
+    if os.name != "nt":
+        os.replace(src, dst)
+        return
+    for attempt in range(10):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            time.sleep(0.02)
 
 
 def _row_to_usage(row: dict | None) -> Usage:
@@ -101,7 +124,7 @@ class UsageLedger:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.parent / (self._path.name + ".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(self._path)
+        _atomic_replace(tmp, self._path)
 
     def record(self, name: str, usage: Usage) -> None:
         """Add one response's tokens to ``name``'s running totals (read-modify-write)."""
