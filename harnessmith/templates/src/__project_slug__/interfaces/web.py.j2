@@ -829,6 +829,25 @@ def create_app(
         # model_dump holds only env-var NAMES (api_key_env), never secret values.
         return app.state.config.model_dump(mode="json", include=set(_EDITABLE_FIELDS))
 
+    @app.get("/env-status")
+    def env_status() -> dict[str, bool]:
+        """Report which configured env-vars currently resolve to a value — a map
+        of ``{NAME: bool}``, booleans ONLY.
+
+        Lets the config UI mask an api_key / base_url that's already set in .env
+        (or the process env) with a placeholder, without ever reading the value
+        back. Strictly write-only: this returns neither secrets NOR URLs, only
+        whether each NAME has a non-empty value. Keys and base URLs are treated
+        identically — no value of any kind leaves the server here.
+        """
+        names: set[str] = set()
+        for profile in app.state.config.llms:
+            if profile.api_key_env:
+                names.add(profile.api_key_env)
+            if profile.base_url_env:
+                names.add(profile.base_url_env)
+        return {name: bool(resolve_env(name)) for name in names}
+
     @app.post("/env")
     async def set_env(request: Request):
         """Write a secret VALUE into the local .env (write-only; never returned).

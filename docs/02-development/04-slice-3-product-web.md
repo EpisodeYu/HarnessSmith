@@ -27,7 +27,7 @@
   - `GET /` — 单页前端(无构建,Tailwind CDN),含 chat 视图 + config 面板视图。
   - `/chat`(SSE)— `Hooks` 子类 + 后台线程驱动 `loop.run()`,推 `token`(默认开)/ `tool_call` / `tool_result` / `step` / `final` 事件。`?stream=false` 退化为纯进度事件 + 单次 `final`(供测试/程序化调用)。
   - `GET /config` / `POST /config` — 读 / 改运行期**行为性配置**(`_EDITABLE_FIELDS = llms/roles/prompts/tools/context/observability/budget`),改后进程内即时生效**且回写 `config.yaml`**(见 §2.4);绝不读写密钥真值(只可见 env 引用名)。结构性配置(`version`/`project_slug`)与 `secrets` 不可改。
-  - `POST /env` — write-only 写 `.env`(不回显);`GET /rules` / `POST /rules` — 读写 rule 文件正文(限仓库内相对路径);`GET /registries` — 内省注册表;系统页相关端点(见 §2.5)。
+  - `POST /env` — write-only 写 `.env`(不回显);`GET /env-status` — 仅返回 `{NAME: bool}`(各 `api_key_env`/`base_url_env` 是否已设值),**布尔ONLY、key 与 url 一视同仁、绝不回读任何值**,供前端把已设的 key/url 渲染成统一长度的假星号占位(`data-masked`;聚焦清空可改、仍为占位则跳过写入,占位永不入 `.env`);`GET /rules` / `POST /rules` — 读写 rule 文件正文(限仓库内相对路径);`GET /registries` — 内省注册表;系统页相关端点(见 §2.5)。
 - `interfaces/web_index.html` — 单页前端(`{{ display_name }}` 标题)。
 - `interfaces/cli.py` — 条件新增 `serve` 子命令(默认 `127.0.0.1`,带 `--mock`)。
 - `tests/test_web.py`(web 门控)。
@@ -89,7 +89,7 @@
 
 - **薄**:默认产物(`web: false`)与 Slice 1/2 完全一致,零新增依赖、零 Web 文件;`web.py` 自身保持薄。
 - **核心改动克制**:进度事件复用既有 `Hooks`(不改 loop);token 级流式仅给 `loop.run()` 加一处可选 `on_delta` 分支,累积逻辑落在 `llm.py` 适配层。
-- **密钥红线**(`CLAUDE.md §6.5`):`/config` 面板、SSE 事件、trace、日志任一路径出现明文 key 即失败;面板只可见 env 引用名;密钥真值经 `POST /env` write-only 写 `.env`。
+- **密钥红线**(`CLAUDE.md §6.5`):`/config` 面板、SSE 事件、trace、日志任一路径出现明文 key 即失败;面板只可见 env 引用名;密钥真值经 `POST /env` write-only 写 `.env`。`GET /env-status` 只回 `{NAME: bool}` 是否已设,**key 与 url 都不回值**(url 也按 write-only 掩码,避免回读内嵌凭证/内网域名),前端据此显示假星号占位。
 - **不绑框架**:FastAPI/uvicorn 是通用 Web 库,不是 agent 编排框架;仅在 `web=true` 时进产物。
 - **配方 vs 活旋钮**(`00-overview.md` §3):`/config` 改运行期行为性配置;接口/模块/范式拓扑是结构性的,只能重新生成。Web 面板属产物自持。
 - **发布拓扑前提**:`/chat` 与 `/config`(读 + 改运行期配置)挂同一 app、同端口、无鉴权;在「管理员托管 + 接口发布」拓扑下,**`/config` 须与公开面隔离**(鉴权 / 绑 localhost / 生成期开关)——隔离本体排 v1+(见 `00-overview.md` §8),也是 Slice 11 面板改 `mcp` 的前提。

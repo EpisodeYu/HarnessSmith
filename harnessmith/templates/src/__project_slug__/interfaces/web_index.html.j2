@@ -370,6 +370,7 @@
         set_key_ph: "set this key's value in .env (overwrites if it exists)", set_key_btn: "Save to .env",
         set_url_ph: "set this URL's value in .env (overwrites if it exists)", set_url_btn: "Save to .env",
         key_saved: "saved to .env", key_need_name: "set the env-var name first",
+        key_unchanged: "already set (unchanged)",
         ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_combine_label: "Trigger combine (or/and)",
         ctx_combine_hint: "or: any trigger fires; and: all triggers must fire.",
         ctx_toolcap_label: "max_tool_result_chars",
@@ -491,6 +492,7 @@
         set_key_ph: "在 .env 设置该 key 的值(如已存在则覆盖)", set_key_btn: "写入 .env",
         set_url_ph: "在 .env 设置该 url 的值(如已存在则覆盖)", set_url_btn: "写入 .env",
         key_saved: "已写入 .env", key_need_name: "请先填环境变量名",
+        key_unchanged: "已设置(未改动)",
         ctx_strategy_label: "策略", ctx_keep_label: "完整保留最近轮数", ctx_combine_label: "触发组合方式 (or/and)",
         ctx_combine_hint: "or:任一触发条件命中即压缩;and:全部命中才压缩。",
         ctx_toolcap_label: "单工具结果上限(字符)",
@@ -1453,6 +1455,10 @@
     const CFG_TABS = ["llm", "context", "tools",{% if spec.mcp.enabled %} "mcp",{% endif %} "paradigms", "prompts", "budget",{% if spec.memory.enabled %} "memory",{% endif %} "observability", "system"];
     let cfgTab = "llm";
     let cfg = {};
+    // {NAME: bool} from GET /env-status — whether each configured api_key/base_url
+    // env-var currently resolves to a value. Used to mask an already-set key/url
+    // with a placeholder; the VALUE itself is never fetched (write-only).
+    let envStatus = {};
     // Tracks unsaved edits in the config view. Edits live only in the DOM until
     // Save (POST /config); this flag drives the "unsaved" marker, the leave/reload
     // guards, and stops a tab switch back to Config from reloading over the edits.
@@ -1507,6 +1513,11 @@
     const numOrNull = (v) => { v = (v ?? "").toString().trim(); return v === "" ? null : Number(v); };
     const esc = (v) => (v == null ? "" : String(v).replace(/'/g, "&#39;"));
     const escNum = (v) => (v ? esc(v) : "");  // hide 0 / null behind the placeholder
+    // A fixed-length dot placeholder shown for an env-var that's already set in
+    // .env (same length for key and url so the two rows line up). It's a sentinel,
+    // never a real value, and is skipped on write (see the .p-setkey/.p-seturl handler).
+    const ENV_MASK = "\u2022".repeat(12);
+    const envSet = (name) => !!(name && envStatus[name]);
 
     // One LLM profile card: name/model + API key + base_url always visible;
     // sampling knobs under "Advanced", per-1M prices under "Pricing".
@@ -1530,8 +1541,8 @@
           "</div>" +
           "<button type='button' class='p-remove text-xs text-red-600'>" + t("profile_remove") + "</button>" +
         "</div>" +
-        keyRow("profile_key_section", "p-key", esc(p.api_key_env || "OPENAI_API_KEY"), "p-keyval", "p-setkey", "p-keystatus", t("set_key_ph"), t("set_key_btn"), "password") +
-        keyRow("profile_url_section", "p-baseurl", esc(p.base_url_env || "OPENAI_BASE_URL"), "p-urlval", "p-seturl", "p-urlstatus", t("set_url_ph"), t("set_url_btn"), "text") +
+        keyRow("profile_key_section", "p-key", esc(p.api_key_env || "OPENAI_API_KEY"), "p-keyval", "p-setkey", "p-keystatus", t("set_key_ph"), t("set_key_btn"), "password", envSet(p.api_key_env || "OPENAI_API_KEY")) +
+        keyRow("profile_url_section", "p-baseurl", esc(p.base_url_env || "OPENAI_BASE_URL"), "p-urlval", "p-seturl", "p-urlstatus", t("set_url_ph"), t("set_url_btn"), "text", envSet(p.base_url_env || "OPENAI_BASE_URL")) +
         "<div class='flex items-center gap-2'>" +
           "<button type='button' class='p-test rounded border px-3 py-1 text-xs'>" + t("test_btn") + "</button>" +
           "<span class='p-teststatus text-xs'></span>" +
@@ -1558,11 +1569,15 @@
       return div;
     }
     // An env-var row: NAME input + write-only VALUE input that posts to /env.
-    function keyRow(sectionKey, nameCls, nameVal, valCls, btnCls, statusCls, ph, btnLabel, valType) {
+    // When `isSet`, the value box shows a masked placeholder (the value is already
+    // in .env) tagged data-masked — focusing clears it to type a new one, and a
+    // still-masked box is skipped on write so the placeholder is never stored.
+    function keyRow(sectionKey, nameCls, nameVal, valCls, btnCls, statusCls, ph, btnLabel, valType, isSet) {
+      const masked = isSet ? (" value='" + ENV_MASK + "' data-masked='1'") : "";
       return "<div><div class='text-xs text-slate-500'>" + t(sectionKey) + "</div>" +
         "<div class='mt-1 flex items-center gap-2'>" +
           "<input class='" + nameCls + " w-44 rounded border px-2 py-1 font-mono text-xs' title='" + t("profile_varname") + "' value='" + nameVal + "'/>" +
-          "<input type='" + valType + "' class='" + valCls + " flex-1 rounded border px-2 py-1' placeholder='" + ph + "'/>" +
+          "<input type='" + valType + "' class='" + valCls + " flex-1 rounded border px-2 py-1' placeholder='" + ph + "'" + masked + "/>" +
           "<button type='button' class='" + btnCls + " rounded border px-2 py-1 text-xs whitespace-nowrap'>" + btnLabel + "</button>" +
           "<span class='" + statusCls + " text-xs text-emerald-700'></span>" +
         "</div></div>";
@@ -2258,11 +2273,17 @@
       try { usageRows = (await (await fetch("/usage")).json()).profiles || []; }
       catch (e) { usageRows = []; }
     }
+    async function loadEnvStatus() {
+      // {NAME: bool} — which configured key/url env-vars resolve to a value (never
+      // the value itself). On error keep the last map; nothing masked is harmless.
+      try { envStatus = await (await fetch("/env-status")).json(); } catch (e) {}
+    }
     async function loadConfig() {
       cfg = await (await fetch("/config")).json();
       try { reg = await (await fetch("/registries")).json(); } catch (e) { /* keep last */ }
       await loadUsage();  // per-LLM accrued cost/tokens for the Budget tab
       await loadRules();  // rule files (explicit + auto-recognized) for the Prompts tab
+      await loadEnvStatus();  // mask any key/url already set in .env on (re)render
 {% if spec.memory.enabled %}      await loadMemory();  // the long-term memory note for the Memory tab
 {% endif %}      renderConfig();
       gateChat();
@@ -2319,14 +2340,41 @@
         : { name: ".p-baseurl", val: ".p-urlval", status: ".p-urlstatus" };
       const name = row.querySelector(sel.name).value.trim();
       const status = row.querySelector(sel.status);
+      const valEl = row.querySelector(sel.val);
       if (!name) { status.textContent = t("key_need_name"); return; }
+      // Still masked => already set in .env and untouched: don't overwrite it with
+      // the placeholder, and never POST the sentinel.
+      if (valEl.dataset.masked === "1") { status.textContent = t("key_unchanged"); return; }
       const resp = await fetch("/env", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, value: row.querySelector(sel.val).value }),
+        body: JSON.stringify({ name, value: valEl.value }),
       });
       const data = await resp.json();
-      if (resp.ok) { row.querySelector(sel.val).value = ""; status.textContent = t("key_saved"); }
-      else { status.textContent = data.error || t("cfg_invalid"); }
+      if (resp.ok) {
+        // Don't clear: re-mask the box (the value is in .env now, never echoed) and
+        // remember it's set so a Save-driven re-render keeps the placeholder.
+        valEl.value = ENV_MASK; valEl.dataset.masked = "1";
+        envStatus[name] = true;
+        status.textContent = t("key_saved");
+      } else { status.textContent = data.error || t("cfg_invalid"); }
+    });
+    // Masked key/url boxes: focusing clears the placeholder so a new value can be
+    // typed; leaving it empty restores the mask (an idle click never wipes the
+    // stored value). A non-empty edit drops the masked flag => it gets written.
+    $("cfg-profiles").addEventListener("focusin", (e) => {
+      const el = e.target;
+      if (el.dataset && el.dataset.masked === "1" &&
+          (el.classList.contains("p-keyval") || el.classList.contains("p-urlval"))) {
+        el.value = ""; el.dataset.masked = "editing";
+      }
+    });
+    $("cfg-profiles").addEventListener("focusout", (e) => {
+      const el = e.target;
+      if (el.dataset && el.dataset.masked === "editing" &&
+          (el.classList.contains("p-keyval") || el.classList.contains("p-urlval"))) {
+        if (el.value === "") { el.value = ENV_MASK; el.dataset.masked = "1"; }
+        else { delete el.dataset.masked; }
+      }
     });
     // Recompute "unsaved" by comparing the live view to the saved snapshot on
     // every edit (delegated). This is robust to the spurious input/change events a
@@ -2454,7 +2502,7 @@
       });
       const data = await resp.json();
       if (resp.ok) {
-        cfg = data; await loadRules();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); markSaved();
+        cfg = data; await loadRules(); await loadEnvStatus();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); markSaved();
         $("cfg-status").textContent = ruleErr ? (t("cfg_saved") + ": " + ruleErr) : t("cfg_saved");
       } else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });

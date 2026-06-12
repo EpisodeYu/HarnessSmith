@@ -780,6 +780,35 @@ def test_env_endpoint_rejects_bad_name():
     assert resp.status_code == 400
 
 
+def test_env_status_reports_presence_not_values(tmp_path, monkeypatch):
+    """GET /env-status reports only WHETHER each configured env-var resolves to a
+    value (booleans), for keys AND base URLs alike — the value itself is never
+    returned (write-only). The UI uses this to mask an already-set key/url."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    config = Config.model_validate({
+        "llms": [{
+            "name": "default", "model": "mock-model",
+            "api_key_env": "OPENAI_API_KEY", "base_url_env": "OPENAI_BASE_URL",
+        }],
+        "roles": {"generation": "default"},
+    })
+    client = TestClient(create_app(config, mock=True))
+    # Nothing written yet: both names report False.
+    assert client.get("/env-status").json() == {
+        "OPENAI_API_KEY": False, "OPENAI_BASE_URL": False
+    }
+    # Write a secret key and a (non-secret) base URL into .env.
+    client.post("/env", json={"name": "OPENAI_API_KEY", "value": "sk-secret-xyz"})
+    client.post("/env", json={"name": "OPENAI_BASE_URL", "value": "https://endpoint.test/v1"})
+    resp = client.get("/env-status")
+    assert resp.json() == {"OPENAI_API_KEY": True, "OPENAI_BASE_URL": True}
+    # Booleans only — neither the secret nor the URL value is ever echoed.
+    assert "sk-secret-xyz" not in resp.text
+    assert "endpoint.test" not in resp.text
+
+
 def test_rules_endpoint_writes_and_reads_within_repo(tmp_path, monkeypatch):
     """POST /rules writes a rule file's content to disk; GET /rules reads back each
     configured rules_files entry so the Prompts tab can edit the files in place."""
