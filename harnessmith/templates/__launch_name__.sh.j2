@@ -12,9 +12,28 @@ echo "[{{ project_slug }}] Folder: $PWD"
 {% if interfaces.web %}action=(serve --open)   # web UI; opens your browser
 {% else %}action=(chat)            # interactive chat in this terminal
 {% endif %}echo "[{{ project_slug }}] Action: ${action[*]}"
-# Behind a proxy? Export HTTP_PROXY / HTTPS_PROXY before running this and uv sync +
-# npx/uvx servers inherit it. (macOS GUI-only proxy: the product reads it for npx
-# itself; for uv sync set the env vars.)
+
+# Reuse the system proxy (corporate networks) so uv sync{% if spec.mcp.enabled and mcp_needs_node %} + the Node download{% endif %} + npx/uvx
+# servers all reach the net the same way. Honor an already-set *_PROXY; otherwise on
+# macOS read the GUI proxy via scutil (curl/uv don't read it on their own) and export
+# it. Linux users export *_PROXY as usual -> no-op here. Best-effort: a parse miss
+# just leaves the env untouched.
+pick_proxy() {
+  [ -n "${HTTP_PROXY:-}${HTTPS_PROXY:-}${http_proxy:-}${https_proxy:-}" ] && return 0
+  [ "$(uname)" = Darwin ] || return 0
+  command -v scutil >/dev/null 2>&1 || return 0
+  local enabled host port px
+  enabled="$(scutil --proxy 2>/dev/null | awk '/^[[:space:]]*HTTPSEnable/ {print $3}')"
+  [ "$enabled" = 1 ] || return 0
+  host="$(scutil --proxy 2>/dev/null | awk '/^[[:space:]]*HTTPSProxy/ {print $3}')"
+  [ -n "$host" ] || return 0
+  port="$(scutil --proxy 2>/dev/null | awk '/^[[:space:]]*HTTPSPort/ {print $3}')"
+  px="http://$host"
+  [ -n "$port" ] && px="$px:$port"
+  export HTTP_PROXY="$px" HTTPS_PROXY="$px"
+  echo "[{{ project_slug }}] Using system proxy: $px"
+}
+pick_proxy
 {% if spec.mcp.enabled and mcp_needs_node %}
 # A Node-based MCP server (e.g. desktop-commander via npx) needs Node.js. uvx
 # servers ride uv, but Node has no runtime on many machines — offer a user-local

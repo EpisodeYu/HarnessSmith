@@ -47,6 +47,7 @@
 - **扩展可发现性**:产物 `GET /registries` 内省 `STRATEGIES`/`CONDITIONS`/`PARADIGMS`/memory backends（纯名字)+ CLI `info` 列「已注册 vs 已启用」;Web Context/Paradigms tab 据此渲染下拉/勾选列表、对未注册名字标 ⚠ + 提示「可 `@register_*` 自定义,import 后即现」。
 - **写入式 `.env` 密钥助手**:CLI `set-key` + Web `POST /env` / LLM tab 把 key/base_url 真值只写本地 gitignored `.env`、write-only 不回显、绝不进 `config.yaml`/spec/trace/日志。keyring 仍 v1+。生成器向导始终不收 key。
 - **跨平台启动健壮性**：一键启动脚本与向导一键生成在缺 uv / 缺 Node 时带 y/N 确认地自举（uv 走 winget/官方安装器或 pip 清华源、Node 走便携二进制),并对 `uv sync`/产物 MCP 子进程做镜像源与代理自动解析（探测官方源不可达 → 用国内镜像;读系统代理注入 npx/uvx 子进程);一键生成展示分步进度条 + 实时日志尾 + 秒表。**不偷偷跑第三方 GitHub 代理脚本**(供应链信任红线)。这些是生成器侧/启动脚本的便利,产物本身不依赖向导。
+- **代理探测一致性 + 可选包索引**(后补):各处「PyPI 可达性」探测统一走系统代理——`curl`(根启动器 `HarnessSmith.bat/.sh` 与产物 `__launch_name__.bat/.sh`)本身不读 WinINET / macOS GUI 代理,故探测前先把系统代理写进 `HTTP(S)_PROXY`(Win 读注册表、macOS 读 `scutil --proxy`、Linux 依赖既有 env),让 `curl` 探测与 `uv`/`urllib`(本就走系统代理)看到同一条网,避免在公司代理后误判 PyPI 不可达而切到「经此代理根本不通」的清华镜像。向导一键启动新增**可选「包索引」旋钮**(留空=自动;优先级 显式 > env `UV_DEFAULT_INDEX` > 自动探测),`/generate` 经 `index_url` 串到 `_uv_sync`;`_uv_sync` 首行把本次实际所用源(explicit/env-pinned/auto-mirror/auto-official)写进 `.setup.log` 便于事后诊断。**对墙外 / 墙内无代理 / 代理三类用户均无行为负面影响**(默认不变,唯一全局新增是 `.setup.log` 多一行说明)。
 
 ## 3. 退出门禁
 

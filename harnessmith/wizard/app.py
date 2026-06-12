@@ -209,7 +209,33 @@ def _ensure_proxy_env(env: dict[str, str]) -> None:
         env["http_proxy"] = env["https_proxy"] = proxy
 
 
-def _product_env() -> dict[str, str]:
+def _resolve_index(index_url: str | None = None) -> tuple[str, str]:
+    """Resolve the package index that the product's ``uv`` calls will use, plus a
+    short human reason — for *display/logging only* (the actual env wiring lives in
+    :func:`_product_env`, which is kept behavior-identical when no explicit index is
+    given). Precedence, highest first:
+
+    - ``index_url`` — an explicit choice made in the wizard this run (the new knob);
+    - an index already pinned in the environment (e.g. ``UV_DEFAULT_INDEX`` the
+      launcher set behind the GFW) — left exactly as-is;
+    - auto: the China mirror when official PyPI looks unreachable, else PyPI's default.
+
+    Returns ``(label, reason)`` where ``label`` is the index URL (or the literal
+    ``"official PyPI"`` when uv is left on its built-in default)."""
+    explicit = (index_url or "").strip()
+    if explicit:
+        return explicit, "explicit"
+    for key in _INDEX_ENV_KEYS:
+        pinned = os.environ.get(key)
+        if pinned:
+            return pinned, "env-pinned"
+    mirror = _auto_index()
+    if mirror:
+        return mirror, "auto-mirror"
+    return "official PyPI", "auto-official"
+
+
+def _product_env(index_url: str | None = None) -> dict[str, str]:
     """Environment for the product's own ``uv`` invocations.
 
     The wizard is itself launched by ``uv run`` *inside HarnessSmith's venv*,
@@ -220,56 +246,109 @@ def _product_env() -> dict[str, str]:
     that means fighting the still-running parent, so the sync never finishes.
     Dropping those keys lets uv resolve the product's own ``.venv``.
 
-    Index selection is automatic: an explicitly-configured index (e.g. a mirror
-    the launcher set via ``UV_DEFAULT_INDEX``) is preserved; otherwise, when the
-    official PyPI looks unreachable, a China mirror is filled in so the install
-    can still fetch deps.
+    Index selection: an explicit ``index_url`` (the wizard's optional knob) always
+    wins; otherwise behavior is unchanged — a pinned index (e.g. one the launcher
+    set via ``UV_DEFAULT_INDEX``) is preserved, and only when none is pinned *and*
+    official PyPI looks unreachable is a China mirror filled in.
     """
     env = dict(os.environ)
     env.pop("VIRTUAL_ENV", None)
     env.pop("UV_PROJECT_ENVIRONMENT", None)
     _ensure_proxy_env(env)
-    if not any(env.get(k) for k in _INDEX_ENV_KEYS):
+    explicit = (index_url or "").strip()
+    if explicit:
+        env["UV_DEFAULT_INDEX"] = explicit
+    elif not any(env.get(k) for k in _INDEX_ENV_KEYS):
         mirror = _auto_index()
         if mirror:
             env["UV_DEFAULT_INDEX"] = mirror
     return env
 
 
-def _log_tail(path: Path, lines: int = 3) -> str:
-    """Last few non-empty log lines, joined into a single-line status hint."""
+def _log_text(path: Path) -> str:
+    """Full log contents, or ``""`` if it can't be read."""
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def _log_tail(path: Path, lines: int = 3) -> str:
+    """Last few non-empty log lines, joined into a single-line status hint."""
+    text = _log_text(path)
     kept = [ln.strip() for ln in text.splitlines() if ln.strip()]
     return " | ".join(kept[-lines:])
 
 
-def _uv_sync(target_dir: Path) -> tuple[int, str]:
+def _run_uv(args: list[str], *, cwd: Path, log, index_url: str | None = None) -> int:
+    """Run a ``uv`` subcommand, streaming combined output to the open ``log`` handle.
+
+    Returns the exit code; a timeout maps to 124 (after killing the child) so the
+    caller reports a failure instead of leaving the UI spinning forever."""
+    try:
+        return subprocess.run(  # noqa: S603 — local dev convenience, fixed argv
+            ["uv", *args],
+            cwd=str(cwd),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env=_product_env(index_url),
+            timeout=_UV_SYNC_TIMEOUT,
+        ).returncode
+    except subprocess.TimeoutExpired:
+        log.write(
+            f"\n[harnessmith] `uv {' '.join(args)}` did not finish within "
+            f"{int(_UV_SYNC_TIMEOUT)}s and was aborted — the package index or a "
+            "managed-Python download is likely unreachable (behind a firewall, "
+            "try a mirror).\n"
+        )
+        return 124
+
+
+def _looks_like_cache_corruption(log_text: str) -> bool:
+    """True if ``log_text`` shows a uv *cache* access failure (Windows ``os error 5``).
+
+    uv's global distribution cache can be left half-written or locked — by an
+    earlier interrupted/partially-removed install, or antivirus holding a temp
+    file — which surfaces as "failed to rename ... os error 5" / "拒绝访问" when
+    uv tries to finalise a cache entry. Gated on a permission-denied marker so a
+    plain network/index failure never triggers the (heavier) cache wipe."""
+    low = log_text.lower()
+    denied = any(m in low for m in ("os error 5", "拒绝访问", "access is denied"))
+    if not denied:
+        return False
+    return "distribution cache" in low or "failed to rename" in low
+
+
+def _uv_sync(target_dir: Path, *, index_url: str | None = None) -> tuple[int, str]:
     """Run ``uv sync`` in the generated repo (installs deps).
 
     Returns ``(exit_code, log_tail)``; output is captured to ``<target>/.setup.log``
-    for troubleshooting. A timeout maps to exit code 124 (after killing the child)
-    so the caller reports a failure instead of leaving the UI spinning forever."""
+    for troubleshooting. The first log line records which package index this run
+    actually uses (explicit knob / env-pinned / auto) so a slow or failed install is
+    diagnosable after the fact.
+
+    Self-heals the common Windows failure mode where a stale/partially-removed
+    entry in uv's global cache makes the install abort with ``os error 5``
+    ("拒绝访问"): on that specific signature, clean the cache once and retry the
+    sync — the same ``uv cache clean`` users run by hand to get unstuck."""
     log_path = target_dir / ".setup.log"
     with log_path.open("w", encoding="utf-8") as log:
-        try:
-            code = subprocess.run(  # noqa: S603 — local dev convenience, fixed argv
-                ["uv", "sync"],
-                cwd=str(target_dir),
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                env=_product_env(),
-                timeout=_UV_SYNC_TIMEOUT,
-            ).returncode
-        except subprocess.TimeoutExpired:
-            log.write(
-                f"\n[harnessmith] uv sync did not finish within {int(_UV_SYNC_TIMEOUT)}s "
-                "and was aborted — the package index or a managed-Python download is "
-                "likely unreachable (behind a firewall, try a mirror).\n"
-            )
-            code = 124
+        index_label, index_reason = _resolve_index(index_url)
+        log.write(f"[harnessmith] package index: {index_label} ({index_reason})\n")
+        log.flush()
+        code = _run_uv(["sync"], cwd=target_dir, log=log, index_url=index_url)
+        if code != 0:
+            log.flush()
+            if _looks_like_cache_corruption(_log_text(log_path)):
+                log.write(
+                    "\n[harnessmith] uv sync failed with a cache access error "
+                    "(os error 5 / 拒绝访问) — this usually means a stale or "
+                    "partially-removed entry in uv's global cache. Running "
+                    "`uv cache clean` and retrying the sync once...\n"
+                )
+                log.flush()
+                _run_uv(["cache", "clean"], cwd=target_dir, log=log, index_url=index_url)
+                code = _run_uv(["sync"], cwd=target_dir, log=log, index_url=index_url)
     return code, _log_tail(log_path)
 
 
@@ -280,6 +359,7 @@ def _launch_product(
     *,
     host: str = "127.0.0.1",
     extra_path: str | None = None,
+    index_url: str | None = None,
 ) -> None:
     """Spawn ``uv run <slug> serve`` in the background (detached, own session).
 
@@ -288,7 +368,7 @@ def _launch_product(
     to the child's PATH so its ``npx``-based MCP servers can launch. Set the LLM key
     in the product's config page / .env to actually chat.
     """
-    env = _product_env()
+    env = _product_env(index_url)
     if extra_path:
         env["PATH"] = extra_path + os.pathsep + env.get("PATH", "")
     log = (target_dir / ".serve.log").open("w", encoding="utf-8")
@@ -334,7 +414,14 @@ def _set_step(job: dict, key: str, status: str) -> None:
             step["status"] = status
 
 
-def _run_launch(job: dict, target_dir: Path, project_slug: str, *, host: str = "127.0.0.1") -> None:
+def _run_launch(
+    job: dict,
+    target_dir: Path,
+    project_slug: str,
+    *,
+    host: str = "127.0.0.1",
+    index_url: str | None = None,
+) -> None:
     """Worker: ``uv sync`` then start serve, updating ``job`` step-by-step."""
     try:
         # Expose the sync log so the status endpoint can stream uv's live output
@@ -342,7 +429,7 @@ def _run_launch(job: dict, target_dir: Path, project_slug: str, *, host: str = "
         # frozen during the quiet download phase).
         job["setup_log"] = str(target_dir / ".setup.log")
         _set_step(job, "sync", "running")
-        code, log_tail = _uv_sync(target_dir)
+        code, log_tail = _uv_sync(target_dir, index_url=index_url)
         if code != 0:
             _set_step(job, "sync", "error")
             hint = f" Last log: {log_tail}" if log_tail else ""
@@ -374,7 +461,9 @@ def _run_launch(job: dict, target_dir: Path, project_slug: str, *, host: str = "
         _set_step(job, "serve", "running")
         job["setup_log"] = str(target_dir / ".serve.log")  # stream serve output too
         port = _find_free_port()
-        _launch_product(target_dir, project_slug, port, host=host, extra_path=node_path)
+        _launch_product(
+            target_dir, project_slug, port, host=host, extra_path=node_path, index_url=index_url
+        )
         if _wait_port(host, port):
             job["url"] = f"http://{host}:{port}"
             _set_step(job, "serve", "done")
@@ -392,10 +481,15 @@ def _run_launch(job: dict, target_dir: Path, project_slug: str, *, host: str = "
         debug_log.debug("wizard: launch job %s error: %s", job["id"], job["error"])
 
 
-def _spawn_launch(job: dict, target_dir: Path, project_slug: str) -> None:
+def _spawn_launch(
+    job: dict, target_dir: Path, project_slug: str, *, index_url: str | None = None
+) -> None:
     """Start :func:`_run_launch` on a daemon thread (overridable in tests)."""
     threading.Thread(
-        target=_run_launch, args=(job, target_dir, project_slug), daemon=True
+        target=_run_launch,
+        args=(job, target_dir, project_slug),
+        kwargs={"index_url": index_url},
+        daemon=True,
     ).start()
 
 
@@ -506,9 +600,13 @@ def create_app() -> FastAPI:
                 s.requires == "node" or (s.command or "").lower() in {"npx", "npm", "node"}
                 for s in servers
             )
+            # Optional per-run package index override (empty -> keep the automatic
+            # behavior). Lets a user behind a slow corporate proxy point uv at a
+            # mirror the proxy can actually reach fast, instead of the auto pick.
+            index_url = str(body.get("index_url") or "").strip() or None
             job = _new_job(needs_node)
             _JOBS[job["id"]] = job
-            _spawn_launch(job, Path(result.target_dir), result.project_slug)
+            _spawn_launch(job, Path(result.target_dir), result.project_slug, index_url=index_url)
             resp["job_id"] = job["id"]
         return resp
 

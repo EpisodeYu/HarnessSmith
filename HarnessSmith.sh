@@ -54,6 +54,29 @@ pick_index() {
   export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
 }
 
+# Reuse the system proxy so the curl probe above, the uv install, and uv's sync all
+# reach the net the same way. Only when none is already set. macOS's GUI proxy isn't
+# read by curl/uv on their own, so on a Mac we read it via scutil and export it
+# (Linux users set *_PROXY as usual -> this is a no-op there). Best-effort: any parse
+# miss just leaves the env untouched. Mirrors the wizard's proxy-aware urllib probe.
+pick_proxy() {
+  [ -n "${HTTP_PROXY:-}${HTTPS_PROXY:-}${http_proxy:-}${https_proxy:-}" ] && return 0
+  [ "$(uname)" = Darwin ] || return 0
+  command -v scutil >/dev/null 2>&1 || return 0
+  local enabled host port px
+  enabled="$(scutil --proxy 2>/dev/null | awk '/^[[:space:]]*HTTPSEnable/ {print $3}')"
+  [ "$enabled" = 1 ] || return 0
+  host="$(scutil --proxy 2>/dev/null | awk '/^[[:space:]]*HTTPSProxy/ {print $3}')"
+  [ -n "$host" ] || return 0
+  port="$(scutil --proxy 2>/dev/null | awk '/^[[:space:]]*HTTPSPort/ {print $3}')"
+  px="http://$host"
+  [ -n "$port" ] && px="$px:$port"
+  export HTTP_PROXY="$px" HTTPS_PROXY="$px"
+  echo "[HarnessSmith] Using system proxy: $px"
+}
+
+pick_proxy
+
 echo "[HarnessSmith] Looking for uv ..."
 uv_bin="$(find_uv || true)"
 if [ -z "$uv_bin" ]; then

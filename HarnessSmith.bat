@@ -8,6 +8,20 @@ cd /d "%~dp0"
 echo [HarnessSmith] Folder: %CD%
 echo.
 
+REM --- Reuse the system proxy (corporate networks) so the curl probe below, the
+REM official uv install, and uv's own sync all reach the net the same way. Only when
+REM none is already set; curl/uv don't read the Windows WinINET proxy on their own,
+REM whereas the wizard's urllib probe DOES - so without this the curl probe could
+REM wrongly report PyPI unreachable and pin a mirror the proxy can't even reach.
+if defined HTTP_PROXY goto :proxy_done
+if defined HTTPS_PROXY goto :proxy_done
+for /f "usebackq delims=" %%p in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue; if ($s.ProxyEnable -eq 1 -and $s.ProxyServer) { $p=[string]$s.ProxyServer; if ($p -match 'https?=([^;]+)') { $p=$matches[1] }; if ($p -notmatch '://') { $p='http://'+$p }; $p }"`) do set "HTTP_PROXY=%%p"
+if not defined HTTP_PROXY goto :proxy_done
+set "HTTPS_PROXY=%HTTP_PROXY%"
+echo [HarnessSmith] Using system proxy: %HTTP_PROXY%
+echo.
+:proxy_done
+
 REM Web form (browser) vs interactive CLI wizard (this terminal). Web is the
 REM default on Windows (a browser is normally present). Set HARNESSMITH_MODE to
 REM web or cli to skip the prompt (e.g. for automation). Flat goto flow only.

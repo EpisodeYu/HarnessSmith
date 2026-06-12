@@ -233,7 +233,7 @@ def test_generate_launches_product_with_progress_job(client, tmp_path, monkeypat
 
     calls = {}
 
-    def fake_spawn(job, target_dir, project_slug):
+    def fake_spawn(job, target_dir, project_slug, *, index_url=None):
         calls["project_slug"] = project_slug
         for step in job["steps"]:
             step["status"] = "done"
@@ -356,7 +356,7 @@ def test_run_launch_reports_sync_failure_without_hanging(tmp_path, monkeypatch):
     import harnessmith.wizard.app as app_mod
 
     monkeypatch.setattr(
-        app_mod, "_uv_sync", lambda target_dir: (124, "error: failed to fetch index")
+        app_mod, "_uv_sync", lambda target_dir, **kw: (124, "error: failed to fetch index")
     )
     job = app_mod._new_job()
     app_mod._run_launch(job, tmp_path, "my_harness")
@@ -376,7 +376,7 @@ def test_run_launch_provisions_portable_node_for_node_servers(tmp_path, monkeypa
     product's PATH (so npx works) — the one-click flow that bypasses <slug>.bat/.sh."""
     import harnessmith.wizard.app as app_mod
 
-    monkeypatch.setattr(app_mod, "_uv_sync", lambda td: (0, ""))
+    monkeypatch.setattr(app_mod, "_uv_sync", lambda td, **kw: (0, ""))
     monkeypatch.setattr(app_mod, "node_on_path", lambda: False)
     monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: True)  # no real network
     captured = {}
@@ -390,7 +390,7 @@ def test_run_launch_provisions_portable_node_for_node_servers(tmp_path, monkeypa
     monkeypatch.setattr(app_mod, "_wait_port", lambda host, port: True)
     monkeypatch.setattr(
         app_mod, "_launch_product",
-        lambda td, slug, port, *, host="127.0.0.1", extra_path=None: captured.update(extra_path=extra_path),
+        lambda td, slug, port, *, host="127.0.0.1", extra_path=None, index_url=None: captured.update(extra_path=extra_path),
     )
 
     job = app_mod._new_job(needs_node=True)
@@ -409,7 +409,7 @@ def test_run_launch_skips_node_download_when_node_present(tmp_path, monkeypatch)
     product launches with the unmodified PATH."""
     import harnessmith.wizard.app as app_mod
 
-    monkeypatch.setattr(app_mod, "_uv_sync", lambda td: (0, ""))
+    monkeypatch.setattr(app_mod, "_uv_sync", lambda td, **kw: (0, ""))
     monkeypatch.setattr(app_mod, "node_on_path", lambda: True)
     monkeypatch.setattr(
         app_mod, "ensure_portable_node",
@@ -420,7 +420,7 @@ def test_run_launch_skips_node_download_when_node_present(tmp_path, monkeypatch)
     captured = {}
     monkeypatch.setattr(
         app_mod, "_launch_product",
-        lambda td, slug, port, *, host="127.0.0.1", extra_path=None: captured.update(extra_path=extra_path),
+        lambda td, slug, port, *, host="127.0.0.1", extra_path=None, index_url=None: captured.update(extra_path=extra_path),
     )
     job = app_mod._new_job(needs_node=True)
     app_mod._run_launch(job, tmp_path, "demo")
@@ -484,3 +484,184 @@ def test_core_dependencies_exclude_wizard_deps():
     assert "fastapi" not in core and "uvicorn" not in core
     extras = data["project"]["optional-dependencies"]
     assert any("fastapi" in d for d in extras["wizard"])
+
+
+# The real Windows failure tail (os error 5 / 拒绝访问 while uv renames a cache entry).
+_CACHE_ERR_LOG = (
+    "Downloaded openai\n"
+    "  × Failed to download `anthropic==0.109.1`\n"
+    "  ├─▶ Failed to read from the distribution cache\n"
+    "  ╰─▶ failed to rename file from C:\\...\\.tmpoEP1d7 to "
+    "C:\\...\\archive-v0\\qBbrteLoxjqT4Tqj: 拒绝访问。 (os error 5)\n"
+)
+
+
+def test_looks_like_cache_corruption_matches_os_error_5():
+    """The Windows cache-rename failure (os error 5 / 拒绝访问) is recognised, but a
+    plain network/index failure is NOT (must never trigger a cache wipe)."""
+    import harnessmith.wizard.app as app_mod
+
+    assert app_mod._looks_like_cache_corruption(_CACHE_ERR_LOG) is True
+    assert app_mod._looks_like_cache_corruption(
+        "error: Failed to fetch https://pypi.org/simple/: connection timed out"
+    ) is False
+    # access-denied alone, without a cache/rename context, is not our signature
+    assert app_mod._looks_like_cache_corruption("permission denied: access is denied") is False
+
+
+def test_uv_sync_self_heals_corrupt_cache(tmp_path, monkeypatch):
+    """On the cache-corruption signature, ``_uv_sync`` runs ``uv cache clean`` once
+    and retries the sync — the retry succeeding yields exit code 0."""
+    import harnessmith.wizard.app as app_mod
+
+    calls: list[list[str]] = []
+
+    def fake_run_uv(args, *, cwd, log, index_url=None):
+        calls.append(args)
+        if args == ["sync"] and calls.count(["sync"]) == 1:
+            log.write(_CACHE_ERR_LOG)  # first sync fails with the cache error
+            return 1
+        log.write(f"ok: uv {' '.join(args)}\n")
+        return 0  # cache clean + the retried sync both succeed
+
+    monkeypatch.setattr(app_mod, "_run_uv", fake_run_uv)
+    code, _ = app_mod._uv_sync(tmp_path)
+
+    assert code == 0
+    assert calls == [["sync"], ["cache", "clean"], ["sync"]]
+
+
+def test_uv_sync_does_not_clean_cache_on_network_failure(tmp_path, monkeypatch):
+    """A non-cache failure (e.g. unreachable index) must NOT wipe the cache: only
+    the single sync runs and its non-zero code is returned as-is."""
+    import harnessmith.wizard.app as app_mod
+
+    calls: list[list[str]] = []
+
+    def fake_run_uv(args, *, cwd, log, index_url=None):
+        calls.append(args)
+        log.write("error: Failed to fetch https://pypi.org/simple/: timed out\n")
+        return 1
+
+    monkeypatch.setattr(app_mod, "_run_uv", fake_run_uv)
+    code, tail = app_mod._uv_sync(tmp_path)
+
+    assert code == 1
+    assert calls == [["sync"]]  # no `uv cache clean` retry
+    assert "Failed to fetch" in tail
+
+
+def test_resolve_index_precedence(monkeypatch):
+    """Index precedence (drives both the .setup.log line and the env wiring): an
+    explicit per-run choice wins; else an env-pinned index (reported as-is); else the
+    auto probe — the China mirror when PyPI is unreachable, official PyPI otherwise."""
+    import harnessmith.wizard.app as app_mod
+
+    for k in app_mod._INDEX_ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+
+    # explicit beats even a pinned env
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://pinned/simple")
+    assert app_mod._resolve_index("https://my.mirror/simple") == (
+        "https://my.mirror/simple", "explicit",
+    )
+    # no explicit -> the pinned env index, surfaced verbatim
+    assert app_mod._resolve_index() == ("https://pinned/simple", "env-pinned")
+
+    # nothing pinned + PyPI unreachable -> the China mirror (auto)
+    monkeypatch.delenv("UV_DEFAULT_INDEX", raising=False)
+    monkeypatch.setattr(app_mod, "_index_probe_cached", None)
+    monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: False)
+    assert app_mod._resolve_index() == (app_mod._CN_PYPI_MIRROR, "auto-mirror")
+
+    # nothing pinned + PyPI reachable -> uv's built-in official default
+    monkeypatch.setattr(app_mod, "_index_probe_cached", None)
+    monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: True)
+    assert app_mod._resolve_index() == ("official PyPI", "auto-official")
+
+
+def test_product_env_explicit_index_overrides_everything(monkeypatch):
+    """The wizard's optional per-run index (e.g. a fast mirror reachable through a slow
+    corporate proxy) overrides even an env-pinned UV_DEFAULT_INDEX, regardless of probe."""
+    import harnessmith.wizard.app as app_mod
+
+    monkeypatch.setattr(app_mod, "_index_probe_cached", None)
+    monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: True)
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://pinned/simple")
+    env = app_mod._product_env("https://mirrors.aliyun.com/pypi/simple/")
+    assert env["UV_DEFAULT_INDEX"] == "https://mirrors.aliyun.com/pypi/simple/"
+
+
+def test_product_env_blank_index_keeps_auto_behavior(monkeypatch):
+    """A blank/whitespace index (the empty form field) is treated as 'auto' -> exactly
+    today's behavior, so users who never touch the knob see no change."""
+    import harnessmith.wizard.app as app_mod
+
+    monkeypatch.setattr(app_mod, "_index_probe_cached", None)
+    monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: True)
+    for k in app_mod._INDEX_ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    assert "UV_DEFAULT_INDEX" not in app_mod._product_env("   ")
+
+
+def test_uv_sync_logs_the_chosen_index(tmp_path, monkeypatch):
+    """The first .setup.log line records which index the install actually used, so a
+    slow/failed sync is diagnosable after the fact (which source? auto or explicit?)."""
+    import harnessmith.wizard.app as app_mod
+
+    monkeypatch.setattr(app_mod, "_run_uv", lambda args, *, cwd, log, index_url=None: 0)
+    app_mod._uv_sync(tmp_path, index_url="https://mirrors.aliyun.com/pypi/simple/")
+    first = (tmp_path / ".setup.log").read_text(encoding="utf-8").splitlines()[0]
+    assert first == (
+        "[harnessmith] package index: https://mirrors.aliyun.com/pypi/simple/ (explicit)"
+    )
+
+
+def test_generate_threads_index_url_to_launch(client, tmp_path, monkeypatch):
+    """A Web one-click launch passes the form's optional package index through to the
+    launch worker (so a user behind a slow proxy can pin a fast mirror for this run)."""
+    import harnessmith.wizard.app as app_mod
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        app_mod, "_spawn_launch",
+        lambda job, td, slug, *, index_url=None: captured.update(index_url=index_url),
+    )
+    out = tmp_path / "gen"
+    r = client.post(
+        "/generate",
+        json={
+            "spec": _valid_spec(),
+            "target_dir": str(out),
+            "launch": True,
+            "index_url": "https://mirrors.aliyun.com/pypi/simple/",
+        },
+    )
+    assert r.status_code == 200 and "job_id" in r.json()
+    assert captured["index_url"] == "https://mirrors.aliyun.com/pypi/simple/"
+
+
+def test_wizard_ui_exposes_optional_package_index(client):
+    """The one-click form surfaces the optional package-index knob (blank = auto), so a
+    user behind a slow proxy can pick a faster mirror without editing env vars."""
+    html = client.get("/").text
+    assert 'id="index_url"' in html and 'id="index_suggestions"' in html
+    assert "mirrors.aliyun.com/pypi/simple" in html  # a suggested fast-via-proxy mirror
+
+
+def test_root_launchers_set_system_proxy_before_probing_pypi():
+    """The repo-root launchers populate HTTP(S)_PROXY from the system proxy BEFORE the
+    curl PyPI probe, so curl (which ignores the WinINET/macOS GUI proxy on its own)
+    sees the network the same way uv/urllib do. Otherwise the probe could wrongly
+    report PyPI unreachable behind a corporate proxy and pin a mirror the proxy can't
+    even reach (the very regression that motivated this)."""
+    bat = (REPO_ROOT / "HarnessSmith.bat").read_text(encoding="utf-8")
+    sh = (REPO_ROOT / "HarnessSmith.sh").read_text(encoding="utf-8")
+
+    # Windows: read the WinINET registry proxy before the curl probe at :run.
+    assert "Internet Settings" in bat
+    assert bat.index("Internet Settings") < bat.index("pypi.org/simple/")
+
+    # POSIX: macOS GUI proxy via scutil, applied (pick_proxy call) before pick_index.
+    assert "scutil --proxy" in sh
+    assert sh.index("\npick_proxy\n") < sh.index("\n  pick_index\n")

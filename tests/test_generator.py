@@ -894,6 +894,11 @@ def test_launch_scripts_auto_pick_china_mirror(tmp_path, spec):
         assert "unreachable" in text  # the mirror-fallback notice
         assert "pypi.tuna.tsinghua.edu.cn" in text  # the fallback mirror
         assert "UV_DEFAULT_INDEX" in text
+    # Both launchers populate the system proxy so the curl probe goes the same way as
+    # uv (curl ignores the WinINET/macOS GUI proxy on its own); without it the probe
+    # could wrongly report PyPI unreachable behind a corporate proxy and pin a mirror.
+    assert "Internet Settings" in bat  # Windows WinINET registry proxy
+    assert "scutil --proxy" in sh  # macOS GUI proxy
 
 
 def test_launch_node_bootstrap_only_when_a_node_server_is_prefilled(tmp_path):
