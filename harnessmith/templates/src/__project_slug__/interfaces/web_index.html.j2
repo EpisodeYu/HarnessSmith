@@ -125,7 +125,7 @@
       </section>
 
       <section id="view-config" class="hidden flex-1 space-y-4 overflow-y-auto px-6 py-4">
-      <p class="text-sm text-slate-500" data-i18n="cfg_intro">Runtime behavioral config (no secrets). Save applies it live and writes it back to config.yaml.</p>
+      <p class="text-sm text-slate-500" data-i18n="cfg_intro">Runtime configuration. Save applies changes live and writes them back to config.yaml.</p>
       <nav id="cfg-tabs" class="flex flex-wrap gap-1 border-b text-sm"></nav>
 
       <div data-cfg="llm" class="space-y-3">
@@ -142,7 +142,7 @@
       </div>
 
       <div data-cfg="context" class="hidden space-y-3">
-        <p class="text-xs text-gray-500" data-i18n="ctx_hint">Compact the history when a trigger fires, using the chosen strategy.</p>
+        <p class="text-xs text-gray-500" data-i18n="ctx_hint">Compact the history with the chosen strategy when a trigger fires.</p>
         <label class="block text-sm"><span data-i18n="ctx_strategy_label">Strategy</span>
           <select id="cfg-ctx-strategy" class="mt-1 block rounded-lg border px-3 py-2"></select></label>
         <label class="block text-sm"><span data-i18n="ctx_keep_label">keep_last_turns</span>
@@ -157,13 +157,13 @@
             <select id="cfg-ctx-combine" class="mt-1 block rounded-lg border px-3 py-2">
               <option value="or">or</option><option value="and">and</option>
             </select>
-            <span class="block text-xs text-gray-500" data-i18n="ctx_combine_hint">or = any trigger fires; and = all must fire (only matters with 2+ triggers).</span></label>
+            <span class="block text-xs text-gray-500" data-i18n="ctx_combine_hint">or: any trigger fires; and: all triggers must fire.</span></label>
         </div>
-        <p class="text-xs text-gray-500" data-i18n="ctx_extend_hint">Define your own with @register_strategy / @register_condition in harness/context.py — they appear here once imported. See AGENTS.md.</p>
+        <p class="text-xs text-gray-500" data-i18n="ctx_extend_hint">Register @register_strategy / @register_condition in harness/context.py; they appear here once imported. See AGENTS.md.</p>
       </div>
 
       <div data-cfg="budget" class="hidden space-y-3">
-        <p class="text-xs text-gray-500" data-i18n="bud_hint">Cost used per LLM, from the prices you set. Set a limit to stop using an LLM once it's reached; Clear resets a counter.</p>
+        <p class="text-xs text-gray-500" data-i18n="bud_hint">Accrued cost per LLM, computed from the prices you enter. Set a limit to stop an LLM once its cost reaches it; Clear resets a counter. Usage persists across runs.</p>
         <div id="cfg-bud-rows" class="space-y-3"></div>
         <button id="cfg-bud-clearall" type="button" class="rounded-lg border px-3 py-1 text-sm text-red-600" data-i18n="bud_clear_all">Clear all usage</button>
         <p class="text-xs text-gray-500" data-i18n="bud_extend_hint">Counts the main generation + context compaction per LLM. Usage persists across runs in .harness/usage.json; it never holds secrets.</p>
@@ -171,19 +171,19 @@
 
       <div data-cfg="tools" class="hidden space-y-2">
         <div class="flex items-start justify-between gap-2">
-          <p class="text-xs text-slate-500" data-i18n="tools_hint">Allowlist — only enabled tools are offered to the model.</p>
+          <p class="text-xs text-slate-500" data-i18n="tools_hint">Allowlist: only enabled tools are offered to the model.</p>
 {% if spec.mcp.enabled %}          <div class="flex items-center gap-2 whitespace-nowrap">
             <span id="cfg-mcp-status" class="text-xs text-slate-500"></span>
             <button id="cfg-mcp-scan" type="button" class="rounded-lg border px-2 py-1 text-xs" data-i18n="tools_scan">Scan MCP</button>
           </div>
 {% endif %}        </div>
         <div id="cfg-tools" class="space-y-1"></div>
-        <p class="text-xs text-gray-500" data-i18n="tools_extend_hint">Your own tools: register with @registry.tool in harness/tools.py, then list the name under tools: in config.yaml to see it here. MCP tools are discovered from your servers (Scan) — tick one to add it to the allowlist. The checkbox toggles a tool live (no restart). See AGENTS.md.</p>
+        <p class="text-xs text-gray-500" data-i18n="tools_extend_hint">Custom tools: register with @registry.tool in harness/tools.py and list the name under tools: in config.yaml. MCP tools are discovered from your servers (Scan); tick one to add it to the allowlist. Toggling applies live. See AGENTS.md.</p>
       </div>
 {% if spec.mcp.enabled %}
       <div data-cfg="mcp" class="hidden space-y-3">
         <div class="flex items-start justify-between gap-2">
-          <p class="text-xs text-slate-500" data-i18n="mcp_hint">MCP servers this product can connect to; the dot shows live connectivity. Add / edit / remove a server here — it reconnects immediately. Local trusted control — don't expose this panel on a public network.</p>
+          <p class="text-xs text-slate-500" data-i18n="mcp_hint">MCP servers this product can connect to; the dot shows live connectivity. Add, edit, or remove a server here and it reconnects immediately.</p>
           <div class="flex items-center gap-2 whitespace-nowrap">
             <span id="cfg-mcp-msg" class="text-xs text-slate-500"></span>
             <button id="cfg-mcp-reconnect" type="button" class="rounded-lg border px-2 py-1 text-xs" data-i18n="mcp_reconnect_all">Reconnect all</button>
@@ -191,7 +191,7 @@
         </div>
         <div id="cfg-mcp-list" class="space-y-2"></div>
         <button id="cfg-mcp-add" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="mcp_add">+ Add server</button>
-        <p class="text-xs text-gray-500" data-i18n="mcp_extend_hint">Turn a server's tools on/off on the Tools tab (each server has a master checkbox). Secrets stay in .env — a server stores only env-var names, never values.</p>
+        <p class="text-xs text-gray-500" data-i18n="mcp_extend_hint">Toggle a server's tools on the Tools tab; each server has a master switch. A server stores only env-var names, never values; secrets stay in .env.</p>
       </div>
 {% endif %}
       <div data-cfg="prompts" class="hidden space-y-3">
@@ -202,7 +202,7 @@
             <span class="text-sm font-medium" data-i18n="prompts_rules">Rule files (always-on)</span>
             <button id="cfg-rule-add" type="button" class="rounded-lg border px-2 py-1 text-xs" data-i18n="rule_add">+ Add rule file</button>
           </div>
-          <p class="mt-1 text-xs text-gray-500" data-i18n="rules_hint">Plain markdown files you own (the AGENTS.md / CLAUDE.md pattern), injected verbatim into every system prompt. Edit the content here; Save writes the files + the active list.</p>
+          <p class="mt-1 text-xs text-gray-500" data-i18n="rules_hint">Markdown files you own (the AGENTS.md / CLAUDE.md pattern), injected verbatim into every system prompt. Edit the content here; Save writes the files and the active list.</p>
           <div id="cfg-rules" class="mt-2 space-y-2"></div>
         </div>
       </div>
@@ -212,7 +212,7 @@
         <div id="cfg-par-list" class="space-y-1"></div>
         <label class="block text-sm"><span data-i18n="paradigms_default">default</span>
           <select id="cfg-par-default" class="mt-1 block w-48 rounded-lg border px-3 py-2 font-mono"></select></label>
-        <p class="text-xs text-gray-500" data-i18n="par_extend_hint">Add your own with @register_paradigm in harness/paradigms/ — it appears here once imported. See AGENTS.md.</p>
+        <p class="text-xs text-gray-500" data-i18n="par_extend_hint">Register @register_paradigm in harness/paradigms/; it appears here once imported. See AGENTS.md.</p>
       </div>
 
 {% if spec.memory.enabled %}      <div data-cfg="memory" class="hidden space-y-3">
@@ -232,7 +232,7 @@
             <span class="text-sm font-medium" data-i18n="mem_note">Current memory note</span>
             <span id="cfg-mem-size" class="text-xs text-slate-500"></span>
           </div>
-          <p id="cfg-mem-oversized" class="mt-1 hidden text-xs text-amber-600" data-i18n="mem_oversized">The note is larger than the injection cap — older notes aren't recalled. Consolidate to condense it.</p>
+          <p id="cfg-mem-oversized" class="mt-1 hidden text-xs text-amber-600" data-i18n="mem_oversized">The note exceeds the injection cap; older notes aren't recalled. Consolidate to condense it.</p>
           <textarea id="cfg-mem-content" rows="6" class="mt-1 block w-full rounded-lg border px-3 py-2 font-mono text-xs"></textarea>
           <div class="mt-2 flex items-center gap-2">
             <button id="cfg-mem-save" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="mem_save_note">Save note</button>
@@ -241,7 +241,7 @@
             <span id="cfg-mem-status" class="text-xs text-slate-500"></span>
           </div>
         </div>
-        <p class="text-xs text-gray-500" data-i18n="mem_extend_hint">Add your own with @register_memory in harness/memory.py — it appears in the backend list once imported. See AGENTS.md.</p>
+        <p class="text-xs text-gray-500" data-i18n="mem_extend_hint">Register @register_memory in harness/memory.py; it appears in the backend list once imported. See AGENTS.md.</p>
       </div>
 
 {% endif %}      <div data-cfg="observability" class="hidden space-y-3">
@@ -251,7 +251,7 @@
         <label class="flex items-center gap-2 text-sm"><input id="cfg-obs-debug" type="checkbox" /> <span data-i18n="obs_debug">write local debug log</span></label>
         <label class="block text-sm"><span data-i18n="obs_debugdir">debug log dir</span>
           <input id="cfg-obs-debugdir" class="mt-1 block w-48 rounded-lg border px-3 py-2 font-mono" /></label>
-        <p class="text-xs text-slate-500" data-i18n="obs_debug_note">Local only — never uploaded; records step/tool names, counts and durations, never message content or tool arguments.</p>
+        <p class="text-xs text-slate-500" data-i18n="obs_debug_note">Records step and tool names, counts, and durations; never message content or tool arguments.</p>
       </div>
 
       <div data-cfg="system" class="hidden space-y-4">
@@ -272,12 +272,12 @@
         </div>
         <div class="space-y-1 border-t pt-3">
           <h4 class="text-sm font-medium" data-i18n="sys_export_label">Export configuration</h4>
-          <p class="text-xs text-slate-500" data-i18n="sys_export_hint">Download config.yaml — every behavioral setting except secrets (keys stay in .env).</p>
+          <p class="text-xs text-slate-500" data-i18n="sys_export_hint">Download config.yaml with every setting except secrets.</p>
           <button id="sys-export" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="sys_export_btn">Download config.yaml</button>
         </div>
         <div class="space-y-2 border-t pt-3">
           <h4 class="text-sm font-medium" data-i18n="sys_import_label">Import configuration</h4>
-          <p class="text-xs text-slate-500" data-i18n="sys_import_hint">Upload or paste a config.yaml. Importing replaces the current config and writes it back to config.yaml; secrets are never imported (keys stay in .env). Local trusted control — don't expose this panel publicly.</p>
+          <p class="text-xs text-slate-500" data-i18n="sys_import_hint">Upload or paste a config.yaml to replace the current config and write it back; secrets are never imported.</p>
           <input id="sys-import-file" type="file" accept=".yaml,.yml,.json,.txt" class="block text-sm" />
           <textarea id="sys-import-text" rows="8" class="w-full rounded-lg border px-3 py-2 font-mono text-xs" data-i18n-ph="sys_import_paste_ph" placeholder="paste config.yaml here…"></textarea>
           <div class="flex items-center gap-2">
@@ -303,16 +303,16 @@
 
     const I18N = {
       en: {
-        nav_chat: "Chat", nav_config: "Config", chat_placeholder: "Ask something…",
+        nav_chat: "Chat", nav_config: "Config", chat_placeholder: "Type a message…",
         chat_send: "Send", chat_stop: "Stop", chat_mode_title: "Loop paradigm",
-        ctx_meter_title: "Context usage — click for details",
+        ctx_meter_title: "Context usage, click for details",
         ctx_meter_empty: "Context usage (no data yet)",
         ctx_meter_nowin: "set context_window to show %",
-        chat_new: "New chat", chat_sessions_title: "Saved sessions (resume)",
-        chat_session_new_opt: "— new session —",
+        chat_new: "New chat", chat_sessions_title: "Saved sessions",
+        chat_session_new_opt: "New session",
         chat_untitled: "New chat", chat_sessions_empty: "No conversations yet",
-        chat_stopped: "stopped — send again to continue",
-        chat_thinking: "thinking …",
+        chat_stopped: "stopped, send again to continue",
+        chat_thinking: "thinking…",
         reasoning_thinking: "Thinking", reasoning_prefix: "Thought for", reasoning_sec: "s",
         reasoning_label: "Reasoning",
         tool_args_label: "arguments", tool_result_label: "result",
@@ -320,12 +320,12 @@
         reask_edit: "Edit this question", reask_send: "Resend",
         reask_warn: "This discards the conversation after this point.", reask_confirm: "Regenerate",
         ask_submit: "Submit", ask_skip: "Skip", ask_other: "Other…", ask_other_ph: "Type a reply…",
-        no_llm: "No LLM is configured yet — set a model (and its API key) before you can chat.",
+        no_llm: "No LLM is configured. Set a model and its API key first.",
         no_llm_link: "Go to Config → LLM",
-        cfg_intro: "Runtime behavioral config (no secrets). Save applies it live and writes it back to config.yaml.",
+        cfg_intro: "Runtime configuration. Save applies changes live and writes them back to config.yaml.",
         cfg_save: "Save", cfg_reload: "Reload", cfg_saved: "saved", cfg_invalid: "rejected",
         cfg_unsaved: "unsaved",
-        cfg_leave_confirm: "You have unsaved config changes — they won't apply until you Save. Switch to Chat anyway?",
+        cfg_leave_confirm: "You have unsaved config changes; they apply only after you Save. Switch to Chat anyway?",
         cfg_reload_confirm: "Reload discards your unsaved changes. Continue?",
         subtab_llm: "LLM", subtab_context: "Context", subtab_budget: "Budget",
         subtab_tools: "Tools",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
@@ -337,10 +337,10 @@
         sys_stream_hint: "Stream the assistant's reply token by token.",
         sys_stream_on: "Enable", sys_stream_off: "Disable",
         sys_export_label: "Export configuration",
-        sys_export_hint: "Download config.yaml — every behavioral setting except secrets (keys stay in .env).",
+        sys_export_hint: "Download config.yaml with every setting except secrets.",
         sys_export_btn: "Download config.yaml",
         sys_import_label: "Import configuration",
-        sys_import_hint: "Upload or paste a config.yaml. Importing replaces the current config and writes it back to config.yaml; secrets are never imported (keys stay in .env). Local trusted control — don't expose this panel publicly.",
+        sys_import_hint: "Upload or paste a config.yaml to replace the current config and write it back; secrets are never imported.",
         sys_import_paste_ph: "paste config.yaml here…",
         sys_import_btn: "Import",
         sys_import_confirm: "Import replaces your current configuration. Continue?",
@@ -371,14 +371,14 @@
         set_url_ph: "set this URL's value in .env (overwrites if it exists)", set_url_btn: "Save to .env",
         key_saved: "saved to .env", key_need_name: "set the env-var name first",
         ctx_strategy_label: "Strategy", ctx_keep_label: "keep_last_turns", ctx_combine_label: "Trigger combine (or/and)",
-        ctx_combine_hint: "or = any trigger fires; and = all must fire (only matters with 2+ triggers).",
+        ctx_combine_hint: "or: any trigger fires; and: all triggers must fire.",
         ctx_toolcap_label: "max_tool_result_chars",
         ctx_toolcap_hint: "Cap one tool result before it enters history (0 = off). window_pct compacts at a fraction (0–1) of a profile's context_window.",
         ctx_triggers_label: "Triggers (condition → threshold; blank = off)",
-        ctx_extend_hint: "Add your own: @register_strategy / @register_condition in harness/context.py — they appear here once imported (see AGENTS.md).",
-        cfg_unregistered: "not registered in code — import its module?",
-        ctx_hint: "Compact the history when a trigger fires (combine: or = any, and = all), using the chosen strategy.",
-        bud_hint: "Cost used per LLM, computed from the prices you fill in. Set a limit to stop using an LLM once its cost reaches it; Clear resets a counter (usage persists across runs).",
+        ctx_extend_hint: "Register @register_strategy / @register_condition in harness/context.py; they appear here once imported. See AGENTS.md.",
+        cfg_unregistered: "not registered in code; import its module.",
+        ctx_hint: "Compact the history with the chosen strategy when a trigger fires.",
+        bud_hint: "Accrued cost per LLM, computed from the prices you enter. Set a limit to stop an LLM once its cost reaches it; Clear resets a counter. Usage persists across runs.",
         bud_clear: "Clear", bud_clear_all: "Clear all usage",
         bud_clear_all_confirm: "Reset accrued cost / usage for ALL LLMs?",
         bud_limit: "limit", bud_no_limit: "no limit",
@@ -386,12 +386,12 @@
         bud_cost: "cost", bud_over: "limit reached",
         bud_none: "Configure an LLM on the LLM tab first.",
         bud_extend_hint: "Counts the main generation + context compaction per LLM. Stored in .harness/usage.json; never holds secrets.",
-        tools_hint: "Allowlist — only enabled tools are offered to the model.",
-        tools_group_custom: "Your tools", tools_group_builtin: "Built-in tools", tools_group_mcp: "MCP",
+        tools_hint: "Allowlist: only enabled tools are offered to the model.",
+        tools_group_custom: "Custom tools", tools_group_builtin: "Built-in tools", tools_group_mcp: "MCP",
         tools_scan: "Scan MCP", tools_scanning: "scanning servers…", tools_scanned: "discovered", tools_none: "no tools",
-        tools_extend_hint: "Your own tools: register with @registry.tool in harness/tools.py, then list the name under tools: in config.yaml to see it here. MCP tools are discovered from your servers (Scan) — tick one to add it to the allowlist. The checkbox toggles a tool live (no restart). See AGENTS.md.",
+        tools_extend_hint: "Custom tools: register with @registry.tool in harness/tools.py and list the name under tools: in config.yaml. MCP tools are discovered from your servers (Scan); tick one to add it to the allowlist. Toggling applies live. See AGENTS.md.",
         tools_group_mcp_all: "all tools",
-{% if spec.mcp.enabled %}        mcp_hint: "MCP servers this product can connect to; the dot shows live connectivity. Add / edit / remove a server here — it reconnects immediately. Local trusted control — don't expose this panel on a public network.",
+{% if spec.mcp.enabled %}        mcp_hint: "MCP servers this product can connect to; the dot shows live connectivity. Add, edit, or remove a server here and it reconnects immediately.",
         mcp_reconnect: "Reconnect", mcp_add: "+ Add server", mcp_remove: "Remove", mcp_save: "Save",
         mcp_name: "name", mcp_transport: "transport", mcp_transport_auto: "auto",
         mcp_command: "command", mcp_args: "args (space-separated)", mcp_env: "env var names (comma-separated)",
@@ -400,40 +400,40 @@
         mcp_loading: "loading…", mcp_reconnecting: "reconnecting…", mcp_saved: "saved",
         mcp_reconnect_all: "Reconnect all", mcp_connecting: "connecting…",
         mcp_connected: "connected", mcp_unreachable: "unreachable", mcp_tools_word: "tools",
-        mcp_extend_hint: "Turn a server's tools on/off on the Tools tab (each server has a master checkbox). Secrets stay in .env — a server stores only env-var names, never values.",
+        mcp_extend_hint: "Toggle a server's tools on the Tools tab; each server has a master switch. A server stores only env-var names, never values; secrets stay in .env.",
 {% endif %}        prompts_system: "system", prompts_rules: "Rule files (always-on)",
         rule_add: "+ Add rule file", rule_path_ph: "path, e.g. RULES.md",
-        rule_auto: "auto", rule_auto_hint: "Auto-recognized at the project root (CLAUDE.md) — injected even without listing it. Edit the content here; Save writes the file.",
-        rules_hint: "Plain markdown files you own (the AGENTS.md / CLAUDE.md pattern), injected verbatim into every system prompt. Edit the content here; Save writes the files + the active list.",
+        rule_auto: "auto", rule_auto_hint: "Auto-recognized at the project root (e.g. CLAUDE.md) and injected without being listed. Edit the content here; Save writes the file.",
+        rules_hint: "Markdown files you own (the AGENTS.md / CLAUDE.md pattern), injected verbatim into every system prompt. Edit the content here; Save writes the files and the active list.",
         paradigms_enabled: "Enabled paradigms", paradigms_default: "default",
-        par_extend_hint: "Add your own: @register_paradigm in harness/paradigms/ — it appears here once imported (see AGENTS.md).",
+        par_extend_hint: "Register @register_paradigm in harness/paradigms/; it appears here once imported. See AGENTS.md.",
 {% if spec.memory.enabled %}        mem_hint: "A small note the agent keeps across sessions, injected into every system prompt. The agent curates it with the memory tools; you can edit it here too.",
         mem_readonly: "read-only (the agent can read memory but not write it)",
         mem_backend: "backend", mem_capacity: "capacity (inject_max_chars)",
         mem_auto: "auto-consolidate at session end when oversized (uses the memory-role model)",
         mem_policy: "memory policy (what/when to remember)",
         mem_policy_ph: "e.g. Remember durable user preferences, decisions, and project facts; don't store transient chit-chat.",
-        mem_note: "Current memory note", mem_oversized: "The note is larger than the injection cap — older notes aren't recalled. Consolidate to condense it.",
+        mem_note: "Current memory note", mem_oversized: "The note exceeds the injection cap; older notes aren't recalled. Consolidate to condense it.",
         mem_save_note: "Save note", mem_consolidate: "Consolidate", mem_clear: "Clear",
         mem_saved: "saved", mem_cleared: "cleared", mem_consolidating: "consolidating…",
         mem_consolidated: "consolidated", mem_consolidate_noop: "nothing to consolidate",
         mem_chars: "chars",
-        mem_extend_hint: "Add your own with @register_memory in harness/memory.py — it appears in the backend list once imported. See AGENTS.md.",
+        mem_extend_hint: "Register @register_memory in harness/memory.py; it appears in the backend list once imported. See AGENTS.md.",
 {% endif %}        obs_trace: "write JSONL trace", obs_tracedir: "trace_dir",
         obs_debug: "write local debug log", obs_debugdir: "debug log dir",
-        obs_debug_note: "Local only — never uploaded; records step/tool names, counts and durations, never message content or tool arguments.",
+        obs_debug_note: "Records step and tool names, counts, and durations; never message content or tool arguments.",
       },
       zh: {
-        nav_chat: "对话", nav_config: "配置", chat_placeholder: "问点什么…",
+        nav_chat: "对话", nav_config: "配置", chat_placeholder: "输入消息…",
         chat_send: "发送", chat_stop: "停止", chat_mode_title: "循环范式",
-        ctx_meter_title: "上下文占用 —— 点击查看详情",
+        ctx_meter_title: "上下文占用,点击查看详情",
         ctx_meter_empty: "上下文占用(暂无数据)",
         ctx_meter_nowin: "设置 context_window 后显示占比",
-        chat_new: "新会话", chat_sessions_title: "已保存会话(续聊)",
-        chat_session_new_opt: "— 新会话 —",
+        chat_new: "新会话", chat_sessions_title: "已保存会话",
+        chat_session_new_opt: "新建会话",
         chat_untitled: "新会话", chat_sessions_empty: "还没有会话",
-        chat_stopped: "已停止 —— 再次发送即可继续",
-        chat_thinking: "思考中 …",
+        chat_stopped: "已停止,再次发送以继续",
+        chat_thinking: "思考中…",
         reasoning_thinking: "思考中", reasoning_prefix: "已思考", reasoning_sec: " 秒",
         reasoning_label: "思考过程",
         tool_args_label: "参数", tool_result_label: "结果",
@@ -441,12 +441,12 @@
         reask_edit: "编辑此问题", reask_send: "重新发送",
         reask_warn: "这会丢弃此处之后的对话。", reask_confirm: "重新生成",
         ask_submit: "提交", ask_skip: "跳过", ask_other: "其他…", ask_other_ph: "输入回答…",
-        no_llm: "尚未配置 LLM —— 请先设置一个 model(及其 API key)才能对话。",
+        no_llm: "尚未配置 LLM,请先设置 model 及其 API key。",
         no_llm_link: "前往 配置 → LLM",
-        cfg_intro: "运行期行为性配置(无密钥)。保存即时生效并写回 config.yaml。",
+        cfg_intro: "运行期配置,保存后即时生效并写回 config.yaml。",
         cfg_save: "保存", cfg_reload: "重载", cfg_saved: "已保存", cfg_invalid: "被拒绝",
         cfg_unsaved: "未保存",
-        cfg_leave_confirm: "有未保存的配置修改 —— 不点保存不会生效。仍要切换到对话?",
+        cfg_leave_confirm: "有未保存的配置修改,保存后才会生效。仍要切换到对话?",
         cfg_reload_confirm: "重载会丢弃未保存的修改,确定继续?",
         subtab_llm: "LLM", subtab_context: "上下文", subtab_budget: "预算",
         subtab_tools: "工具",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_prompts: "提示词", subtab_paradigms: "范式",
@@ -458,10 +458,10 @@
         sys_stream_hint: "逐 token 流式显示助手回复。",
         sys_stream_on: "启用", sys_stream_off: "禁用",
         sys_export_label: "导出配置",
-        sys_export_hint: "下载 config.yaml —— 除密钥外的全部行为性配置(密钥仍在 .env)。",
+        sys_export_hint: "下载 config.yaml,包含除密钥外的全部配置。",
         sys_export_btn: "下载 config.yaml",
         sys_import_label: "导入配置",
-        sys_import_hint: "上传或粘贴 config.yaml。导入会替换当前配置并写回 config.yaml;密钥永不导入(仍放 .env)。本地可信控制面 —— 切勿对公网暴露此面板。",
+        sys_import_hint: "上传或粘贴 config.yaml 以替换当前配置并写回,密钥不会被导入。",
         sys_import_paste_ph: "在此粘贴 config.yaml…",
         sys_import_btn: "导入",
         sys_import_confirm: "导入会替换当前配置,确定继续?",
@@ -492,14 +492,14 @@
         set_url_ph: "在 .env 设置该 url 的值(如已存在则覆盖)", set_url_btn: "写入 .env",
         key_saved: "已写入 .env", key_need_name: "请先填环境变量名",
         ctx_strategy_label: "策略", ctx_keep_label: "完整保留最近轮数", ctx_combine_label: "触发组合方式 (or/and)",
-        ctx_combine_hint: "or = 任一触发条件命中即压缩;and = 全部命中才压缩(仅在 2 个及以上触发条件时才有区别)。",
+        ctx_combine_hint: "or:任一触发条件命中即压缩;and:全部命中才压缩。",
         ctx_toolcap_label: "单工具结果上限(字符)",
         ctx_toolcap_hint: "单条工具结果进入历史前的字符上限(0=不限)。window_pct 按 profile 的 context_window 的比例(0–1)触发压缩。",
         ctx_triggers_label: "触发条件(条件 → 阈值;留空=不启用)",
-        ctx_extend_hint: "可自定义:在 harness/context.py 用 @register_strategy / @register_condition 注册,import 后即在此出现(见 AGENTS.md)。",
-        cfg_unregistered: "代码中未注册 —— 是否忘了 import 其模块?",
-        ctx_hint: "命中触发条件时按所选策略压缩历史(组合方式:or=任一命中,and=全部命中)。",
-        bud_hint: "按 LLM 列出已用 cost(由你填写的单价算出)。设置限额后,该 LLM 用量达到即停止使用;清空可重置某个计数(用量跨多次运行累计)。",
+        ctx_extend_hint: "在 harness/context.py 用 @register_strategy / @register_condition 注册自定义项,import 后在此出现。详见 AGENTS.md。",
+        cfg_unregistered: "代码中未注册,请确认已 import 其模块。",
+        ctx_hint: "命中触发条件时按所选策略压缩历史。",
+        bud_hint: "按 LLM 列出累计 cost,依据填写的单价计算。设置限额后用量达到即停止使用该 LLM,清空可重置计数。用量跨多次运行累计。",
         bud_clear: "清空", bud_clear_all: "清空全部用量",
         bud_clear_all_confirm: "重置所有 LLM 的累计 cost / 用量?",
         bud_limit: "限额", bud_no_limit: "不限",
@@ -507,12 +507,12 @@
         bud_cost: "费用", bud_over: "已达限额",
         bud_none: "请先在 LLM 标签页配置一个 LLM。",
         bud_extend_hint: "按 LLM 统计主 generation + 上下文压缩。用量持久化在 .harness/usage.json,绝不含密钥。",
-        tools_hint: "allowlist —— 只有开启的工具会提供给模型。",
-        tools_group_custom: "你的工具", tools_group_builtin: "内置工具", tools_group_mcp: "MCP",
+        tools_hint: "allowlist:只有开启的工具会提供给模型。",
+        tools_group_custom: "自定义工具", tools_group_builtin: "内置工具", tools_group_mcp: "MCP",
         tools_scan: "扫描 MCP", tools_scanning: "正在连接服务器…", tools_scanned: "已发现", tools_none: "无工具",
-        tools_extend_hint: "你自己的工具:在 harness/tools.py 用 @registry.tool 注册,再把名字加进 config.yaml 的 tools: 才会出现在这里。MCP 工具会从你配置的服务器自动发现(扫描)—— 勾上即加入 allowlist。勾选框可实时开关某个工具(免重启)。见 AGENTS.md。",
+        tools_extend_hint: "自定义工具:在 harness/tools.py 用 @registry.tool 注册,并在 config.yaml 的 tools 中列出名称。MCP 工具经扫描从服务器发现,勾选即加入 allowlist 并实时生效。详见 AGENTS.md。",
         tools_group_mcp_all: "全部工具",
-{% if spec.mcp.enabled %}        mcp_hint: "本产物可连接的 MCP 服务器;圆点显示实时连通性。在此添加 / 编辑 / 删除服务器 —— 立即热重连。本地可信控制面 —— 切勿对公网暴露此面板。",
+{% if spec.mcp.enabled %}        mcp_hint: "本产物可连接的 MCP 服务器,圆点显示实时连通性。在此添加、编辑或删除服务器,保存后立即重连。",
         mcp_reconnect: "重新连接", mcp_add: "+ 添加服务器", mcp_remove: "删除", mcp_save: "保存",
         mcp_name: "名称", mcp_transport: "传输", mcp_transport_auto: "自动",
         mcp_command: "command", mcp_args: "args(空格分隔)", mcp_env: "env 变量名(逗号分隔)",
@@ -521,28 +521,28 @@
         mcp_loading: "加载中…", mcp_reconnecting: "重连中…", mcp_saved: "已保存",
         mcp_reconnect_all: "全部重连", mcp_connecting: "连接中…",
         mcp_connected: "已连接", mcp_unreachable: "不可达", mcp_tools_word: "工具",
-        mcp_extend_hint: "在工具标签里开关某服务器的工具(每个服务器有一个总复选框)。密钥仍放 .env —— 服务器只存环境变量名,不存真值。",
+        mcp_extend_hint: "在工具标签页开关各服务器的工具,每个服务器有一个总开关。服务器只存环境变量名,密钥仍放 .env。",
 {% endif %}        prompts_system: "系统提示", prompts_rules: "规则文件(常驻)",
         rule_add: "+ 添加规则文件", rule_path_ph: "路径,如 RULES.md",
-        rule_auto: "自动", rule_auto_hint: "在项目根目录自动识别(CLAUDE.md)—— 无需列出也会注入。可在此编辑正文;保存即写入该文件。",
-        rules_hint: "你拥有的纯 markdown 文件(AGENTS.md / CLAUDE.md 模式),每轮原文注入系统提示。在此编辑正文;保存会写入文件 + 生效列表。",
+        rule_auto: "自动", rule_auto_hint: "在项目根目录自动识别(如 CLAUDE.md),无需列出即会注入。可在此编辑正文,保存即写入文件。",
+        rules_hint: "你拥有的 markdown 文件(AGENTS.md / CLAUDE.md 模式),每轮原文注入系统提示。在此编辑正文,保存会写入文件及生效列表。",
         paradigms_enabled: "启用的范式", paradigms_default: "默认范式",
-        par_extend_hint: "可自定义:在 harness/paradigms/ 用 @register_paradigm 注册,import 后即在此出现(见 AGENTS.md)。",
+        par_extend_hint: "在 harness/paradigms/ 用 @register_paradigm 注册自定义范式,import 后在此出现。详见 AGENTS.md。",
 {% if spec.memory.enabled %}        mem_hint: "一份 agent 跨会话维护的简短笔记,每轮注入系统提示。agent 用记忆工具自行维护,你也可在此编辑。",
         mem_readonly: "只读(agent 只能读记忆,不能写)",
         mem_backend: "后端", mem_capacity: "容量(注入上限 inject_max_chars)",
         mem_auto: "会话结束时若超出容量自动整理(用 memory 角色模型)",
         mem_policy: "记忆策略(记什么 / 何时写)",
         mem_policy_ph: "例如:记住稳定的用户偏好、决策、项目事实;不要记临时闲聊。",
-        mem_note: "当前记忆笔记", mem_oversized: "笔记已超过注入上限——较早的笔记不会再被召回。整理可精简它。",
+        mem_note: "当前记忆笔记", mem_oversized: "笔记已超过注入上限,较早的内容不会再被召回。整理可精简笔记。",
         mem_save_note: "保存笔记", mem_consolidate: "整理", mem_clear: "清空",
         mem_saved: "已保存", mem_cleared: "已清空", mem_consolidating: "整理中…",
         mem_consolidated: "已整理", mem_consolidate_noop: "无需整理",
         mem_chars: "字符",
-        mem_extend_hint: "可自定义:在 harness/memory.py 用 @register_memory 注册后端,import 后即出现在后端列表(见 AGENTS.md)。",
+        mem_extend_hint: "在 harness/memory.py 用 @register_memory 注册自定义后端,import 后出现在后端列表。详见 AGENTS.md。",
 {% endif %}        obs_trace: "写 JSONL trace", obs_tracedir: "trace 目录",
         obs_debug: "写本地 debug 日志", obs_debugdir: "debug 日志目录",
-        obs_debug_note: "仅存本机、绝不上传;只记录步骤/工具名、计数与耗时,不记录消息内容与工具参数。",
+        obs_debug_note: "只记录步骤与工具名、计数和耗时,不记录消息内容与工具参数。",
       },
     };
     let lang = localStorage.getItem("hf_lang") || "{{ language }}";
@@ -2324,7 +2324,7 @@
       const data = await resp.json();
       if (resp.ok) {
         cfg = data; await loadRules();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); markSaved();
-        $("cfg-status").textContent = ruleErr ? (t("cfg_saved") + " — " + ruleErr) : t("cfg_saved");
+        $("cfg-status").textContent = ruleErr ? (t("cfg_saved") + ": " + ruleErr) : t("cfg_saved");
       } else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });
 {% if spec.memory.enabled %}

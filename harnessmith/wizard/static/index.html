@@ -23,7 +23,7 @@
     <section class="space-y-4">
       <h2 class="font-semibold" data-i18n="basic_heading">基本</h2>
       <div>
-        <label class="block text-sm font-medium" data-i18n="display_name_label">显示名</label>
+        <label class="block text-sm font-medium" data-i18n="display_name_label">显示名称</label>
         <input id="display_name" class="mt-1 w-full rounded-lg border px-3 py-2" placeholder="My Coding Assistant" />
       </div>
       <div>
@@ -33,7 +33,7 @@
       <div>
         <label class="block text-sm font-medium" data-i18n="paradigms_label">范式 (多选)</label>
         <div id="paradigms-list" class="mt-1 space-y-1"></div>
-        <p class="mt-1 text-xs text-slate-500" data-i18n="paradigms_hint">至少选一个;第一个选中的作为运行期默认范式。</p>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="paradigms_hint">至少选择一个,第一个为运行期默认范式。</p>
       </div>
     </section>
 
@@ -43,16 +43,16 @@
       <div>
         <label class="flex items-center gap-2 text-sm font-medium">
           <input id="iface_web" type="checkbox" checked />
-          <span data-i18n="iface_web_label">生成 Web 接口(SSE chat + 分页配置面板)</span>
+          <span data-i18n="iface_web_label">生成 Web 接口</span>
         </label>
-        <p class="mt-1 text-xs text-slate-500" data-i18n="iface_web_hint">关时产物不含 fastapi/uvicorn,零 Web 痕迹(只有 CLI)。</p>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="iface_web_hint">包含 SSE 对话与分页配置面板,关闭则不含 fastapi/uvicorn,仅保留 CLI。</p>
       </div>
       <div>
         <label class="flex items-center gap-2 text-sm font-medium">
           <input id="mcp_enabled" type="checkbox" checked />
-          <span data-i18n="mcp_enable_label">启用 MCP 工具能力</span>
+          <span data-i18n="mcp_enable_label">启用 MCP 工具</span>
         </label>
-        <p class="mt-1 text-xs text-slate-500" data-i18n="mcp_hint">关时产物零 MCP 痕迹。开后可从 catalog 预选 server(落运行期 config.yaml)。</p>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="mcp_hint">关闭则不含 MCP,启用后可从 catalog 预选 server 写入 config.yaml。</p>
         <div id="catalog-wrap" class="mt-2">
           <label class="block text-sm font-medium" data-i18n="catalog_label">预选 MCP server</label>
           <div id="catalog-list" class="mt-1 space-y-1"></div>
@@ -63,14 +63,14 @@
           <input id="skills_enabled" type="checkbox" checked />
           <span data-i18n="skills_enable_label">启用标准 Agent Skills</span>
         </label>
-        <p class="mt-1 text-xs text-slate-500" data-i18n="skills_hint">关时产物零 skills 痕迹。开后生成 skills.py + read_skill + 示例 skill。</p>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="skills_hint">关闭则不含 skills,启用后支持 Agent Skills 标准。</p>
       </div>
       <div>
         <label class="flex items-center gap-2 text-sm font-medium">
           <input id="memory_enabled" type="checkbox" checked />
           <span data-i18n="memory_enable_label">启用跨会话长期记忆</span>
         </label>
-        <p class="mt-1 text-xs text-slate-500" data-i18n="memory_hint">关时产物零记忆痕迹。开后生成 memory.py + 记忆工具 + 自维护文件笔记(可 @register_memory 换后端)。</p>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="memory_hint">关闭则不含记忆,启用后提供跨会话文件笔记,可通过 @register_memory 更换后端。</p>
       </div>
     </section>
 
@@ -108,7 +108,7 @@
       <div class="space-y-3 rounded-lg border p-4">
         <h3 class="font-medium" data-i18n="cli_heading">CLI 生成</h3>
         <div class="flex flex-wrap items-center gap-3">
-          <button id="produce" type="button" class="rounded-lg bg-slate-800 px-4 py-2 text-sm text-white" data-i18n="produce_btn">校验并产出 spec</button>
+          <button id="produce" type="button" class="rounded-lg bg-slate-800 px-4 py-2 text-sm text-white" data-i18n="produce_btn">校验并生成 spec</button>
           <a id="download" class="hidden rounded-lg border px-4 py-2 text-sm" data-i18n="download_btn" download="spec.yaml">下载 spec.yaml</a>
           <span id="produce-status" class="text-sm text-slate-500"></span>
         </div>
@@ -129,33 +129,33 @@
     const I18N = {
       zh: {
         app_title: "HarnessSmith 向导",
-        basic_heading: "基本", display_name_label: "显示名",
+        basic_heading: "基本", display_name_label: "显示名称",
         slug_label: "包名 (project_slug)",
-        paradigms_label: "范式 (多选)", paradigms_hint: "至少选一个;第一个选中的作为运行期默认范式。",
+        paradigms_label: "范式 (多选)", paradigms_hint: "至少选择一个,第一个为运行期默认范式。",
         caps_heading: "能力(结构开关)",
-        iface_web_label: "生成 Web 接口(SSE chat + 分页配置面板)",
-        iface_web_hint: "关时产物不含 fastapi/uvicorn,零 Web 痕迹(只有 CLI)。",
-        mcp_enable_label: "启用 MCP 工具能力",
-        mcp_hint: "关时产物零 MCP 痕迹。开后可从 catalog 预选 server(落运行期 config.yaml)。",
+        iface_web_label: "生成 Web 接口",
+        iface_web_hint: "包含 SSE 对话与分页配置面板,关闭则不含 fastapi/uvicorn,仅保留 CLI。",
+        mcp_enable_label: "启用 MCP 工具",
+        mcp_hint: "关闭则不含 MCP,启用后可从 catalog 预选 server 写入 config.yaml。",
         catalog_label: "预选 MCP server", skills_enable_label: "启用标准 Agent Skills",
-        skills_hint: "关时产物零 skills 痕迹。开后生成 skills.py + read_skill + 示例 skill。",
+        skills_hint: "关闭则不含 skills,启用后支持 Agent Skills 标准。",
         memory_enable_label: "启用跨会话长期记忆",
-        memory_hint: "关时产物零记忆痕迹。开后生成 memory.py + 记忆工具 + 自维护文件笔记(可 @register_memory 换后端)。",
+        memory_hint: "关闭则不含记忆,启用后提供跨会话文件笔记,可通过 @register_memory 更换后端。",
         generate_heading: "生成产物",
         oneclick_heading: "一键生成",
         target_label: "目标目录",
         git_label: "git init", oneclick_btn: "一键生成",
         or_divider: "或",
-        cli_heading: "CLI 生成", produce_btn: "校验并产出 spec", download_btn: "下载 spec.yaml",
+        cli_heading: "CLI 生成", produce_btn: "校验并生成 spec", download_btn: "下载 spec.yaml",
         newcmd_label: "下载 spec.yaml 后,在其所在目录运行:",
         ok_produced: "spec 已校验通过。", ok_generated: "已生成", err_fix: "请修正以下字段:",
-        open_product: "跳转到", generating: "正在生成…",
-        ready: "产物已就绪,点「跳转」打开。", failed: "失败",
+        open_product: "打开", generating: "正在生成…",
+        ready: "产物已就绪,点「打开」查看。", failed: "失败",
         step_render: "生成代码", step_sync: "安装依赖 (uv sync)", step_node: "准备 Node", step_serve: "启动产物 Web",
-        sync_hint: "首次安装依赖会下载若干包,慢网络下可能要几分钟,请耐心等待。",
-        node_hint: "该产物用到 Node 系 MCP(如 desktop-commander),正在下载便携 Node(约 30MB,一次性),慢网可能要一会。",
-        serve_hint: "正在启动产物 Web 并等待端口就绪(MCP server 在后台连接,首次会自动选源/代理拉包,产物页可看进度)。",
-        forward_note: "远程访问产物?先在你的机器转发该端口:",
+        sync_hint: "首次安装会下载若干依赖包,慢网络下可能需要几分钟。",
+        node_hint: "该产物使用 Node 系 MCP(如 desktop-commander),正在下载便携 Node(约 30MB,仅一次)。",
+        serve_hint: "正在启动产物 Web 并等待端口就绪,MCP server 在后台连接,可在产物页查看进度。",
+        forward_note: "远程访问产物需先在本地转发端口:",
       },
       en: {
         app_title: "HarnessSmith wizard",
@@ -163,29 +163,29 @@
         slug_label: "Package name (project_slug)",
         paradigms_label: "Paradigms (multi-select)", paradigms_hint: "Pick at least one; the first selected is the runtime default.",
         caps_heading: "Capabilities (structural switches)",
-        iface_web_label: "Generate the Web interface (SSE chat + paged config panel)",
-        iface_web_hint: "Off = no fastapi/uvicorn, zero Web footprint (CLI only).",
-        mcp_enable_label: "Enable MCP tool capability",
-        mcp_hint: "Off = zero MCP footprint. On = preselect servers from the catalog (written to runtime config.yaml).",
+        iface_web_label: "Generate the Web interface",
+        iface_web_hint: "Includes SSE chat and a paged config panel; off omits fastapi/uvicorn and keeps only the CLI.",
+        mcp_enable_label: "Enable MCP tools",
+        mcp_hint: "Off omits MCP; on lets you preselect servers from the catalog, written to config.yaml.",
         catalog_label: "Preselect MCP servers", skills_enable_label: "Enable standard Agent Skills",
-        skills_hint: "Off = zero skills footprint. On = generate skills.py + read_skill + a sample skill.",
+        skills_hint: "Off omits skills; on enables the Agent Skills standard.",
         memory_enable_label: "Enable cross-session long-term memory",
-        memory_hint: "Off = zero memory footprint. On = memory.py + memory tools + a self-maintained file note (swap backends via @register_memory).",
+        memory_hint: "Off omits memory; on provides a cross-session file note, with backends swappable via @register_memory.",
         generate_heading: "Generate the product",
         oneclick_heading: "One-click generate",
         target_label: "Target directory",
         git_label: "git init", oneclick_btn: "Generate",
         or_divider: "or",
-        cli_heading: "CLI generate", produce_btn: "Validate & produce spec", download_btn: "Download spec.yaml",
+        cli_heading: "CLI generate", produce_btn: "Validate & generate spec", download_btn: "Download spec.yaml",
         newcmd_label: "After downloading spec.yaml, run from its directory:",
         ok_produced: "Spec validated.", ok_generated: "Generated at", err_fix: "Please fix these fields:",
         open_product: "Open", generating: "Generating…",
-        ready: "Product is ready — click Open.", failed: "Failed",
+        ready: "Product is ready, click Open.", failed: "Failed",
         step_render: "Generate code", step_sync: "Install deps (uv sync)", step_node: "Prepare Node", step_serve: "Start product web",
         sync_hint: "First install downloads several packages; on a slow network this can take a few minutes.",
-        node_hint: "This product uses a Node-based MCP server (e.g. desktop-commander); downloading a portable Node (~30MB, one-time) — may take a moment on a slow network.",
-        serve_hint: "Starting the product web and waiting for its port (MCP servers connect in the background; the first run auto-picks a registry/proxy and fetches the package — watch progress on the product's MCP page).",
-        forward_note: "Reaching the product remotely? Forward its port from your machine first:",
+        node_hint: "This product uses a Node-based MCP server (e.g. desktop-commander); downloading a portable Node (~30MB, one-time).",
+        serve_hint: "Starting the product web and waiting for its port. MCP servers connect in the background; watch progress on the product's MCP page.",
+        forward_note: "To reach the product remotely, forward its port from your machine first:",
       },
     };
 
@@ -235,14 +235,14 @@
       meta.paradigms.forEach((p) => {
         pl.insertAdjacentHTML("beforeend",
           "<label class='flex items-start gap-2 text-sm'><input type='checkbox' class='par mt-1' value='" + p.name + "' checked/>" +
-          "<span><span class='font-mono'>" + p.name + "</span> — <span class='text-slate-500'>" + p.description + "</span></span></label>");
+          "<span><span class='font-mono'>" + p.name + "</span><span class='text-slate-500'>: " + p.description + "</span></span></label>");
       });
       const cl = $("catalog-list");
       meta.catalog.forEach((s) => {
         const req = s.requires ? " (needs " + s.requires + ")" : "";
         cl.insertAdjacentHTML("beforeend",
           "<label class='flex items-start gap-2 text-sm'><input type='checkbox' class='cserver mt-1' value='" + s.name + "' " + (s.default_checked ? "checked" : "") + "/>" +
-          "<span><span class='font-mono'>" + s.name + "</span>" + req + " — <span class='text-slate-500'>" + s.description + "</span></span></label>");
+          "<span><span class='font-mono'>" + s.name + "</span>" + req + "<span class='text-slate-500'>: " + s.description + "</span></span></label>");
       });
     }
 
