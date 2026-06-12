@@ -440,9 +440,19 @@ class McpManager:
                         return  # shutdown or reconnect: tear the session down in this task
                     tool, arguments, fut = req
                     try:
-                        fut.set_result(
-                            _result_text(await self._sessions[name].call_tool(tool, arguments))
-                        )
+                        # Bound each call: a hung server fails this ONE call with a
+                        # timeout ERROR the model can react to, instead of wedging
+                        # the turn (and Stop) forever.
+                        async with asyncio.timeout(self._config.call_timeout_seconds):
+                            fut.set_result(
+                                _result_text(await self._sessions[name].call_tool(tool, arguments))
+                            )
+                    except TimeoutError:
+                        fut.set_exception(TimeoutError(
+                            f"MCP tool {name}__{tool} timed out after "
+                            f"{self._config.call_timeout_seconds:.0f}s "
+                            "(mcp.call_timeout_seconds in config.yaml)"
+                        ))
                     except Exception as exc:
                         fut.set_exception(exc)
         except Exception as exc:  # connect failure/timeout: isolate, never fatal
@@ -574,7 +584,18 @@ class McpManager:
     def call(self, server: str, tool: str, arguments: dict) -> str:
         fut: concurrent.futures.Future = concurrent.futures.Future()
         self._loop.call_soon_threadsafe(self._inbox.put_nowait, (server, tool, arguments, fut))
-        return fut.result()
+        # The server task bounds the call (call_timeout_seconds); the grace here
+        # only covers a wedged event loop, so call() can never hang its caller.
+        try:
+            return fut.result(timeout=self._config.call_timeout_seconds + 10)
+        except TimeoutError:
+            # concurrent.futures.TimeoutError IS builtin TimeoutError (3.11+), so a
+            # done future means the server task's own timeout — keep its message.
+            if fut.done():
+                raise
+            raise TimeoutError(
+                f"MCP tool {server}__{tool} timed out (manager unresponsive)"
+            ) from None
 
     def close(self) -> None:
         if self._loop.is_closed() or self._inbox is None:

@@ -580,6 +580,7 @@ mcp:
       transport: sse          # legacy HTTP+SSE; omit (or `http`) for Streamable HTTP
       auth_env: EXAMPLE_TOKEN  # env-var NAME holding the bearer token
   connect_timeout_seconds: 120  # generous; first uvx/npx cold starts can be slow on Windows / behind the GFW
+  call_timeout_seconds: 120     # per tool CALL: a hung server fails this one call instead of wedging the turn
   # proxy / npm_registry / pip_index: optional overrides (see "Network" below)
 tools:
   - name: git__*                 # wildcard: enable EVERY tool of this server

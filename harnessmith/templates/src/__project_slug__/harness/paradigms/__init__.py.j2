@@ -16,6 +16,8 @@ each other — they import only this contract and the stable infra modules
 
 from __future__ import annotations
 
+import contextvars
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
@@ -138,6 +140,55 @@ def _truncate_result(result: str, max_chars: int | None) -> str:
     return result[:max_chars] + f"\n\n[truncated {dropped} chars]"
 
 
+class ToolInterrupted(Exception):
+    """A Stop arrived while a tool was still running: the loop stops WAITING and
+    ends the turn. The tool itself cannot be safely killed, so it finishes on its
+    daemon thread and its result is discarded (same contract as closing the tab —
+    side effects already started may still complete)."""
+
+
+# How often the waiting side rechecks ``cancel`` while a tool runs — the upper
+# bound on how long a Stop takes to be felt mid-tool.
+_CANCEL_POLL_SECONDS = 0.2
+
+
+def _call_abortable(registry: Registry, name: str, arguments: str, cancel) -> str:
+    """``registry.call`` on a daemon thread, polling ``cancel`` while waiting.
+
+    Makes Stop responsive DURING tool execution — a hung tool (e.g. a wedged MCP
+    server) no longer blocks the turn until the process dies. Raises
+    :class:`ToolInterrupted` when cancelled; without a ``cancel`` predicate this
+    is a plain synchronous call (no extra thread).
+    """
+    if cancel is None:
+        return registry.call(name, arguments)
+    box: dict = {}
+
+    def target() -> None:
+        try:
+            box["result"] = registry.call(name, arguments)
+        except Exception as exc:  # re-raised on the waiting side below
+            box["error"] = exc
+
+    # Carry the caller's ContextVars (the interaction asker/confirmer) into the
+    # tool thread — ask_question must still reach the user from there.
+    ctx = contextvars.copy_context()
+    thread = threading.Thread(target=lambda: ctx.run(target), daemon=True, name=f"tool-{name}")
+    thread.start()
+    while True:
+        thread.join(timeout=_CANCEL_POLL_SECONDS)
+        if not thread.is_alive():
+            break
+        if cancel():
+            raise ToolInterrupted(
+                f"interrupted while tool {name!r} was running (side effects "
+                "already started may still complete in the background)"
+            )
+    if "error" in box:
+        raise box["error"]
+    return box["result"]
+
+
 def run_tool(
     registry: Registry,
     call: ToolCall,
@@ -145,6 +196,7 @@ def run_tool(
     trace: Trace,
     allowed: set[str] | None = None,
     max_result_chars: int | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> str:
     """Execute one tool call; tool errors are captured, never crash the loop.
 
@@ -163,6 +215,10 @@ def run_tool(
 
     ``max_result_chars`` caps the result the model sees (A1): a too-large result is
     truncated with a marker. The trace/hooks still receive the full result.
+
+    ``cancel`` makes the wait abortable: a Stop while the tool runs abandons the
+    wait within ~0.2s (the tool finishes on a daemon thread, discarded) and this
+    call's observation becomes an interrupted ERROR — see :class:`ToolInterrupted`.
     """
     hooks.before_tool(call)
     trace.event("tool_call", name=call.name, arguments=call.arguments)
@@ -178,7 +234,12 @@ def run_tool(
             outcome = "refused (HITL)"
         else:
             try:
-                result = registry.call(call.name, call.arguments)
+                result = _call_abortable(registry, call.name, call.arguments, cancel)
+            except ToolInterrupted as exc:
+                # A Stop mid-tool: not an error (no on_error hook) — the turn ends
+                # as "interrupted" and this call's observation records why.
+                result = f"ERROR: {exc}"
+                outcome = "interrupted"
             except Exception as exc:
                 hooks.on_error("tool", exc)
                 result = f"ERROR: {exc}"

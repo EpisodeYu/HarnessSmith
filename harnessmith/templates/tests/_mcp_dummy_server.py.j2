@@ -1,9 +1,12 @@
 """A tiny local MCP server over stdio, used by tests/test_mcp.py (no network).
 
-Exposes two safe tools so tests can exercise discovery, allowlist filtering, and
-a real stdio tool call. Launched as a subprocess by the tests. The leading
-underscore keeps pytest from collecting it as a test module.
+Exposes a few safe tools so tests can exercise discovery, allowlist filtering,
+a real stdio tool call, and the per-call timeout. Launched as a subprocess by
+the tests. The leading underscore keeps pytest from collecting it as a test
+module.
 """
+
+import time
 
 from mcp.server.fastmcp import FastMCP
 
@@ -20,6 +23,13 @@ def echo(text: str) -> str:
 def add(a: int, b: int) -> int:
     """Add two integers."""
     return a + b
+
+
+@server.tool()
+def nap(seconds: float) -> str:
+    """Sleep for ``seconds`` then return — exercises the per-call timeout."""
+    time.sleep(seconds)
+    return f"napped {seconds}s"
 
 
 if __name__ == "__main__":

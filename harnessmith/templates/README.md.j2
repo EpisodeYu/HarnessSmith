@@ -113,10 +113,13 @@ off with `sessions.enabled: false` in `config.yaml`{% if interfaces.web %}; the 
 Press **Ctrl-C** to stop a turn mid-flight{% if interfaces.web %} (or the **Stop** button in the web chat){% endif %};
 the model is cut off and the partial conversation is saved. Just send again
 (`run --continue` / `chat` / the web chat) to continue — the model sees what was
-already done and picks up from there. A second Ctrl-C force-quits. Stop ends the
-model and the loop; it does **not** undo side effects already done (files written,
-requests sent) — use git / Docker for that. Crash safety: each step is
-write-ahead saved (atomic), so even a hard kill leaves a resumable session.
+already done and picks up from there. A second Ctrl-C force-quits. Stop works
+even while a tool is running: the wait is abandoned (the tool finishes in the
+background, its result discarded) and the interrupted calls are recorded so the
+conversation stays resumable. Stop does **not** undo side effects already done
+(files written, requests sent) — use git / Docker for that. Crash safety: each
+step is write-ahead saved (atomic), so even a hard kill leaves a resumable
+session.
 {% if interfaces.web %}In the web chat, click ✎ on any earlier question to **re-ask** — edit it, confirm,
 and the conversation regenerates from that point (the rest is discarded).
 {% endif %}{% if interfaces.web %}

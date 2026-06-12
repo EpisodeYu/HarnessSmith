@@ -176,10 +176,16 @@ def run(
 
         messages.append(assistant_message(response))
         for call in response.tool_calls:
-            result = run_tool(
-                registry, call, hooks, trace, allowed=set(active),
-                max_result_chars=context_cfg.max_tool_result_chars,
-            )
+            # A Stop during the batch: remaining calls are not run — they get the
+            # same synthetic result crash-repair writes, so the sequence stays
+            # legal and the step-boundary check above ends the turn cleanly.
+            if cancel is not None and cancel():
+                result = "ERROR: interrupted before this tool ran"
+            else:
+                result = run_tool(
+                    registry, call, hooks, trace, allowed=set(active),
+                    max_result_chars=context_cfg.max_tool_result_chars, cancel=cancel,
+                )
             messages.append(
                 {"role": "tool", "tool_call_id": call.id, "content": result}
             )

@@ -10,7 +10,7 @@
 
 - **会话本身就是可续状态**:`harness/session.py` 已把整段 `messages` 正文落盘(Slice 8)。「继续」不是新存储,而是「中断时把进行中的 `messages` 存到一个合法边界」,之后沿用现成 `--continue`/`--resume`/Web 续聊即可——LLM 看到原问题 + 已完成的工具步骤,天然知道「之前在做什么」。
 - **停止是护栏不是安全边界**:停止能终止本进程的 LLM 调用与循环,**不保证**外部副作用(已写出去的文件、已发出的网络请求)被回滚——那是 Docker(威胁模型 B)/ 用户自管 git 的事。
-- **取消只在「合法边界」生效**(优雅中断时保证 `messages` 对 API 合法):① 模型输出中途(流式逐 chunk)——丢弃半截输出、`messages` 停在上一条干净边界;② 下一步开头(一批工具执行完之后)。**不在一批工具执行中途打断**(避免出现「assistant 有 tool_calls 但缺部分 tool 结果」的非法序列)。**取消粒度对标 Cursor**:Stop 切断模型生成(mid-token)、不杀正在跑的工具/终端进程;我们「工具批次跑完才停」反而更可预测、不留悬挂进程。
+- **取消随时生效,`messages` 始终合法**(2026-06 修订,原文为「工具批次跑完才停」——其前提「工具总会返回」被无超时的 MCP 调用打破,实测挂死的 server 让 Stop 永远不生效;人审后改为工具期间可停,见 §1 决策⑥):① 模型输出中途(流式逐 chunk)——丢弃半截输出、`messages` 停在上一条干净边界;② **工具等待中途**——`run_tool` 把工具放 daemon 线程执行、轮询取消(~0.2s),命中即放弃等待(工具本体不杀,后台跑完即弃),该调用记 `ERROR: interrupted while tool ... was running`,批内未执行的调用记 `ERROR: interrupted before this tool ran`(与崩溃修复同款合成结果,序列恒合法);③ 下一步开头。Stop 仍不回滚已发生的副作用。
 - **崩溃恢复靠 write-ahead(Tier B)**:优雅中断停在合法边界、不留悬挂 tool_use;但**硬崩溃**(kill -9 / 断电 / OOM)进程瞬死,只能靠**每步完成即落盘**扛——故采用 **per-step 原子写**(写临时文件 + `os.replace`,仍单文件)+ 会话 `status`(回合干净结束才置 `complete`,载入时非 `complete` = 被中断)。resume 时若历史含悬挂 `tool_use`,注入合成 error `tool_result` 修复以保证 API 合法。结构性标记(悬挂 tool_use)是主信号,`status` 状态位是显式补充;模型那侧靠上下文自明,不需专门提示。
 - **重问是破坏式截断,不是 fork**:覆盖该 session(丢掉后续),不另存分支。fork 是后续可选项。
 - **CLI 只做停止/继续,不做重问**:见 §1 决策④。
@@ -22,6 +22,7 @@
 - **③ 继续语义(Tier B:崩溃安全)**:① 优雅中断把进行中 `messages` 存进同一 session;② per-step 原子 write-ahead + 会话 `status`;③ resume 时对悬挂 `tool_use` 注入合成 error `tool_result` 修复合法性。下次任意发送即带全部上下文续上,LLM 靠上下文自明(不强制注入提示)。
 - **④ 重问(Web 专属)**:破坏式截断重生(确认丢后续)。CLI 不做(Claude CLI 重问靠复杂 rewind TUI,按「支持但复杂→不做」)。
 - **⑤ 重问 = 破坏式截断**(覆盖、丢后续),不做 fork。
+- **⑥ 工具期间可停 + MCP 单调用超时**(2026-06-12 人审,修订本切片「批次跑完才停」的原决策):`run_tool` 加 `cancel` ——工具放 daemon 线程执行、~0.2s 轮询取消,命中即放弃等待(在跑的工具不杀、结果弃置),批内未执行调用合成 `ERROR: interrupted before this tool ran`;`mcp.call_timeout_seconds`(默认 120s,config.yaml 可调)给每次 `call_tool` 包 `asyncio.timeout` + `call()` 侧兜底超时,挂死的 server 只损失这一次调用并返回指明旋钮的 TimeoutError。动机:实测 MCP server 挂死时整个回合(连同 Stop)永久卡死。代价:被放弃的工具线程短暂悬挂至自然结束(MCP 侧有超时上界)。
 
 ## 2. 交付物
 

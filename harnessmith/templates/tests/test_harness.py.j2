@@ -387,6 +387,69 @@ def test_cancel_at_step_boundary_stops_with_zero_steps(tmp_path):
     assert result.messages == [{"role": "user", "content": "hi"}]
 
 
+def test_stop_unblocks_a_hung_tool(tmp_path):
+    """A Stop while a tool is RUNNING ends the turn promptly: the wait is
+    abandoned (the tool finishes on a daemon thread, discarded), the running call
+    records an interrupted ERROR, the batch's remaining calls get "interrupted
+    before this tool ran", and the saved sequence stays legal for the chat API."""
+    import threading
+    import time
+
+    from {{ project_slug }}.harness.session import repair_orphan_tool_results
+
+    registry = Registry()
+    release = threading.Event()
+    entered = threading.Event()
+
+    @registry.tool(
+        name="block",
+        description="Blocks until released.",
+        parameters={"type": "object", "properties": {}},
+    )
+    def block() -> str:
+        entered.set()
+        release.wait(timeout=30)  # "hangs"; bounded so a failed test can't wedge CI
+        return "done"
+
+    class TwoCallClient:
+        """One response with a TWO-call batch, so the skip path is exercised."""
+
+        def __init__(self):
+            self.steps = 0
+
+        def complete(self, messages, tools=None, *, cancel=None):
+            self.steps += 1
+            usage = Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+            if self.steps == 1:
+                return LLMResponse(
+                    tool_calls=[
+                        ToolCall(id="c1", name="block", arguments="{}"),
+                        ToolCall(id="c2", name="block", arguments="{}"),
+                    ],
+                    usage=usage,
+                )
+            return LLMResponse(content="never reached", usage=usage)
+
+    config = _config(tmp_path, tools=[{"name": "block", "enabled": True}])
+    started = time.monotonic()
+    # Stop trips the moment the first tool starts running (cancel = entered).
+    result = run(
+        "hi", client=TwoCallClient(), config=config,
+        registry=registry, cancel=entered.is_set,
+    )
+    elapsed = time.monotonic() - started
+    release.set()
+
+    assert result.stop_reason == "interrupted"
+    assert elapsed < 10  # did not wait out the 30s "hang"
+    tool_results = [m for m in result.messages if m.get("role") == "tool"]
+    assert len(tool_results) == 2  # every requested call got a result
+    assert "interrupted while tool" in tool_results[0]["content"]
+    assert tool_results[1]["content"] == "ERROR: interrupted before this tool ran"
+    # already legal for the chat API: the crash-repair pass is a no-op on it
+    assert repair_orphan_tool_results(result.messages) == result.messages
+
+
 def test_checkpoint_called_after_each_completed_step(tmp_path):
     """The write-ahead checkpoint fires once per completed tool step, with the
     body so far (no system prompt). The final answer step doesn't checkpoint."""

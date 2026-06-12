@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -47,6 +48,30 @@ def manager():
     mgr.close()
 
 
+def test_call_timeout_fails_one_call_not_the_server():
+    """A tool call that exceeds ``mcp.call_timeout_seconds`` fails with a
+    TimeoutError naming the knob — the loop sees an ERROR observation instead of
+    hanging the turn forever (Stop works again at the next boundary). The server
+    session survives and keeps serving later calls."""
+    mgr = McpManager(
+        McpConfig(
+            servers=[McpServerConfig(name="dummy", command=sys.executable, args=[DUMMY])],
+            call_timeout_seconds=1.0,
+        )
+    )
+    mgr.start()
+    try:
+        assert "dummy" in mgr.discovered, mgr.errors
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match="call_timeout_seconds"):
+            mgr.call("dummy", "nap", {"seconds": 2.5})
+        assert time.monotonic() - started < 10  # returned at the timeout, not after the nap
+        time.sleep(2.0)  # let the abandoned nap drain server-side either way
+        assert "hi" in mgr.call("dummy", "echo", {"text": "hi"})
+    finally:
+        mgr.close()
+
+
 def test_stdio_discovers_and_calls_tool(manager):
     assert "dummy" in manager.discovered, manager.errors
     names = {tool.name for tool in manager.discovered["dummy"]}
@@ -70,13 +95,13 @@ def test_wildcard_enables_all_server_tools(manager):
     )
     registered = register_mcp_tools(config, manager, registry)
 
-    assert set(registered) == {"dummy__echo", "dummy__add"}  # whole toolset on
+    assert set(registered) == {"dummy__echo", "dummy__add", "dummy__nap"}  # whole toolset on
     assert registry.get("dummy__echo").risk == SAFE  # safe_tools still grades risk
     assert registry.get("dummy__add").risk == HIGH
 
     # The wildcard also gates active_names (what the model is offered).
     enabled = config.enabled_tool_names()
-    assert set(registry.active_names(enabled)) == {"dummy__echo", "dummy__add"}
+    assert set(registry.active_names(enabled)) == {"dummy__echo", "dummy__add", "dummy__nap"}
     # Read-only paradigms still drop the high-risk tool, keep the safe one.
     read_only = registry.active_names(enabled, allow_high_risk=False)
     assert read_only == ["dummy__echo"]
