@@ -1,0 +1,22 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Must match the environment registered with the PyPI trusted publisher.
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches project version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
+          [ "$tag" = "$version" ] || { echo "tag $tag != pyproject version $version"; exit 1; }
+      - run: pipx run build
+      - uses: pypa/gh-action-pypi-publish@release/v1
