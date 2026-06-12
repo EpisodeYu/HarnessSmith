@@ -1,7 +1,7 @@
 # CLAUDE.md — HarnessSmith 项目守则
 
 > Agent 进入本项目（**vibe coding 模式**）入场必读。本文件是 Agent 工作的**硬约束**。
-> 项目定位 / 范围 / 决策以 `docs/01-project-plan.md` 为准；开发节奏与切片门禁见 `docs/02-development/00-overview.md`。
+> 项目定位 / 范围 / 决策 / 开发节奏与切片门禁见 `docs/02-development/00-overview.md`。
 >
 > **Tradeoff**：偏向"先把事情做对"。显然小到不值得讨论的操作自己判断,别让流程把简单任务搞复杂。
 
@@ -108,8 +108,8 @@
 
 ## 9. 文档维护
 
-- **任务完成即更新文档(硬规则)**:每个任务 / slice 一旦实现完成,必须把受影响的文档更新到**与实现一致**——slice 子文档勾选退出门禁、修正字段枚举 / 行为描述、回填人审决策点结论,并同步 `01-project-plan.md` / `00-overview.md` 的相关条目。**文档落后于实现 = 任务未完成**。实现与初版计划有偏差时,在文档就地标注"实现说明"而非默默留旧描述。
-- 改 `HarnessSpec` 字段:同步 `01-project-plan.md §5` + 相关 slice 文档。
+- **任务完成即更新文档(硬规则)**:每个任务 / slice 一旦实现完成,必须把受影响的文档更新到**与实现一致**——slice 子文档勾选退出门禁、修正字段枚举 / 行为描述、回填人审决策点结论,并同步 `docs/02-development/00-overview.md` 的相关条目。**文档落后于实现 = 任务未完成**。
+- 改 `HarnessSpec` 字段:同步 `docs/02-development/00-overview.md §5` + 相关 slice 文档。
 - 改全局决策(罕见,走 §6 人审):必须改 `docs/02-development/00-overview.md` 的决策总表。
 - 改 `.env.example` / 默认依赖:同步产物 README / AGENTS.md 与相关 slice 文档。
 - 文档与代码相互引用的地方,**改一处必检另一处**。Agent 是这套文档体系的唯一维护者。
@@ -123,6 +123,5 @@
 
 1. 读 `README.md` 速览定位。
 2. 读本文件(`CLAUDE.md`)—— 你正在读。
-3. 读 `docs/01-project-plan.md`(定位 / 范围 / 关键决策)。
-4. 读 `docs/02-development/00-overview.md`(当前 slice 与完成门禁)。
-5. 按当前任务**只读**相关 slice 子文档;不要把全部文档塞进上下文。
+3. 读 `docs/02-development/00-overview.md`(定位 / 范围 / 决策 / 切片门禁)。
+4. 按当前任务**只读**相关 slice 子文档;不要把全部文档塞进上下文。
