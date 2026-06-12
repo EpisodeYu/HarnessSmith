@@ -1319,7 +1319,7 @@
     });
 
     // ---- config: functional sub-tabs ------------------------------------
-    const CFG_TABS = ["llm", "context", "budget", "tools",{% if spec.mcp.enabled %} "mcp",{% endif %} "prompts", "paradigms",{% if spec.memory.enabled %} "memory",{% endif %} "observability", "system"];
+    const CFG_TABS = ["llm", "context", "tools",{% if spec.mcp.enabled %} "mcp",{% endif %} "paradigms", "prompts", "budget",{% if spec.memory.enabled %} "memory",{% endif %} "observability", "system"];
     let cfgTab = "llm";
     let cfg = {};
     // Tracks unsaved edits in the config view. Edits live only in the DOM until

@@ -2,7 +2,7 @@
 
 > 目标(2026-06-06 细化后):
 > ① **生成器侧 wizard**——`harnessforge/wizard/`(FastAPI + 无构建单页,Tailwind CDN + 原生 JS,`harnessforge[wizard]` extra)。**只采集「生成什么」的结构选项**(显示名→slug、语言、`paradigms`、`interfaces.web`、`mcp.enabled`+catalog、`skills.enabled`),**首项选语言(中文/English)**;行为性字段(llms/prompts/budget/tools…)由后端**烤可用默认值**进 spec、**不在向导露出**(降低新手门槛,产物开箱即跑);`POST /spec` 校验产合法 spec(可下载)+ 可选一键 `generate()`。
-> ② **产物侧分页配置页**——把产物 Web 的 `/config`(Slice 3)从单一 JSON 文本框重组成**按功能分页**(LLM/Context/Budget/Tools/Prompts/Paradigms/Observability)+ **中英切换**;只改运行期行为性配置(守两轴);仅 `interfaces.web=true` 时存在,默认薄产物零改动。**产物不做 wizard、不做首启自动拉起**(人 2026-06-06 定:产物只要分页配置页)。
+> ② **产物侧分页配置页**——把产物 Web 的 `/config`(Slice 3)从单一 JSON 文本框重组成**按功能分页**(LLM/Context/Tools/Paradigms/Prompts/Budget/Observability)+ **中英切换**;只改运行期行为性配置(守两轴);仅 `interfaces.web=true` 时存在,默认薄产物零改动。**产物不做 wizard、不做首启自动拉起**(人 2026-06-06 定:产物只要分页配置页)。
 >
 > wizard 是**生成器侧工具**,不进产物、产物不依赖它(`01 §1`)。属 `01-project-plan.md` 的 **L2**。
 >
@@ -38,7 +38,7 @@
 
 产物侧(`harnessforge/templates/`,`interfaces.web` 门控):
 
-- `src/<pkg>/interfaces/web_index.html.j2` — Config 视图重组为**按功能子 tab**(LLM/Context/Budget/Tools/Prompts/Paradigms/Observability)+ 顶部**语言切换(静态双语标签 `语言/Language`,默认值由 `{{ language }}` 即 `spec.language` 种子化,localStorage 记忆)**;LLM tab 每个 profile 带**写入式 set-key**(写 `.env`、不回显);chat 视图行为不变;标题/header 用 `{{ display_name }}`。**后端 `web.py` `/config` 不变**(仍是同一组 `_EDITABLE_FIELDS`);新增 `POST /env`(write-only 写 `.env`,不回显)。
+- `src/<pkg>/interfaces/web_index.html.j2` — Config 视图重组为**按功能子 tab**(LLM/Context/Tools/Paradigms/Prompts/Budget/Observability)+ 顶部**语言切换(静态双语标签 `语言/Language`,默认值由 `{{ language }}` 即 `spec.language` 种子化,localStorage 记忆)**;LLM tab 每个 profile 带**写入式 set-key**(写 `.env`、不回显);chat 视图行为不变;标题/header 用 `{{ display_name }}`。**后端 `web.py` `/config` 不变**(仍是同一组 `_EDITABLE_FIELDS`);新增 `POST /env`(write-only 写 `.env`,不回显)。
 - `README.md.j2` / `web.py.j2` — 标题用 `{{ display_name }}`(回落 slug)。
 - **写入式 `.env` 密钥助手**(人 2026-06-06 决策 D):`config.py set_env_value(name, value)`(只写本地 gitignored `.env`、单行防注入、env 名校验)+ CLI `<pkg> set-key <ENV_NAME>`(隐藏输入)+ Web `POST /env` / LLM tab 输入框。**write-only**:值只进 `.env`,绝不进 `config.yaml`/spec/trace/日志/任何响应。降低"建 .env 粘 key"门槛(尤其 Windows 免配系统环境变量)。keyring 仍 v1+。
 - `cli.py`(产物)/ `cli.py`(生成器) — `serve` / `wizard` 默认 `--port 0` 自动挑空闲端口(`_find_free_port`,从 8000 起)并打印可打开地址。
