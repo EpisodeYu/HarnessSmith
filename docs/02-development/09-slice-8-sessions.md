@@ -32,7 +32,7 @@
 
 ### CLI / Web
 - 产物 `interfaces/cli.py` — `run` 加 `--continue`/`--resume <id>`(载入 history → 跑 → save,结尾打印 `session: <id>`);新增 `chat` REPL(累积 + 每轮落盘 → `/exit`/EOF 退出;支持 `--continue/--resume`);抽 `_mcp_setup(config)` helper 供 `run`/`chat`/`serve` 共用。
-- 产物 `interfaces/web.py` — `/chat` 加 `session` 参数(载 history + 跑完 save + 首发 `event: session`);`GET /sessions`(列 `{id,updated,mode,title,preview}`)、`GET /sessions/{id}`(回 messages 供回放)、`PATCH /sessions/{id}`(改标题)、`DELETE /sessions/{id}`(幂等)。会话首轮**用 LLM 自动起标题**(可配置 role `title`,缺省回落 `generation`;`sessions.auto_title` 开关;Web 专属,经 SSE `title` 事件即时更新)。
+- 产物 `interfaces/web.py` — `/chat` 加 `session` 参数(载 history + 跑完 save + 首发 `event: session`);`GET /sessions`(列 `{id,updated,mode,title,preview}`)、`GET /sessions/{id}`(回 messages 供回放)、`PATCH /sessions/{id}`(改标题)、`DELETE /sessions/{id}`(幂等)。会话首轮**自动起标题(临时标题 + LLM 并行精修)**:先用用户首条消息(裁剪到首行/≤40 字)作零成本临时标题、紧随 `run`/`session` 即时发 SSE `title`;再在后台线程并行用 LLM 精修(可配置 role `title`,缺省回落 `generation`)发第二个 `title` 覆盖,worker 收尾 `save` 时落盘其中胜出者,LLM 失败/超时则保留临时标题。**标题调用不再阻塞首事件**——`run`/`session` 先于标题发出,run_id 即时可用、Stop 立即可按,消除思考型模型(如 mimo)起标题导致的首事件长静默窗口。`sessions.auto_title` 开关;Web 专属。
 - 产物 `interfaces/web_index.html` — 全高度双栏壳(左 session 侧栏 + 右全屏),会话列表、「新会话」、侧栏内联重命名/删除(不用 `window.prompt`/`window.confirm`)、中英 i18n。空草稿不新建/不持久化。
 
 ### 边角

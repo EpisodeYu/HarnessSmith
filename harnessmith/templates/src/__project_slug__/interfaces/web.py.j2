@@ -168,6 +168,12 @@ _TITLE_PROMPT = (
     "- <= 8 words, or <= 16 Chinese characters."
 )
 
+# How long the worker waits for the parallel LLM title before persisting with the
+# provisional one instead. Generous on purpose: the LLM title (one call) is almost
+# always ready before the loop finishes, so this never fires in practice — it only
+# stops a wedged title call from holding up the final save indefinitely.
+_TITLE_JOIN_TIMEOUT = 120.0
+
 
 def _generate_title(client, question: str) -> str:
     """Summarize the first user message into a short session title (best-effort).
@@ -192,6 +198,15 @@ def _generate_title(client, question: str) -> str:
     text = (resp.content or "").strip()
     line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
     return line.strip("\"'").strip()[:60]
+
+
+def _provisional_title(question: str) -> str:
+    """A zero-cost placeholder title taken from the user's message itself: the
+    first non-empty line, trimmed. Shown the instant a session starts so the
+    sidebar is named before the (slower) LLM title arrives, and kept as the
+    fallback if the LLM title fails or times out."""
+    line = next((ln.strip() for ln in (question or "").splitlines() if ln.strip()), "")
+    return line[:40].strip()
 
 
 def _safe_repo_path(path: str) -> Path | None:
@@ -300,9 +315,11 @@ def _chat_events(
     ``event: token``; otherwise only step/tool/final events are emitted. ``mode``
     selects the loop paradigm (defaults to ``config.paradigms.default``).
     ``history`` resumes a prior conversation; the updated body is saved under
-    ``session_id`` when sessions are enabled. When ``auto_title`` is set, the
-    first message is summarized into a session title (``title`` role) BEFORE the
-    answer so the sidebar names the session up front.
+    ``session_id`` when sessions are enabled. When ``auto_title`` is set, a
+    zero-cost provisional title (the trimmed first message) is emitted up front
+    and an LLM title (``title`` role) is refined IN PARALLEL — neither blocks the
+    first event, so run_id ships immediately. The worker persists whichever title
+    wins (the LLM one if it lands in time, else the provisional one).
 
     A cancel token is registered in ``runs`` under a fresh ``run_id`` (emitted as
     the first ``event: run``) so ``POST /chat/{run_id}/stop`` — or a client
@@ -370,11 +387,22 @@ def _chat_events(
 
         confirmer = ToolConfirmer(confirm_needs, persist=_persist_confirm, session=session_set)
 
-    # Auto-title first (best-effort): the sidebar gets a name before the answer.
-    new_title = ""
-    if auto_title and message.strip():
-        title_role = "title" if "title" in config.roles else "generation"
-        new_title = _generate_title(router.client_for(title_role), message)
+    # Auto-title (best-effort, PARALLEL): emit a zero-cost provisional title (the
+    # user's message, trimmed) right away so the sidebar is named up front, then
+    # refine it with an LLM title on a background thread. The title call no longer
+    # runs before the first yield, so run_id ships immediately and Stop works even
+    # while a slow reasoning model is still summarizing. The worker folds in the
+    # LLM title (or keeps the provisional one) when it persists the turn.
+    provisional = _provisional_title(message) if auto_title else ""
+    title_box: dict[str, str] = {"title": ""}
+    title_thread: threading.Thread | None = None
+    # Resolve the title client on THIS thread (before the workers start) so the
+    # router cache is warm and never built concurrently from two threads.
+    title_client = (
+        router.client_for("title" if "title" in config.roles else "generation")
+        if provisional
+        else None
+    )
 
     save_mode = mode or config.paradigms.default
 
@@ -401,10 +429,18 @@ def _chat_events(
                     checkpoint=_checkpoint,
                 )
             interrupted = result.stop_reason == "interrupted"
+            # Fold in the parallel title: wait briefly for the LLM title (almost
+            # always already done — one call vs the whole loop), else keep the
+            # provisional one. This only ever delays the final SAVE, never the
+            # streamed answer (tokens already flowed); the timeout just guards a
+            # wedged title call.
+            if title_thread is not None:
+                title_thread.join(_TITLE_JOIN_TIMEOUT)
+            final_title = title_box["title"] or provisional
             if session_id is not None and config.sessions.enabled:
                 session_store.save(
                     session_id, result.messages, config.sessions.dir,
-                    mode=result.mode, title=new_title or None,
+                    mode=result.mode, title=final_title or None,
                     status="interrupted" if interrupted else "complete",
                 )
 {% if spec.memory.enabled %}            from ..harness.memory import record_turn
@@ -439,8 +475,20 @@ def _chat_events(
     yield _sse("run", {"run_id": run_id, "context_window": gen_window})
     if session_id is not None:
         yield _sse("session", {"id": session_id})
-    if new_title:
-        yield _sse("title", {"id": session_id, "title": new_title})
+    # Provisional title up front (instant), then refine it in the background: the
+    # title thread emits a SECOND `title` event when the LLM title lands, and the
+    # worker persists whichever we end up with.
+    if provisional:
+        yield _sse("title", {"id": session_id, "title": provisional})
+
+        def _title_worker() -> None:
+            text = _generate_title(title_client, message)
+            if text:
+                title_box["title"] = text
+                q.put(("title", {"id": session_id, "title": text}))
+
+        title_thread = threading.Thread(target=_title_worker, daemon=True)
+        title_thread.start()
     threading.Thread(target=worker, daemon=True).start()
     try:
         while True:
@@ -869,8 +917,13 @@ def create_app(
     async def test_llm(request: Request) -> dict:
         """Probe one LLM profile with a real one-shot call. Returns ``{ok, error}``.
 
-        Uses the SAME client path as the loop (so the result reflects real usage):
-        sampling knobs are sent only when set. Secrets stay server-side — the
+        Uses the SAME client path as the loop (so the result reflects real usage),
+        but probes with the LIGHTEST reasoning effort first: a thinking model would
+        otherwise deliberate ~20s over "ping" before the page can show PASSED, and
+        all we need to prove is reachable + authenticated + the model exists, not a
+        thoughtful reply. If the endpoint rejects the lighter setting (a plain model
+        that doesn't take ``reasoning_effort``), it retries with the profile as
+        configured so the result stays correct. Secrets stay server-side — the
         request carries the env-var NAME, the key is resolved from .env here.
         Obvious config gaps (no model, unresolved key with no custom base_url) are
         reported up front without a network call.
@@ -890,11 +943,20 @@ def create_app(
                 "environment — set its value first (or configure a custom base_url)"
             )}
 
-        def _probe() -> None:
-            _client_for_profile(profile).complete([{"role": "user", "content": "ping"}], None)
+        def _probe(p: LLMProfileConfig) -> None:
+            _client_for_profile(p).complete([{"role": "user", "content": "ping"}], None)
 
+        # Reasoning-light first so thinking models answer "ping" fast; fall back to
+        # the profile as-is if the endpoint rejects `reasoning_effort` (the retry
+        # also yields the authoritative error on a genuine failure).
+        light = profile.model_copy(update={"reasoning_effort": "low"})
         try:
-            await run_in_threadpool(_probe)
+            await run_in_threadpool(lambda: _probe(light))
+            return {"ok": True}
+        except Exception:
+            pass
+        try:
+            await run_in_threadpool(lambda: _probe(profile))
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

@@ -351,19 +351,23 @@ def test_chat_disabled_sessions_emit_nothing(tmp_path):
 
 
 def test_chat_first_turn_emits_title_and_persists(tmp_path):
-    """First turn auto-titles: a `title` event is emitted (before `final`) and the
-    title is stored on the session so the sidebar can name it."""
+    """First turn auto-titles: a provisional `title` (the trimmed message) is
+    emitted up front, the LLM `title` refines it, both land before `final`, and a
+    non-empty title is stored so the sidebar can name the session."""
     client = _session_client(tmp_path)
     body = client.get(
         "/chat", params={"message": "what is AMF?", "stream": "false"}
     ).text
+    # The FIRST title event is the zero-cost provisional one, from the message.
     title = _sse_event_data(body, "title")
-    assert title and title["title"]  # mock returns a non-empty title
+    assert title and title["title"] == "what is AMF?"
+    # Every title event (provisional + refined) precedes the final answer.
     assert body.index("event: title") < body.index("event: final")
+    assert body.rindex("event: title") < body.index("event: final")
 
     sid = title["id"]
     listed = {s["id"]: s for s in client.get("/sessions").json()["sessions"]}
-    assert listed[sid]["title"] == title["title"]
+    assert listed[sid]["title"]  # a non-empty title is persisted
 
 
 def test_chat_no_autotitle_when_disabled(tmp_path):
@@ -388,6 +392,54 @@ def test_chat_autotitle_skipped_when_title_already_set(tmp_path):
     ).text
     assert "event: title" not in body
     assert session_store.title_of("kept", sdir) == "My title"  # unchanged
+
+
+def test_chat_keeps_provisional_title_when_llm_title_fails(tmp_path, monkeypatch):
+    """If the LLM title returns empty (or fails), the provisional title from the
+    message is what gets persisted — auto-titling never blocks or breaks the chat."""
+    import {{ project_slug }}.interfaces.web as webmod
+    from {{ project_slug }}.harness import session as session_store
+
+    monkeypatch.setattr(webmod, "_generate_title", lambda *a, **k: "")
+    client = _session_client(tmp_path)
+    body = client.get(
+        "/chat", params={"message": "explain the QUIC handshake", "stream": "false"}
+    ).text
+    title = _sse_event_data(body, "title")
+    assert title and title["title"] == "explain the QUIC handshake"
+    sid = title["id"]
+    assert session_store.title_of(sid, str(tmp_path / "sessions")) == "explain the QUIC handshake"
+
+
+def test_chat_run_and_session_precede_title_generation(monkeypatch):
+    """run/session/provisional-title are yielded BEFORE the LLM title is computed:
+    the title call runs on a background thread started only after those yields, so
+    run_id ships immediately even when the title model is slow (no multi-second
+    silent window / disabled Stop on reasoning models).
+
+    Driven on the generator directly because TestClient buffers a streamed response
+    fully before exposing it, which would hide the ordering this guards."""
+    import {{ project_slug }}.interfaces.web as webmod
+    from {{ project_slug }}.interfaces.web import _chat_events
+
+    called = []
+    monkeypatch.setattr(
+        webmod, "_generate_title", lambda *a, **k: (called.append(1), "LLM title")[1]
+    )
+    gen = _chat_events(
+        "hi there", _config(), mock=True, stream=False,
+        session_id="s1", auto_title=True,
+    )
+    try:
+        first = next(gen)   # run (carries run_id)
+        second = next(gen)  # session
+        third = next(gen)   # provisional title (from the message)
+    finally:
+        gen.close()
+    assert "event: run" in first and '"run_id"' in first
+    assert "event: session" in second
+    assert "event: title" in third and "hi there" in third
+    assert called == []  # the LLM title has NOT been called by this point
 
 
 def test_session_rename_and_delete(tmp_path):
@@ -875,6 +927,56 @@ def test_test_llm_requires_a_model(monkeypatch):
     data = resp.json()
     assert data["ok"] is False
     assert "model" in data["error"].lower()
+
+
+def test_test_llm_probes_with_lowered_reasoning_effort(monkeypatch):
+    """The probe sends the LIGHTEST reasoning effort first so a thinking model
+    answers "ping" fast instead of deliberating for seconds before PASSED."""
+    import {{ project_slug }}.interfaces.web as webmod
+    from {{ project_slug }}.harness.llm import LLMResponse
+
+    seen = []
+
+    class _FakeClient:
+        def __init__(self, profile):
+            self._profile = profile
+
+        def complete(self, messages, tools, **kw):
+            seen.append(self._profile.reasoning_effort)
+            return LLMResponse(content="pong")
+
+    monkeypatch.setattr(webmod, "_client_for_profile", lambda p: _FakeClient(p))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    resp = _client().post(
+        "/test-llm", json={"name": "p", "model": "gpt-5", "reasoning_effort": "high"}
+    )
+    assert resp.status_code == 200 and resp.json()["ok"] is True
+    assert seen == ["low"]  # probed with the lighter effort, not the configured one
+
+
+def test_test_llm_falls_back_when_effort_rejected(monkeypatch):
+    """If the lighter probe is rejected (a plain model that doesn't take
+    reasoning_effort), it retries with the profile as configured and still tests."""
+    import {{ project_slug }}.interfaces.web as webmod
+    from {{ project_slug }}.harness.llm import LLMResponse
+
+    seen = []
+
+    class _FakeClient:
+        def __init__(self, profile):
+            self._profile = profile
+
+        def complete(self, messages, tools, **kw):
+            seen.append(self._profile.reasoning_effort)
+            if self._profile.reasoning_effort == "low":
+                raise RuntimeError("unknown parameter: reasoning_effort")
+            return LLMResponse(content="pong")
+
+    monkeypatch.setattr(webmod, "_client_for_profile", lambda p: _FakeClient(p))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    resp = _client().post("/test-llm", json={"name": "p", "model": "plain-chat"})
+    assert resp.status_code == 200 and resp.json()["ok"] is True
+    assert seen == ["low", None]  # tried lowered, then the profile as-is
 
 
 # --- Slice 9: stop / continue / re-ask over the web ------------------------

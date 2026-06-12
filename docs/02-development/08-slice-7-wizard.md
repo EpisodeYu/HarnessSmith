@@ -32,7 +32,7 @@
 
 产物侧(`interfaces.web` 门控):
 
-- `interfaces/web_index.html.j2` — Config 视图重组为按功能子 tab + 顶部语言切换（`{{ language }}` 种子化 + localStorage 记忆);LLM tab 每 profile 带写入式 set-key（写 `.env`、不回显）+「测试」按钮（`POST /test-llm` 走与 loop 同一条 `complete` 路径做真实一问）+ 角色下拉（generation/compaction,空 = 回落首个 profile)。标题/header 用 `{{ display_name }}`。
+- `interfaces/web_index.html.j2` — Config 视图重组为按功能子 tab + 顶部语言切换（`{{ language }}` 种子化 + localStorage 记忆);LLM tab 每 profile 带写入式 set-key（写 `.env`、不回显）+「测试」按钮（`POST /test-llm` 走与 loop 同一条 `complete` 路径做真实一问;探针**先用最低 `reasoning_effort` 试**,免得思考型模型对 "ping" 思考数十秒才返回 PASSED,端点若拒该参数则按原 profile 回退重试,结果仍准确）+ 角色下拉（generation/compaction,空 = 回落首个 profile)。标题/header 用 `{{ display_name }}`。
 - `harness/config.py` — `set_env_value(name, value)`(只写本地 gitignored `.env`、单行防注入、env 名校验);单价字段 `input_cost_per_million`/`output_cost_per_million`（per-million、货币无关);`reasoning_effort`（顶层,仅显式选了才发,默认不传)。
 - `interfaces/cli.py` — `<pkg> set-key <ENV_NAME>`(隐藏输入);`serve` 默认自动挑空闲端口 + `--open`。
 - 产物模板 `__launch_name__.{sh,bat}.j2` — 渲染成 `<显示名>.{sh,bat}` 一键启动脚本（文件名按 `display_name` 清洗，非法字符回落 slug);动作 = web 时 `serve --open`、否则 `chat`。
