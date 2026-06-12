@@ -8,7 +8,7 @@
 >
 > **状态:✅ 已实现(2026-06-09)。门禁全绿:生成器快测 124、生成产物自带测试 170(含 MCP 管理端点/状态/热重连/重同步/大复选框/transport·sse/wizard DC 默认)、golden 10 + Docker 2 全绿;CLI `mcp status`(连通 + 不可达标红 + 缺 launcher 提示)与产物 Web MCP 管理页经浏览器实测(红绿点 / 增删改热重连 / Tools 大复选框三态);`ReadLints` clean。六项决策人 2026-06-09 签字(见 §4)。**
 >
-> **实现说明(与计划的细化)**:① **`doctor`**:产物 CLI 本无 `doctor` 命令(`harnessforge doctor` 是**生成器**的脚手架预检,与产物无关),故 MCP 健康自检落为产物 `<pkg> mcp status`(typer 子命令组),**未在产物新增 doctor**。② **常驻 manager 连接策略**:web `serve` 启动即 `_ensure_mcp_manager` 连接全部已配置 server;CLI `run`/`chat` 一次性路径沿用"有≥1启用工具才起该 server";`mcp status` 显式连接全部。**(2026-06-09 续:MCP 暖机改后台线程,不挡端口)** 原 `serve` 在 `uvicorn.run` 前**同步**跑 `_ensure_mcp_manager`,而 `McpManager._main` 是**逐个**连接(每个 `connect_timeout_seconds=30s`),首次启动还要 uvx/npx **冷启动下载** server(墙内 npx desktop-commander 走 npm 尤其慢/被墙)——于是"启动产物 Web"这一步在端口绑定前可卡到 ~N×30s(向导默认 4 个 server)。改:`serve` 把 `_ensure_mcp_manager` 丢到 **daemon 线程**后立即 `uvicorn.run`,**端口秒开**;页面轮询 `/mcp/status` 看连接进度、chat 在 manager 就绪后自动拿到 MCP 工具(其间 `/mcp`+chat 处理器本就 lazy `_ensure_mcp_manager`,与后台暖机经锁+幂等收敛到同一次连接)。`create_app` 仍把 `mcp_manager` 置 None、不在构造期暖机。测试守卫:`test_generator` 断言 web+MCP 产物的 `serve` 体内 `_ensure_mcp_manager` 在 `Thread(daemon=True)` 里、且早于 `uvicorn.run`。**未改逐个连接为并发**(留作后续:并发 connect 可把就绪时间 sum→max,但不影响端口已秒开)。③ **`confirm: high` 走生成期渲染变量**(`generate(confirm_default=...)` → `config.yaml.j2`),**不进 spec schema**;仅 wizard `/generate` 传 `high`,CLI/preset 仍 `none`。④ **server 编辑端点**用专用 `/mcp/servers`(POST upsert / DELETE)+ `/mcp/reconnect`,**不**把 `mcp` 加进 `/config` 的 `_EDITABLE_FIELDS`(统一在专用端点触发热重连);`/config` 改 tool allowlist 后追加 `sync_mcp_tools` 重同步(无需重连)。
+> **实现说明(与计划的细化)**:① **`doctor`**:产物 CLI 本无 `doctor` 命令(`harnessmith doctor` 是**生成器**的脚手架预检,与产物无关),故 MCP 健康自检落为产物 `<pkg> mcp status`(typer 子命令组),**未在产物新增 doctor**。② **常驻 manager 连接策略**:web `serve` 启动即 `_ensure_mcp_manager` 连接全部已配置 server;CLI `run`/`chat` 一次性路径沿用"有≥1启用工具才起该 server";`mcp status` 显式连接全部。**(2026-06-09 续:MCP 暖机改后台线程,不挡端口)** 原 `serve` 在 `uvicorn.run` 前**同步**跑 `_ensure_mcp_manager`,而 `McpManager._main` 是**逐个**连接(每个 `connect_timeout_seconds=30s`),首次启动还要 uvx/npx **冷启动下载** server(墙内 npx desktop-commander 走 npm 尤其慢/被墙)——于是"启动产物 Web"这一步在端口绑定前可卡到 ~N×30s(向导默认 4 个 server)。改:`serve` 把 `_ensure_mcp_manager` 丢到 **daemon 线程**后立即 `uvicorn.run`,**端口秒开**;页面轮询 `/mcp/status` 看连接进度、chat 在 manager 就绪后自动拿到 MCP 工具(其间 `/mcp`+chat 处理器本就 lazy `_ensure_mcp_manager`,与后台暖机经锁+幂等收敛到同一次连接)。`create_app` 仍把 `mcp_manager` 置 None、不在构造期暖机。测试守卫:`test_generator` 断言 web+MCP 产物的 `serve` 体内 `_ensure_mcp_manager` 在 `Thread(daemon=True)` 里、且早于 `uvicorn.run`。**未改逐个连接为并发**(留作后续:并发 connect 可把就绪时间 sum→max,但不影响端口已秒开)。③ **`confirm: high` 走生成期渲染变量**(`generate(confirm_default=...)` → `config.yaml.j2`),**不进 spec schema**;仅 wizard `/generate` 传 `high`,CLI/preset 仍 `none`。④ **server 编辑端点**用专用 `/mcp/servers`(POST upsert / DELETE)+ `/mcp/reconnect`,**不**把 `mcp` 加进 `/config` 的 `_EDITABLE_FIELDS`(统一在专用端点触发热重连);`/config` 改 tool allowlist 后追加 `sync_mcp_tools` 重同步(无需重连)。
 >
 > **2026-06-10 Windows 回归修复**:前两次 MCP 修复后仍有两个 Windows 问题。① `desktop-commander` 的 `npx` 是 `.cmd` shim,且本机可能没有 Node/npx;产物现在在 Windows 下先解析 launcher,`.cmd/.bat` 统一经 `cmd.exe /d /c <resolved.cmd>` 启动,launcher 缺失则在进入 MCP transport 前给出"安装 Node.js/uv 或改 config"的可读错误,避免裸 `[WinError 2] 系统找不到指定的文件`。② 并发连接实现不能用 `asyncio.wait_for(self._connect(...))`:它会把进入 MCP/anyio async context 的连接协程包进子 Task,退出时回到 server owner Task,导致首次进入所有 MCP 工具出现 `Attempted to exit cancel scope in a different task than it was entered in`。已改为同 Task 内的 `asyncio.timeout()` 并补回归测试,保持"每 server 一个长期 Task 持有 session"的设计。
 >
@@ -34,7 +34,7 @@
 
 ## 1. 交付物
 
-### 生成器侧(`harnessforge/`)
+### 生成器侧(`harnessmith/`)
 
 - `wizard/app.py` — **DC 默认启用 + HITL 默认**(决策 dc_default=high):
   - `_WIZARD_CATALOG_DEFAULT` 加入 `desktop-commander`(默认勾选);DC 在表单仍排最后并带"高风险/需 Node/HITL 确认"说明。
@@ -43,7 +43,7 @@
 - `catalog/mcp_servers.yaml` — desktop-commander 条目补充 `transport: stdio`(已隐含);github 远程条目可标 `transport: sse` 或 `http` 作示例(数据源层,非安全闸)。
 - 生成器测试:wizard `/meta` 含 DC 默认勾选 + 烤默认含 `confirm: high` 的断言;MCP-enabled fixture / golden 覆盖新端点与热重连(见 §3)。
 
-### 生成产物侧(`harnessforge/templates/`,`spec.mcp.enabled` 门控,关掉零痕迹不变)
+### 生成产物侧(`harnessmith/templates/`,`spec.mcp.enabled` 门控,关掉零痕迹不变)
 
 - `harness/config.py`(条件块)— `McpServerConfig` 新增运行期字段:
   - `transport: Literal["stdio", "http", "sse"] | None = None`:留空时按形态推断(`command`→stdio、`url`→http);设了则权威。`url` + `transport: sse` 走老式 HTTP+SSE。
@@ -68,7 +68,7 @@
   - **Tools 页大复选框**(决策 server_model=B):每个 MCP server 折叠组的 `<summary>` 里加一个**主复选框**——勾/取消 = 批量勾选/取消该组全部工具(三态:全开/全关/部分);其状态与下方小复选框联动,纳入 `collectConfig` 的 allowlist 回写。组标题状态色与 `/mcp/status` 的红绿一致(server 掉线时标红、其工具置灰提示)。
 - `interfaces/cli.py`(条件块)— 新增 **`mcp` 子命令组**(typer sub-app,仅 `spec.mcp.enabled`):
   - `mcp status` — 连接全部已配置 server(显式)、`list_tools`,打印每 server:🟢/🔴 连通 + transport + 工具计数(启用/总)+ 不可达错因;缺 launcher(`npx`/`node`/`uvx`,如 DC `requires: node`)给"装 Node/uv"提示。
-  - **(实现说明)产物 CLI 本无 `doctor` 命令**(`harnessforge doctor` 是生成器脚手架预检),故 MCP 健康自检落为 `mcp status`,未在产物新增 `doctor`。
+  - **(实现说明)产物 CLI 本无 `doctor` 命令**(`harnessmith doctor` 是生成器脚手架预检),故 MCP 健康自检落为 `mcp status`,未在产物新增 `doctor`。
 - `README.md` / `AGENTS.md` — 增"MCP 管理"章节:管理页用法、`transport: stdio/http/sse` 选择(老 server 用 sse)、面板增删改 = 本地可信能力勿对公网暴露、`mcp status`/`doctor`、DC 默认开 + HITL 确认怎么用。
 
 ---
@@ -128,7 +128,7 @@
 - [x] **不泄密**:`/mcp/status` 仅回 env 名(`config` 字段无真值);server 增删改只收 env 名;trace/日志不回显(沿用 Slice 4)。
 - [x] **关 MCP 零痕迹**:`spec.mcp.enabled=false` 产物不含 `mcp.py`/MCP 标签/`/mcp/*`/`mcp` CLI 段(条件渲染 + `test_generator` 既有断言;`thin` golden `uv.lock` 不含 `mcp`)。
 - [x] **薄**:`mcp.py` 实测约 250 行(含常驻管理 + 重连 + 重同步 + SSE + status,仍单文件聚合,无新抽象层);`loop.py`/`active_names`/`call` 语义不变;`Registry` 仅加 `unregister`/`remove_where`。
-- [x] **大改动回归(动 mcp.py/web.py/cli.py/config.py + Registry 核心微改 + 跨≥3 文件,触 `§5.2`)**:全量 golden 10 + Docker 2(MCP/web/baseline 产物)+ `uvx harnessforge new` 冒烟全绿。
+- [x] **大改动回归(动 mcp.py/web.py/cli.py/config.py + Registry 核心微改 + 跨≥3 文件,触 `§5.2`)**:全量 golden 10 + Docker 2(MCP/web/baseline 产物)+ `uvx harnessmith new` 冒烟全绿。
 - [x] **黄金路径回归**:`coding-assistant`(含 MCP baseline)golden 端到端绿;关 MCP 的 `thin`/example golden 绿。`ReadLints` clean。
 
 ---
@@ -152,5 +152,5 @@
 - **密钥红线(`§6.5`)**:server 增删改只收 env 名;`/mcp/*` 响应 / trace / 日志不回显真值;密钥真值仍走 Slice 3 `/env` 写-only。
 - **安全面(新)**:网页增 stdio server = 让产物 spawn 任意命令 = 威胁模型 A 本地控制面,**非**对手强制边界;文档强调勿对公网暴露 `/config`/`/mcp`,"托管+发布"拓扑须 `/config` 与公开面隔离(Slice 14+,`/mcp/*` 纳入保护)。DC 默认开靠 HITL 兜底,但 HITL 也非安全边界(`01 §4`)。
 - **DC / Node 依赖**:DC 默认开需 Node(npx);缺 Node 时失败隔离(管理页标红 + `mcp status`/`doctor` 提示装 Node),不崩产物。Docker/离线沿用 Slice 6(uvx server 可烤镜像;Node server 需镜像带 Node,文档说明)。
-- **不绑框架**:`mcp` 是协议 SDK,非 agent 编排框架,仅 `mcp.enabled` 时进产物;管理面是产物自持,**HarnessForge 不做中心化 MCP 配置/托管**(守"生成后不再依赖 HarnessForge")。
+- **不绑框架**:`mcp` 是协议 SDK,非 agent 编排框架,仅 `mcp.enabled` 时进产物;管理面是产物自持,**HarnessSmith 不做中心化 MCP 配置/托管**(守"生成后不再依赖 HarnessSmith")。
 - **联网 MCP registry / `forge add` 增量接 server** 仍 v1+(Slice 14+),不在本片。

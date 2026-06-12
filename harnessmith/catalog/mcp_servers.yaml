@@ -1,0 +1,118 @@
+# Curated MCP server catalog (HarnessSmith, Slice 6).
+#
+# A *generation-time convenience datasource* — used by `harnessmith new
+# --mcp-server <name>` and by presets to PREFILL the generated repo's runtime
+# config.yaml (mcp.servers + tool allowlist). It is NOT a security gate and is
+# NOT part of HarnessSpec or its snapshot: the real gate is the runtime tool
+# allowlist + per-tool risk markers (high-risk tools default OFF). Secrets are
+# referenced by env-var NAME only — never values.
+#
+# Because the generated harness ships no built-in productivity tools, these MCP
+# presets double as the *capability baseline*. Each prefilled server is enabled by
+# a single `<server>__*` wildcard in config.yaml — its WHOLE toolset (read +
+# mutating/shell) is on by default (narrow it after generation if you want).
+# uvx-based servers (requires: uv) can be prewarmed at generation and baked into
+# the Docker image for offline use; Node-based servers (requires: node) need
+# Node/npx on the host.
+#
+# Per-tool `risk`: safe = read-only / low-impact (offered even to read-only
+# paradigms like plan/ask); high = mutating / shell / network side effects
+# (agent-only). `risk` feeds `safe_tools` (risk grading); the per-tool
+# `default_enabled` flag is retained as documentation but the prefill now enables
+# every tool via the wildcard regardless.
+version: 1
+
+servers:
+  fetch:
+    description: Fetch a URL from the internet and extract its content as markdown.
+    transport: stdio
+    command: uvx
+    args: [mcp-server-fetch]
+    requires: uv
+    source: https://pypi.org/project/mcp-server-fetch/
+    updated: "2026-06-04"
+    tools:
+      - {name: fetch, risk: safe, default_enabled: true}
+
+  ddg-search:
+    description: Web search via DuckDuckGo (keyless) plus fetching a result page as markdown.
+    transport: stdio
+    command: uvx
+    args: [duckduckgo-mcp-server]
+    requires: uv
+    source: https://github.com/nickclyde/duckduckgo-mcp-server
+    updated: "2026-06-04"
+    tools:
+      - {name: search, risk: safe, default_enabled: true}
+      - {name: fetch_content, risk: safe, default_enabled: true}
+
+  git:
+    description: Inspect and operate on local Git repositories (read tools on; write tools off).
+    transport: stdio
+    command: uvx
+    # No --repository pin on purpose: every git tool already takes a required
+    # `repo_path` arg, so pinning adds no default — it ONLY restricts which repo is
+    # reachable, AND makes mcp-server-git EXIT at startup when launched outside a
+    # git repo (it surfaces as the server going "unreachable: Connection closed").
+    # The server's health should reflect the tool, not the cwd; unpinned it stays
+    # up and the agent operates on whatever repo it points `repo_path` at.
+    args: [mcp-server-git]
+    requires: uv
+    source: https://pypi.org/project/mcp-server-git/
+    updated: "2026-06-04"
+    tools:
+      - {name: git_status, risk: safe, default_enabled: true}
+      - {name: git_diff_unstaged, risk: safe, default_enabled: true}
+      - {name: git_diff_staged, risk: safe, default_enabled: true}
+      - {name: git_diff, risk: safe, default_enabled: true}
+      - {name: git_log, risk: safe, default_enabled: true}
+      - {name: git_show, risk: safe, default_enabled: true}
+      - {name: git_branch, risk: safe, default_enabled: true}
+      - {name: git_add, risk: high, default_enabled: false}
+      - {name: git_reset, risk: high, default_enabled: false}
+      - {name: git_commit, risk: high, default_enabled: false}
+      - {name: git_create_branch, risk: high, default_enabled: false}
+      - {name: git_checkout, risk: high, default_enabled: false}
+      - {name: git_init, risk: high, default_enabled: false}
+
+  desktop-commander:
+    description: Terminal command execution + full filesystem read/write/edit (powerful; all tools high-risk, default off).
+    transport: stdio
+    command: npx
+    args: ["-y", "@wonderwhy-er/desktop-commander@latest"]
+    requires: node
+    source: https://github.com/wonderwhy-er/DesktopCommanderMCP
+    updated: "2026-01-23"
+    # A representative subset (Desktop Commander exposes ~30 tools). All high-risk;
+    # the prefilled `desktop-commander__*` wildcard enables the whole set (needs Node).
+    tools:
+      - {name: read_file, risk: high, default_enabled: false}
+      - {name: write_file, risk: high, default_enabled: false}
+      - {name: edit_block, risk: high, default_enabled: false}
+      - {name: list_directory, risk: high, default_enabled: false}
+      - {name: start_process, risk: high, default_enabled: false}
+
+  # --- Extra candidates (not in the coding-assistant baseline). Add with
+  #     `--mcp-server <name>` or paste the server block into config.yaml. ---
+
+  time:
+    description: Current time and timezone conversion utilities.
+    transport: stdio
+    command: uvx
+    args: [mcp-server-time]
+    requires: uv
+    source: https://pypi.org/project/mcp-server-time/
+    updated: "2026-06-04"
+    tools:
+      - {name: get_current_time, risk: safe, default_enabled: true}
+      - {name: convert_time, risk: safe, default_enabled: true}
+
+  github:
+    description: GitHub platform API (issues / PRs / repos). Remote MCP — needs a token.
+    transport: remote
+    url: https://api.githubcopilot.com/mcp/
+    auth_env: GITHUB_MCP_TOKEN
+    source: https://github.com/github/github-mcp-server
+    updated: "2026-06-04"
+    # Large surface (70+ tools); enable specific tools by name as needed.
+    tools: []

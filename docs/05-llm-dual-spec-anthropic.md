@@ -24,7 +24,7 @@
 
 产物循环**不直接依赖 OpenAI SDK**。`llm.py` 已是一层 Protocol/适配：
 
-```47:57:harnessforge/templates/src/__project_slug__/harness/llm.py.j2
+```47:57:harnessmith/templates/src/__project_slug__/harness/llm.py.j2
     def complete(self, messages: list[dict], tools: list[dict] | None) -> LLMResponse:
         ...
 

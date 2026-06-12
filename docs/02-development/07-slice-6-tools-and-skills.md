@@ -1,6 +1,6 @@
 # 02·07 - Slice 6:工具基线 + 标准 SKILL(MCP 预设让 agent 开箱可用 + Agent Skills 支持)
 
-> 目标:让生成产物**真正能干活**,两件:① **工具基线(MCP 预设)**——产物默认只有 time/calculator 玩具工具,故基线能力**全由 MCP 预设提供、不自写 built-in**:`fetch` 默认开、`git` 读类默认开/写类默认关、Desktop Commander 预填一键开;`harnessforge/catalog/mcp_servers.yaml` 供 wizard/CLI 预填 `config.yaml` 并指向 marketplace 快捷扩展;离线靠**生成期预热 + Docker 烤镜像**。② **标准 SKILL**——支持 **Agent Skills 开放标准**(`SKILL.md`,Claude/Cursor/Codex 等 25+ 工具通用),渐进披露三级,让产物直接讲可移植的 Skills。属 `01-project-plan.md` 的 **L2/L3(人已定向)**。
+> 目标:让生成产物**真正能干活**,两件:① **工具基线(MCP 预设)**——产物默认只有 time/calculator 玩具工具,故基线能力**全由 MCP 预设提供、不自写 built-in**:`fetch` 默认开、`git` 读类默认开/写类默认关、Desktop Commander 预填一键开;`harnessmith/catalog/mcp_servers.yaml` 供 wizard/CLI 预填 `config.yaml` 并指向 marketplace 快捷扩展;离线靠**生成期预热 + Docker 烤镜像**。② **标准 SKILL**——支持 **Agent Skills 开放标准**(`SKILL.md`,Claude/Cursor/Codex 等 25+ 工具通用),渐进披露三级,让产物直接讲可移植的 Skills。属 `01-project-plan.md` 的 **L2/L3(人已定向)**。
 >
 > **本片由 2026-06-05 重切而来**:原 Slice 5 过大,拆为 Slice 5(范式)/ Slice 6(本片:工具基线 + SKILL)/ Slice 7(wizard)。SKILL 放本片因**技能依赖工具**(读 `SKILL.md` 正文、跑脚本都靠文件/shell 工具)。
 >
@@ -22,15 +22,15 @@
 
 ## 1. 交付物
 
-生成器侧(`harnessforge/`):
+生成器侧(`harnessmith/`):
 
-- `harnessforge/catalog/mcp_servers.yaml`(Slice 4 挪来)— 静态精选 MCP server 清单,含**基线 server** `fetch`(`uvx mcp-server-fetch`)、`git`(`uvx mcp-server-git`)、Desktop Commander(`npx @wonderwhy-er/desktop-commander`)+ 各项 `name`/`description`/传输形态/所需 **env 变量名**/风险/来源+日期。
-- `harnessforge/generator.py` — `mcp.enabled` 时把基线/选中 server 合并进产物 `config.yaml mcp.servers`;**生成期预热缓存**(`uvx <server> --help` 拉进 `~/.cache/uv`,可 `--no-verify`/`--no-prewarm` 跳过)。
-- `harnessforge/templates/Dockerfile.j2` — `mcp.enabled` 时 build 阶段预热/`uv tool install` 把 server 烤进镜像 → 容器开箱即用、运行期离线。
-- `harnessforge/cli.py` — `new --mcp-server <name>`(从 catalog 预填)。
+- `harnessmith/catalog/mcp_servers.yaml`(Slice 4 挪来)— 静态精选 MCP server 清单,含**基线 server** `fetch`(`uvx mcp-server-fetch`)、`git`(`uvx mcp-server-git`)、Desktop Commander(`npx @wonderwhy-er/desktop-commander`)+ 各项 `name`/`description`/传输形态/所需 **env 变量名**/风险/来源+日期。
+- `harnessmith/generator.py` — `mcp.enabled` 时把基线/选中 server 合并进产物 `config.yaml mcp.servers`;**生成期预热缓存**(`uvx <server> --help` 拉进 `~/.cache/uv`,可 `--no-verify`/`--no-prewarm` 跳过)。
+- `harnessmith/templates/Dockerfile.j2` — `mcp.enabled` 时 build 阶段预热/`uv tool install` 把 server 烤进镜像 → 容器开箱即用、运行期离线。
+- `harnessmith/cli.py` — `new --mcp-server <name>`(从 catalog 预填)。
 - preset 调整:`coding-assistant` 升级为 **MCP 基线**(`mcp.enabled: true` + fetch 开 + git 读开/写关 + Desktop Commander 预填关);**另保留一个极薄 example**(不开 MCP)供 thin/golden 断言。
 
-生成产物侧(`harnessforge/templates/`,SKILL 由 `spec.skills.enabled` 门控):
+生成产物侧(`harnessmith/templates/`,SKILL 由 `spec.skills.enabled` 门控):
 
 - `src/<pkg>/harness/skills.py`(`skills.enabled` 时生成,目标 ≈ 60–120 行)— 标准 Agent Skills 支持:
   - **L1 发现/注入**:扫描技能目录(默认 `skills/`,可配 `.claude/skills/`、`.cursor/skills/`、`.agents/skills/`)下 `*/SKILL.md`,用已有 `pyyaml` 解析 frontmatter(`name`/`description`,可选 `disable-model-invocation`/`paths`/`allowed-tools`),把 `name + description (+ 路径)` 注入系统提示(经 `prompts.py`)。

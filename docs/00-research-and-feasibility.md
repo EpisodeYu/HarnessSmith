@@ -1,6 +1,6 @@
 # 调研与可行性:Agent Harness（2026）
 
-> 本文是 HarnessForge 立项的背景调研。先讲清楚 2026 年大火的 "harness" 概念，再盘点竞品、判断立项意义、评估可行性与难度。
+> 本文是 HarnessSmith 立项的背景调研。先讲清楚 2026 年大火的 "harness" 概念，再盘点竞品、判断立项意义、评估可行性与难度。
 
 ## 1. harness 是什么（2026 年的定义）
 
@@ -14,7 +14,7 @@
 
 ### 1.1 一个标准 harness 的组成
 
-这也正是 HarnessForge 需要能生成的模块:
+这也正是 HarnessSmith 需要能生成的模块:
 
 - **编排循环 (Orchestration Loop)**:ReAct / TAO(Thought-Action-Observation)状态机,决定何时继续、何时停、出错怎么办。"call the model until done" 不是 harness,是 bug。
 - **上下文工程 (Context Management)**:选择检索什么、压缩超窗历史、过滤噪音、把大工具输出 offload 到磁盘。多数 agent 失败源于"对着错误的上下文推理"。
@@ -27,17 +27,17 @@
 
 ### 1.2 关键趋势
 
-**模型越强,harness 越薄。** Manus 半年重写 5 次,每次都在删复杂度(复杂工具定义 → 通用 shell;"管理 agent" → 简单结构化交接)。这对 HarnessForge 是利好:目标就是"生成可拥有、可删改的薄 harness 代码",踩在潮流上。
+**模型越强,harness 越薄。** Manus 半年重写 5 次,每次都在删复杂度(复杂工具定义 → 通用 shell;"管理 agent" → 简单结构化交接)。这对 HarnessSmith 是利好:目标就是"生成可拥有、可删改的薄 harness 代码",踩在潮流上。
 
 ## 2. 竞品盘点(有无立项意义)
 
-把赛道分成三层,HarnessForge 的构思横跨其中两层:
+把赛道分成三层,HarnessSmith 的构思横跨其中两层:
 
 ### A. 无代码 / 低代码托管平台(描述→直接跑,框架隐藏,SaaS 托管)
 - Arahi AI、Nagent、MindStudio、SketricGen、Vellum。
 - **与诉求冲突**:锁定、托管、隐藏 harness,不给"可自定义、不依赖 agent 框架的代码"。
 
-### B. 代码脚手架生成器(最接近 HarnessForge)
+### B. 代码脚手架生成器(最接近 HarnessSmith)
 - [`create-agent-app` / AgentForge](https://github.com/Saichandra2520/agentforge):一条命令生成 ReAct/RAG/Multi-Agent —— 但**构建在 LangGraph 之上**(正是要避开的)。
 - [`create-google-adk-agent`](https://github.com/unrealandychan/create-adk-agent):交互式向导选 agent 类型/工具/MCP —— 但绑死 Google ADK。
 - [`full-stack-ai-agent-template`](https://github.com/vstorm-co/full-stack-ai-agent-template):FastAPI + Next.js,内置 5 个 agent 框架、4 个向量库、RAG、流式、会话持久化 —— 功能很全,但**静态模板 + 依赖 agent 框架**,没有 Web 配置向导。
@@ -49,7 +49,7 @@
 
 ### 结论:立项有意义,但窗口窄
 
-HarnessForge 设想的精确组合 —— **"不绑定 agent 编排框架(LangChain/LangGraph/ADK)、生成你完全拥有可删改代码的 harness 生成器 + Web 可视化配置向导 + MCP 工具目录 + RAG/上下文/护栏可选 + 同时产出 Web/CLI 接口"** —— 目前**没有完全对位的项目**。MVP 不一次做全,先收敛到「生成 → 跑通 → 易改」的黄金路径,其余按分层(L1/L2/L3)推进(详见 [01-project-plan.md](./01-project-plan.md))。
+HarnessSmith 设想的精确组合 —— **"不绑定 agent 编排框架(LangChain/LangGraph/ADK)、生成你完全拥有可删改代码的 harness 生成器 + Web 可视化配置向导 + MCP 工具目录 + RAG/上下文/护栏可选 + 同时产出 Web/CLI 接口"** —— 目前**没有完全对位的项目**。MVP 不一次做全,先收敛到「生成 → 跑通 → 易改」的黄金路径,其余按分层(L1/L2/L3)推进(详见 [01-project-plan.md](./01-project-plan.md))。
 
 差异化窗口比较窄,必须把以下三点打透,否则会被 `create-agent-app` 与 `full-stack-ai-agent-template` 覆盖:
 1. **无 agent 框架锁定(不是「无依赖」)**:生成代码零 LangChain/LangGraph/ADK 等 **agent 编排框架**依赖;底座只用通用库(openai SDK / pydantic / typer 等),不构成锁定。
@@ -60,7 +60,7 @@ HarnessForge 设想的精确组合 —— **"不绑定 agent 编排框架(LangCh
 
 - 官方 [MCP Registry](https://registry.modelcontextprotocol.io/);Smithery(7000+ servers,CLI 一键装)、mcp.so(19000+)、Glama、[awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers)。
 - MCP 在 2026 年初已达 ~9700+ 公共 server、月 ~9700 万 SDK 下载。官方 Python SDK 成熟,接入 stdio / HTTP-SSE 传输都简单。
-- HarnessForge MVP 接入 **stdio 本地 + 远程 HTTP/SSE 传输**(2026-06-03 定向,取代初版"仅 stdio");生成期只决定有无,server/tool 全运行期 `config.yaml` 配。**联网 registry 仍推迟 v1+**;静态 catalog 降级为 wizard 预填便捷数据源(非安全闸)。安全上需注意:工具元数据会被 agent 当指令,优先用 vendor 维护的 server、收紧权限、高风险工具默认关。
+- HarnessSmith MVP 接入 **stdio 本地 + 远程 HTTP/SSE 传输**(2026-06-03 定向,取代初版"仅 stdio");生成期只决定有无,server/tool 全运行期 `config.yaml` 配。**联网 registry 仍推迟 v1+**;静态 catalog 降级为 wizard 预填便捷数据源(非安全闸)。安全上需注意:工具元数据会被 agent 当指令,优先用 vendor 维护的 server、收紧权限、高风险工具默认关。
 
 ## 4. 可行性与难度
 

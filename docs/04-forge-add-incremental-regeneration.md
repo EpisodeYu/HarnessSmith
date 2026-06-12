@@ -8,13 +8,13 @@
 
 ## 1. 要解决的问题：own-your-code 的"税"
 
-HarnessForge 的卖点是 own-your-code：产出一份你拥有、可读可删改、**生成后不再依赖 HarnessForge** 的仓库。但这份自由有一个固有代价：
+HarnessSmith 的卖点是 own-your-code：产出一份你拥有、可读可删改、**生成后不再依赖 HarnessSmith** 的仓库。但这份自由有一个固有代价：
 
-> 我生成了一个 CLI-only 的薄 harness，改了 `paradigms/agent.py` 的提示拼装、给 `tools.py` 加了三个自定义工具。**两周后我想加 Web 界面 / 开 MCP / 再加一个 `plan` 范式**——难道要重新 `harnessforge new` 一遍、把我的编辑全丢掉、再手工搬回去？
+> 我生成了一个 CLI-only 的薄 harness，改了 `paradigms/agent.py` 的提示拼装、给 `tools.py` 加了三个自定义工具。**两周后我想加 Web 界面 / 开 MCP / 再加一个 `plan` 范式**——难道要重新 `harnessmith new` 一遍、把我的编辑全丢掉、再手工搬回去？
 
-这正是 `create-next-app` 生态用 **codemod / `add` 子命令** 解决的问题（"加一个 feature 而不重建项目"）。目前 HarnessForge 只有：
+这正是 `create-next-app` 生态用 **codemod / `add` 子命令** 解决的问题（"加一个 feature 而不重建项目"）。目前 HarnessSmith 只有：
 
-- **生成期一次性**：`harnessforge new`（全量渲染 + `git init` + `uv lock` + 冒烟自检）。
+- **生成期一次性**：`harnessmith new`（全量渲染 + `git init` + `uv lock` + 冒烟自检）。
 - **重跑保护**：重跑 `new` 到已存在目录会**警告不覆盖**（防误删编辑）——但这也意味着"加能力"目前**无路可走**，只能手抄。
 
 结论：**own-your-code 越成功（用户越敢改代码），"加能力"的痛越尖锐。** 不解决它，"薄 + 拥有"会在第二次需求到来时反噬体验。
@@ -41,7 +41,7 @@ HarnessForge 的卖点是 own-your-code：产出一份你拥有、可读可删�
 
 ## 4. 关键使能件：产物自带的 `harness.spec.yaml`
 
-`harnessforge new` 已经把**完整 spec 快照**拷进产物根（`harness.spec.yaml`）。这是 `forge add` 的支点：
+`harnessmith new` 已经把**完整 spec 快照**拷进产物根（`harness.spec.yaml`）。这是 `forge add` 的支点：
 
 ```
 forge add web 的本质 =
@@ -54,7 +54,7 @@ forge add web 的本质 =
 
 因为 spec 快照在、且 spec 是**声明式**的，`forge add` = "把声明从 A 改成 A+web，并补齐 A→A+web 的代码增量"。这与 `01 §4` 的"结构性配置只能重新生成或 `forge add`"完全一致。
 
-> **不破"生成后不再依赖 HarnessForge"**：产物**运行期**永远不 import `harnessforge`。`forge add` 是**可选的开发期便利**（你再次主动调用生成器作用在你的仓库上，等同 codemod 工具），不是运行期依赖。不用它，产物照跑；用它，等于"让原厂脚手架帮你补一段代码再交回给你改"。这条边界必须在文档与 UX 上讲死。
+> **不破"生成后不再依赖 HarnessSmith"**：产物**运行期**永远不 import `harnessmith`。`forge add` 是**可选的开发期便利**（你再次主动调用生成器作用在你的仓库上，等同 codemod 工具），不是运行期依赖。不用它，产物照跑；用它，等于"让原厂脚手架帮你补一段代码再交回给你改"。这条边界必须在文档与 UX 上讲死。
 
 ## 5. 核心难点：把代码生成进"用户已编辑过的仓库"
 
@@ -99,7 +99,7 @@ from . import agent                              # 总在
 
 两种插入机制（可并用）：
 1. **结构化插入**：spec 改 flag（如 `interfaces.web=true`）→ 只渲染那些 `{% raw %}{% if interfaces.web %}{% endraw %}` 条件命中的"缺席文件"（`interfaces/web.py`、`web_index.html`）+ 改 `pyproject.toml` 的 optional-dependencies（结构化编辑 TOML，不做正则）。**生成器已有"按 spec 条件渲染文件"机制（Slice 3 引入），`add` 复用它，只渲染 delta。**
-2. **锚点标记插入**：对必须改的少量"接线点"（如 `paradigms/__init__.py` 的 import 块）放显式锚点注释（`# >>> harnessforge:paradigm-imports`），`add` 只在锚点间幂等插入。用户没动锚点 → 干净插入；动了 → 停下提示手工接线（给出要插的那一行）。
+2. **锚点标记插入**：对必须改的少量"接线点"（如 `paradigms/__init__.py` 的 import 块）放显式锚点注释（`# >>> harnessmith:paradigm-imports`），`add` 只在锚点间幂等插入。用户没动锚点 → 干净插入；动了 → 停下提示手工接线（给出要插的那一行）。
 - **冲突策略**：能 `git apply` 的补丁就 apply；冲突就**留给用户**（写出 `.rej` 或在 diff 里标冲突），绝不静默覆盖。
 - **每步收尾**：回写 spec + `uv lock` + 冒烟自检 + 打印 `git diff --stat`。
 
@@ -114,12 +114,12 @@ from . import agent                              # 总在
 ## 7. 命令面草图（实现前细化）
 
 ```bash
-harnessforge add web                 # 开产物 Web 接口（新增 interfaces/web.py + extra）
-harnessforge add mcp                 # 开 MCP 能力（新增 harness/mcp.py + mcp extra）
-harnessforge add mcp-server fetch    # Phase 1：往 config.yaml 预填一个 catalog server
-harnessforge add paradigm plan       # 增一个内置范式（新增文件 + 受控接线）
-harnessforge add skill my-skill      # Phase 1：新建 skills/my-skill/SKILL.md
-harnessforge upgrade                 # Phase 3：模板版本演进（3-way merge）
+harnessmith add web                 # 开产物 Web 接口（新增 interfaces/web.py + extra）
+harnessmith add mcp                 # 开 MCP 能力（新增 harness/mcp.py + mcp extra）
+harnessmith add mcp-server fetch    # Phase 1：往 config.yaml 预填一个 catalog server
+harnessmith add paradigm plan       # 增一个内置范式（新增文件 + 受控接线）
+harnessmith add skill my-skill      # Phase 1：新建 skills/my-skill/SKILL.md
+harnessmith upgrade                 # Phase 3：模板版本演进（3-way merge）
 
 # 通用旗标
   --dry-run        # 只打印将改哪些文件 / diff，不落地（强制可预览）
@@ -139,7 +139,7 @@ harnessforge upgrade                 # Phase 3：模板版本演进（3-way merg
 
 ## 9. 红线复核（对照 `01 §6`）
 
-- **不让产物运行期依赖 HarnessForge**：`forge add` 是开发期可选 codemod，产物运行不 import `harnessforge`；不用它产物照跑。✅（§4 已讲死）
+- **不让产物运行期依赖 HarnessSmith**：`forge add` 是开发期可选 codemod，产物运行不 import `harnessmith`；不用它产物照跑。✅（§4 已讲死）
 - **不做中心化配置/托管**：`forge add` 在用户本机作用于本地仓库，不联网、不回传、无中心服务。✅
 - **不引 agent 框架 / 不加运行期依赖到默认产物**：`add` 只渲染既有模板的 delta，依赖仍由 spec 开关决定、零额外运行期依赖。✅
 - **不做在线 MCP registry**：`add mcp-server` 只从**本地静态 catalog**（Slice 6）预填，不联网拉 registry。✅
@@ -154,5 +154,5 @@ harnessforge upgrade                 # Phase 3：模板版本演进（3-way merg
 
 ---
 
-> 一句话：`forge add` 把 own-your-code 从"一次性吐代码"升级成"可增量演进的代码所有权"，是 HarnessForge 区别于托管平台与框架的**结构性**优势。建议从 **Phase 1 安全子集** 起步验证，再决定是否深入 Phase 2/3。
+> 一句话：`forge add` 把 own-your-code 从"一次性吐代码"升级成"可增量演进的代码所有权"，是 HarnessSmith 区别于托管平台与框架的**结构性**优势。建议从 **Phase 1 安全子集** 起步验证，再决定是否深入 Phase 2/3。
 </content>

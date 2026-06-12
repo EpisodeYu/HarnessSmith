@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from harnessforge.catalog import (
+from harnessmith.catalog import (
     CatalogError,
     available_servers,
     get_server,

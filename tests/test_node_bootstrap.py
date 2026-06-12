@@ -6,7 +6,7 @@ import io
 import tarfile
 from pathlib import Path
 
-from harnessforge import node_bootstrap as nb
+from harnessmith import node_bootstrap as nb
 
 
 def _node_targz(dirname: str) -> bytes:

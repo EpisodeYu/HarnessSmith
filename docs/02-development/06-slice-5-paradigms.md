@@ -26,13 +26,13 @@
 
 ## 1. 交付物
 
-生成器侧(`harnessforge/`):
+生成器侧(`harnessmith/`):
 
-- `harnessforge/spec.py` — `HarnessSpec` 新增 **`paradigms: list[Literal["agent","plan","ask"]] = ["agent"]`**(选渲染哪些内置范式;校验非空 + 去重;**首项作 `config.yaml` 默认范式初值种子**)。改 schema → `CLAUDE.md §6.1`;字段+运行期配置形态已定稿(§4⑪,集修订见 §4②′)。spec.py 落地时同步 `01 §5` + `00-overview §3`。
-- `harnessforge/generator.py` — **始终渲染** `harness/paradigms/` 注册表 + `agent`;`plan`/`ask` 按 `'<p>' in spec.paradigms` **整文件条件渲染**(每范式独立文件,复用 Slice 3 `CONDITIONAL_TEMPLATES`);`config.yaml` 渲染 `paradigms:` 段(`enabled` = 选中集合,`default` = 首项)。
+- `harnessmith/spec.py` — `HarnessSpec` 新增 **`paradigms: list[Literal["agent","plan","ask"]] = ["agent"]`**(选渲染哪些内置范式;校验非空 + 去重;**首项作 `config.yaml` 默认范式初值种子**)。改 schema → `CLAUDE.md §6.1`;字段+运行期配置形态已定稿(§4⑪,集修订见 §4②′)。spec.py 落地时同步 `01 §5` + `00-overview §3`。
+- `harnessmith/generator.py` — **始终渲染** `harness/paradigms/` 注册表 + `agent`;`plan`/`ask` 按 `'<p>' in spec.paradigms` **整文件条件渲染**(每范式独立文件,复用 Slice 3 `CONDITIONAL_TEMPLATES`);`config.yaml` 渲染 `paradigms:` 段(`enabled` = 选中集合,`default` = 首项)。
 - 多范式 fixture(测试内 `spec.paradigms = ["agent","plan","ask"]`,同 web/mcp 模式)+ 一个**用户自定义范式扩展测试**;`coding-assistant` preset 范式保持默认 `["agent"]`(其 MCP 基线升级见 Slice 6)。
 
-生成产物侧(`harnessforge/templates/`):
+生成产物侧(`harnessmith/templates/`):
 
 - `src/<pkg>/harness/paradigms/`(**始终生成**)— 范式注册表 + 内置范式:
   - `__init__.py` — `Paradigm` 契约(统一签名,沿用 `loop.run` 形:`run(user_input, *, ...) -> RunResult`)+ `register_paradigm(name)` 装饰器 + `PARADIGMS: dict[str, Paradigm]` + `get_paradigm(name)` + 共享 plumbing(`assistant_message`/`run_tool`/`limit_message`);导入内置范式触发注册。**薄注册表,非编排引擎**(红线)。

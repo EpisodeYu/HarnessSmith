@@ -3,7 +3,7 @@
 The pure ``build_spec`` / ``slugify`` logic is exercised directly (no tty); the
 ``run_wizard`` prompt flow is driven with a stubbed ``questionary`` so no terminal
 is needed. The wizard must reuse the same baking/catalog helpers as the web form
-(``harnessforge.scaffold``) and must NOT pull FastAPI (it runs from the core CLI).
+(``harnessmith.scaffold``) and must NOT pull FastAPI (it runs from the core CLI).
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from harnessforge.cli_wizard import WizardAborted, build_spec, run_wizard
-from harnessforge.scaffold import DEFAULT_SYSTEM_PROMPT, slugify
+from harnessmith.cli_wizard import WizardAborted, build_spec, run_wizard
+from harnessmith.scaffold import DEFAULT_SYSTEM_PROMPT, slugify
 
 
 @pytest.mark.parametrize(
@@ -156,9 +156,9 @@ def test_run_wizard_aborts_when_user_cancels(monkeypatch):
 
 def test_cli_wizard_imports_without_fastapi():
     """Red line: the CLI wizard path (scaffold + cli_wizard) must stay FastAPI-free
-    so `uvx harnessforge new` never pulls the wizard extra."""
+    so `uvx harnessmith new` never pulls the wizard extra."""
     code = (
-        "import harnessforge.cli_wizard, harnessforge.scaffold, sys; "
+        "import harnessmith.cli_wizard, harnessmith.scaffold, sys; "
         "assert 'fastapi' not in sys.modules, sorted(sys.modules)"
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)

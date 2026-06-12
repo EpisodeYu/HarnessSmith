@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from harnessforge.presets import (
+from harnessmith.presets import (
     PresetNotFoundError,
     available_presets,
     preset_mcp_servers,
     preset_spec_path,
 )
-from harnessforge.spec import load_spec
+from harnessmith.spec import load_spec
 
 
 def test_coding_assistant_preset_is_available():

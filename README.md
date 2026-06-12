@@ -1,6 +1,6 @@
-# HarnessForge
+# HarnessSmith
 
-> **Forge your own agent harness.** A config-to-code generator that produces a standalone, framework-free agent harness you fully own — no LangChain, no LangGraph, no ADK, and no dependency on HarnessForge after generation.
+> **Forge your own agent harness.** A config-to-code generator that produces a standalone, framework-free agent harness you fully own — no LangChain, no LangGraph, no ADK, and no dependency on HarnessSmith after generation.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
@@ -14,7 +14,7 @@
 
 The contemporary consensus is captured by one equation: **`Agent = Model + Harness`**. The model reasons; the harness is everything else that makes an agent work in practice — the orchestration loop, tool execution, context management, session state, guardrails, and observability.
 
-HarnessForge is a generator for that harness, in the spirit of `create-next-app`. A specification (`HarnessSpec`) is captured through a web wizard, an interactive terminal wizard, a preset, or a hand-written YAML file; HarnessForge then renders a **complete, independent Python repository** — readable, editable, testable, and runnable on its own. The generated project is not a consumer of HarnessForge: once generated, it has zero relationship with the generator.
+HarnessSmith is a generator for that harness, in the spirit of `create-next-app`. A specification (`HarnessSpec`) is captured through a web wizard, an interactive terminal wizard, a preset, or a hand-written YAML file; HarnessSmith then renders a **complete, independent Python repository** — readable, editable, testable, and runnable on its own. The generated project is not a consumer of HarnessSmith: once generated, it has zero relationship with the generator.
 
 ### Design positioning
 
@@ -123,28 +123,28 @@ The generated `pyproject.toml` contains no agent-orchestration framework, and th
 
 ### Installation
 
-HarnessForge v0.1.0 is a pre-release and is not yet published to PyPI. Run it from a clone:
+HarnessSmith v0.1.0 is a pre-release and is not yet published to PyPI. Run it from a clone:
 
 ```bash
-git clone https://github.com/EpisodeYu/HarnessForge.git
-cd HarnessForge
+git clone https://github.com/EpisodeYu/HarnessSmith.git
+cd HarnessSmith
 uv sync
 ```
 
-Once published, the same commands will work installation-free via `uvx harnessforge …`.
+Once published, the same commands will work installation-free via `uvx harnessmith …`.
 
 ### Generating a harness
 
 ```bash
-uv run harnessforge new my-agent --preset coding-assistant   # from a bundled preset
-uv run harnessforge new my-agent --spec ./harness.spec.yaml  # from a hand-written spec
-uv run harnessforge new                                      # interactive terminal wizard
-uv run harnessforge wizard                                   # web wizard (uv sync --extra wizard)
-uv run harnessforge doctor                                   # preflight check of the local toolchain
+uv run harnessmith new my-agent --preset coding-assistant   # from a bundled preset
+uv run harnessmith new my-agent --spec ./harness.spec.yaml  # from a hand-written spec
+uv run harnessmith new                                      # interactive terminal wizard
+uv run harnessmith wizard                                   # web wizard (uv sync --extra wizard)
+uv run harnessmith doctor                                   # preflight check of the local toolchain
 ```
 
 - The **terminal wizard** (`new` with no `--spec` / `--preset`) and the **web wizard** (`wizard`) collect the same structural choices — display name, paradigms, web interface, MCP, skills, memory — and apply identical defaults; they are suited to headless servers and desktops respectively.
-- Alternatively, the repository root provides one-click launchers — `HarnessForge.bat` (Windows) and `HarnessForge.sh` (macOS / Linux) — which offer a choice between the web and terminal wizards and can install uv on first use.
+- Alternatively, the repository root provides one-click launchers — `HarnessSmith.bat` (Windows) and `HarnessSmith.sh` (macOS / Linux) — which offer a choice between the web and terminal wizards and can install uv on first use.
 - After rendering, the generator locks dependencies and runs a smoke verification (`uv sync`, import check, one mock function-calling turn, `pytest`). Pass `--no-verify` to skip it, for example when offline.
 - Secrets are never collected by any wizard and never enter the spec, the generated `config.yaml`, or git.
 
@@ -206,15 +206,15 @@ Structural changes (adding or removing an interface or module) require regenerat
 
 # 中文
 
-> **锻造你自己的 agent harness。** 一个"配置即生成"的代码生成器,产出一套你完全拥有的独立 agent harness 代码仓库——不绑定任何 agent 编排框架(无 LangChain、LangGraph、ADK),生成后不再依赖 HarnessForge。
+> **锻造你自己的 agent harness。** 一个"配置即生成"的代码生成器,产出一套你完全拥有的独立 agent harness 代码仓库——不绑定任何 agent 编排框架(无 LangChain、LangGraph、ADK),生成后不再依赖 HarnessSmith。
 
-[English](#harnessforge) | **中文**
+[English](#harnessmith) | **中文**
 
 ## 概述
 
 当下的共识可以浓缩为一个等式:**`Agent = Model + Harness`**。模型负责推理;harness 是让 agent 真正可用的其余一切——编排循环、工具执行、上下文管理、会话状态、护栏与可观测性。
 
-HarnessForge 是这层 harness 的生成器,定位类似 `create-next-app`。通过 Web 向导、终端交互向导、preset 或手写 YAML 采集一份规格(`HarnessSpec`),HarnessForge 据此渲染出一个**完整、独立的 Python 代码仓库**——可读、可改、可测试、可独立运行。生成的项目与 HarnessForge 没有任何运行期关系:生成即脱离。
+HarnessSmith 是这层 harness 的生成器,定位类似 `create-next-app`。通过 Web 向导、终端交互向导、preset 或手写 YAML 采集一份规格(`HarnessSpec`),HarnessSmith 据此渲染出一个**完整、独立的 Python 代码仓库**——可读、可改、可测试、可独立运行。生成的项目与 HarnessSmith 没有任何运行期关系:生成即脱离。
 
 ### 设计定位
 
@@ -301,28 +301,28 @@ HarnessForge 是这层 harness 的生成器,定位类似 `create-next-app`。通
 
 ### 安装
 
-HarnessForge v0.1.0 为预发布版本,尚未发布到 PyPI,需从源码运行:
+HarnessSmith v0.1.0 为预发布版本,尚未发布到 PyPI,需从源码运行:
 
 ```bash
-git clone https://github.com/EpisodeYu/HarnessForge.git
-cd HarnessForge
+git clone https://github.com/EpisodeYu/HarnessSmith.git
+cd HarnessSmith
 uv sync
 ```
 
-发布到 PyPI 后,同样的命令可经 `uvx harnessforge …` 免安装使用。
+发布到 PyPI 后,同样的命令可经 `uvx harnessmith …` 免安装使用。
 
 ### 生成 harness
 
 ```bash
-uv run harnessforge new my-agent --preset coding-assistant   # 使用内置 preset
-uv run harnessforge new my-agent --spec ./harness.spec.yaml  # 使用手写 spec
-uv run harnessforge new                                      # 终端交互向导
-uv run harnessforge wizard                                   # Web 向导(uv sync --extra wizard)
-uv run harnessforge doctor                                   # 本机工具链预检
+uv run harnessmith new my-agent --preset coding-assistant   # 使用内置 preset
+uv run harnessmith new my-agent --spec ./harness.spec.yaml  # 使用手写 spec
+uv run harnessmith new                                      # 终端交互向导
+uv run harnessmith wizard                                   # Web 向导(uv sync --extra wizard)
+uv run harnessmith doctor                                   # 本机工具链预检
 ```
 
 - **终端向导**(`new` 不带 `--spec` / `--preset`)与 **Web 向导**(`wizard`)采集同一组结构选项——显示名、范式、Web 界面、MCP、技能、记忆——并应用一致的默认值;前者适合无图形界面的服务器,后者适合桌面环境。
-- 也可使用仓库根目录的一键启动器——`HarnessForge.bat`(Windows)与 `HarnessForge.sh`(macOS / Linux)——它会让你在 Web 向导与终端向导之间选择,并可在首次使用时代为安装 uv。
+- 也可使用仓库根目录的一键启动器——`HarnessSmith.bat`(Windows)与 `HarnessSmith.sh`(macOS / Linux)——它会让你在 Web 向导与终端向导之间选择,并可在首次使用时代为安装 uv。
 - 渲染完成后,生成器锁定依赖并执行冒烟验证(`uv sync`、import 检查、一次 mock function-calling、`pytest`);离线等场景可用 `--no-verify` 跳过。
 - 任何向导都不采集密钥;密钥不会进入 spec、生成的 `config.yaml` 或 git。
 

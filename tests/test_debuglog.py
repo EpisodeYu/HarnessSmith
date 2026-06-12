@@ -1,4 +1,4 @@
-"""The generator's always-on local debug log (harnessforge/debuglog.py)."""
+"""The generator's always-on local debug log (harnessmith/debuglog.py)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from logging.handlers import RotatingFileHandler
 import pytest
 from typer.testing import CliRunner
 
-from harnessforge import debuglog
-from harnessforge.cli import app
+from harnessmith import debuglog
+from harnessmith.cli import app
 
 runner = CliRunner()
 
@@ -49,9 +49,9 @@ def test_cli_logs_invocation_and_spec_errors(isolated_log, tmp_path):
 
 
 def test_generate_logs_render_phases(isolated_log, tmp_path):
-    from harnessforge.generator import generate
-    from harnessforge.presets import preset_spec_path
-    from harnessforge.spec import load_spec
+    from harnessmith.generator import generate
+    from harnessmith.presets import preset_spec_path
+    from harnessmith.spec import load_spec
 
     debuglog.setup()
     spec = load_spec(preset_spec_path("coding-assistant"))

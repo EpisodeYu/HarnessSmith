@@ -6,11 +6,11 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-import harnessforge.cli as cli_mod
-from harnessforge.cli import app
-from harnessforge.cli_wizard import WizardResult
-from harnessforge.generator import GenerationResult
-from harnessforge.spec import HarnessSpec
+import harnessmith.cli as cli_mod
+from harnessmith.cli import app
+from harnessmith.cli_wizard import WizardResult
+from harnessmith.generator import GenerationResult
+from harnessmith.spec import HarnessSpec
 
 runner = CliRunner()
 

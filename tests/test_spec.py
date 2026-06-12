@@ -8,8 +8,8 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from harnessforge.scaffold import DEFAULT_SYSTEM_PROMPT
-from harnessforge.spec import HarnessSpec, load_spec
+from harnessmith.scaffold import DEFAULT_SYSTEM_PROMPT
+from harnessmith.spec import HarnessSpec, load_spec
 
 EXAMPLE_SPEC = Path(__file__).resolve().parents[1] / "examples" / "spec.yaml"
 

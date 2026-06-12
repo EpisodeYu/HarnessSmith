@@ -14,7 +14,7 @@
 
 ---
 
-## 1. 先认清 HarnessForge 已经站在哪
+## 1. 先认清 HarnessSmith 已经站在哪
 
 读 `00-research-and-feasibility.md §1.1` 列的"标准 harness 八件套"，对照现状，**这个项目已经覆盖了大半**，而且覆盖方式恰好是事实标准正在收敛的形态（薄循环 + MCP + Skills + 渐进披露 + 可扩展注册表）。这点要先讲清楚，否则容易把"已经做对的事"当成"还要补的洞"。
 
@@ -22,22 +22,22 @@
 
 - **原生 function-calling 循环**（TAO/ReAct）——和 Codex/Claude Code 的核心循环是同一个原语：把工具结果喂回、累积上下文、直到模型不再调工具。`paradigms/agent.py` 154 行讲完，符合"模型越强 harness 越薄"的趋势。
 - **MCP（stdio + 远程 HTTP/SSE）**——事实标准的工具层，已是 on/off 开关 + 运行期配置。
-- **Agent Skills 开放标准**（`SKILL.md` 渐进披露）——这是 Anthropic 2025-12 开源、25+ 工具可移植的标准，HarnessForge 已对齐（Slice 6）。
+- **Agent Skills 开放标准**（`SKILL.md` 渐进披露）——这是 Anthropic 2025-12 开源、25+ 工具可移植的标准，HarnessSmith 已对齐（Slice 6）。
 - **全局 rule 文件注入**（`AGENTS.md`/`CLAUDE.md`/`.cursor/rules` 模式）——Slice 6B。
 - **Plan / Ask 只读范式**——对齐 Cursor 三件套。
 - **上下文压缩**（`truncate`/`summarize` + 可组合触发条件 + 可扩展注册表）——对位各家的 `/compact`，而且**可扩展这一层是领先的**：竞品的 compaction 大多是黑盒，这里是 `@register_strategy`/`@register_condition` 的 own-code。
 - **可观测 + 预算**（JSONL trace + token/cost + 4 维 per-run 预算）——对位 `/cost` 与各家 telemetry。
 - **多 profile + 角色路由**、**code-level 生命周期 hooks**、**写-only `.env` 助手**、**注册表自省**（`info` / `GET /registries`）。
 
-**结论**：黄金路径上 HarnessForge 没有"功能洞"，它的洞在**人机协作的交互层（确认/会话/回滚）**和**新进入标配的安全/可信层**——这正是下面要分析的。
+**结论**：黄金路径上 HarnessSmith 没有"功能洞"，它的洞在**人机协作的交互层（确认/会话/回滚）**和**新进入标配的安全/可信层**——这正是下面要分析的。
 
 ---
 
-## 2. 能力对标表（2026 事实标准 × HarnessForge 现状）
+## 2. 能力对标表（2026 事实标准 × HarnessSmith 现状）
 
 把当前被 Claude Code / Codex CLI / Cursor / Cline / Gemini(Antigravity) CLI / Goose / OpenHands 共同确立的能力逐条对账。"标配"= 多数主流 harness 都默认带；"新兴"= 头部已有、正在扩散。
 
-| # | 能力 | 谁有 / 成熟度 | HarnessForge 现状 | 差距判断 |
+| # | 能力 | 谁有 / 成熟度 | HarnessSmith 现状 | 差距判断 |
 |---|------|---------------|-------------------|----------|
 | 1 | 原生 function-calling 循环 | 全员 / 标配 | ✅ `paradigms/agent.py` | 无 |
 | 2 | MCP（stdio + HTTP） | 全员 / 标配 | ✅ Slice 4 | 无 |
@@ -63,7 +63,7 @@
 | 22 | 插件 / marketplace | Claude/Antigravity / 新兴 | ⚠️ 靠 MCP marketplace 文档 | 低优先 → Tier 3 |
 
 **两条总结**：
-1. 真正"已成标配、HarnessForge 还没有、且 backlog 也没登记"的有三项：**#10 HITL 交互确认、#12 Checkpoints、#14 会话持久化/resume**。其中 **#10、#14 薄、不触红线、强契合 own-your-code，最值得先做**；**#12 Checkpoints 经 2026-06-08 评估撤销不内建**（理由见 §3 T1-C），改由"用户自管 git + #10 HITL + Docker"覆盖。
+1. 真正"已成标配、HarnessSmith 还没有、且 backlog 也没登记"的有三项：**#10 HITL 交互确认、#12 Checkpoints、#14 会话持久化/resume**。其中 **#10、#14 薄、不触红线、强契合 own-your-code，最值得先做**；**#12 Checkpoints 经 2026-06-08 评估撤销不内建**（理由见 §3 T1-C），改由"用户自管 git + #10 HITL + Docker"覆盖。
 2. 其余多数缺口（#9/#13/#17/#18/#19）其实**已经在 v1+ backlog 里**——本文的价值是给它们标出"哪些已经从'锦上添花'升级成'2026 标配'"，从而调整优先级。
 
 ---
@@ -144,12 +144,12 @@
 
 ## 6. 只有"own-your-code 生成器"才能打的差异化（强烈建议至少投 1 个）
 
-前面的 §3–§5 多数是"补齐别人也有的标配"。但 HarnessForge 有两个**竞品结构上做不到**的杠杆——因为竞品要么是托管平台、要么是你 import 的框架，**都不交付一份你拥有的代码**。这才是真正的护城河投资。
+前面的 §3–§5 多数是"补齐别人也有的标配"。但 HarnessSmith 有两个**竞品结构上做不到**的杠杆——因为竞品要么是托管平台、要么是你 import 的框架，**都不交付一份你拥有的代码**。这才是真正的护城河投资。
 
 ### D-1 · `forge add` / 增量再生成 + 模板升级（headline 差异化）
 
-- **痛点**：own-your-code 的最大代价是"我生成后改了代码，现在想加 Web / MCP / 换范式，难道要重新生成、丢掉我的编辑？" 这是 `create-next-app` 生态用 **codemod / `add` 子命令**解决的问题，目前 HarnessForge 只在 backlog 里零散提过 `forge add/regenerate`。
-- **建议**：把它升格为 v1+ 的**头号产品投资**——`harnessforge add web|mcp|skills|paradigm <name>` 做**结构轴的增量生成**（只新增"缺席"的能力代码，对已存在文件做 3-way merge / 仅插入扩展点），`harnessforge upgrade` 做模板版本升级（靠 `harness.spec.yaml` 里的 `version` 做 codemod）。
+- **痛点**：own-your-code 的最大代价是"我生成后改了代码，现在想加 Web / MCP / 换范式，难道要重新生成、丢掉我的编辑？" 这是 `create-next-app` 生态用 **codemod / `add` 子命令**解决的问题，目前 HarnessSmith 只在 backlog 里零散提过 `forge add/regenerate`。
+- **建议**：把它升格为 v1+ 的**头号产品投资**——`harnessmith add web|mcp|skills|paradigm <name>` 做**结构轴的增量生成**（只新增"缺席"的能力代码，对已存在文件做 3-way merge / 仅插入扩展点），`harnessmith upgrade` 做模板版本升级（靠 `harness.spec.yaml` 里的 `version` 做 codemod）。
 - **为什么是护城河**：它把"own-your-code 的代价"直接抵消掉，且**结构上锁死了竞品**——托管平台没有你的代码可 add，框架的"add" 只是装包不是改你的循环。这是把 `01 §4` 的"结构轴/能力天花板"做成可增量演进的产品化兑现。
 - **难度诚实**：3-way merge 进用户已编辑的代码是这份建议里最难的（要处理冲突、要可预测）。可先从"纯新增、不碰已有文件"的安全子集起步（加一个新范式/新 MCP 块），把会改已有文件的留后。
 - **详设**：完整设计（三种操作 add/upgrade/regenerate 的区分、`harness.spec.yaml` 快照作支点、扩展点锚点插入、分 Phase 落地、红线复核、待签决策）见 [`04-forge-add-incremental-regeneration.md`](./04-forge-add-incremental-regeneration.md)。

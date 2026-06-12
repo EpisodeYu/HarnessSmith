@@ -20,7 +20,7 @@
 
 ## 1. 交付物
 
-生成器侧(`harnessforge/`):
+生成器侧(`harnessmith/`):
 
 - `spec.py` — `Interfaces` 新增 `tui: bool = False`(仿 `web`;`extra="forbid"` 不变,`HarnessSpec.interfaces` 不改)。
 - `generator.py` — `CONDITIONAL_TEMPLATES` 新增 `src/__project_slug__/interfaces/tui.py.j2`、`tests/test_tui.py.j2`(谓词 `spec.interfaces.tui`);`_build_context` 已传 `interfaces`,无需改。
@@ -33,7 +33,7 @@
 - `cli.py`(生成器)— `new` 的 debug 日志加 `tui=`(仿 `web=`)。
 - `examples/spec.yaml` / `presets/coding-assistant/spec.yaml` — 显式 `tui: false`(守薄默认)。
 
-生成产物侧(`harnessforge/templates/`,`interfaces.tui` 门控):
+生成产物侧(`harnessmith/templates/`,`interfaces.tui` 门控):
 
 - `src/<pkg>/interfaces/tui.py` — Textual App:
   - `ChatScreen`(默认):流式消息区 + 输入框 + 状态栏(model / paradigm / steps / tokens / cost)+ 工具调用内联渲染 + 未配 LLM banner(引导进 config);slash 命令(`/config /sessions /new /model /mode /mcp /help /quit`)或命令面板;Stop(Esc)接 `cancel`;session resume + checkpoint。
@@ -90,7 +90,7 @@ flowchart LR
 - [ ] **配置面板全字段**:各 section 改值 → `Config.model_validate` 校验(非法拒)→ `save_config` **保注释**回写 `config.yaml`(重启后保留);`set_env_value` 写 `.env`(write-only,不回显);**面板/事件/trace/日志均不出现明文 key**。
 - [ ] **HITL / ask_question 模态**:TUI 中弹出 → 回传 → 答案进 loop / `tool_result`(mock 可测,headless pilot)。
 - [ ] **启动优先级**:`tui` 产物一键脚本 + 裸命令默认进 TUI(`tui > web > chat`);web+tui 同开时脚本仍以 tui 为先。
-- [ ] **大改动回归**(改 schema + 跨 ≥3 文件,§5.2):golden 全量(示例 + 每 preset)+ Docker 冒烟 + `uvx harnessforge new` 冒烟全绿;无框架断言(pyproject/lock 无 langchain/langgraph/adk)。
+- [ ] **大改动回归**(改 schema + 跨 ≥3 文件,§5.2):golden 全量(示例 + 每 preset)+ Docker 冒烟 + `uvx harnessmith new` 冒烟全绿;无框架断言(pyproject/lock 无 langchain/langgraph/adk)。
 - [ ] `ReadLints` clean。
 - [ ] **对外可读(人审)**:真起 `<pkg> tui` 走查——对话流式 / 工具内联 / config 全字段改并写回 / 未配 LLM 引导 / HITL/ask 模态 / 中英文案,对非作者用户友好。
 

@@ -1,6 +1,6 @@
 """Wizard tests (Slice 7): structural-only form, baked defaults, isolation.
 
-The wizard is a generator-side tool behind the ``harnessforge[wizard]`` extra.
+The wizard is a generator-side tool behind the ``harnessmith[wizard]`` extra.
 Its UI collects only *structural* choices (what to generate); behavioral fields
 (llms/prompts/tools/context) are baked with working defaults and edited later in
 the generated product. These drive it with ``fastapi.testclient`` (no real
@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from harnessforge.wizard.app import create_app  # noqa: E402
+from harnessmith.wizard.app import create_app  # noqa: E402
 
 
 @pytest.fixture
@@ -123,12 +123,12 @@ def test_spec_command_fills_target_dir_when_provided(client):
         "/spec", json={"spec": _valid_spec(), "target_dir": "/tmp/generate/my_ca"}
     )
     cmd = r.json()["new_command"]
-    assert cmd.startswith("harnessforge new /tmp/generate/my_ca --spec spec.yaml")
+    assert cmd.startswith("harnessmith new /tmp/generate/my_ca --spec spec.yaml")
 
 
 def test_spec_command_uses_placeholder_without_target_dir(client):
     cmd = client.post("/spec", json={"spec": _valid_spec()}).json()["new_command"]
-    assert cmd.startswith("harnessforge new <target-dir> --spec spec.yaml")
+    assert cmd.startswith("harnessmith new <target-dir> --spec spec.yaml")
 
 
 def test_baked_defaults_fill_behavioral_fields(client):
@@ -229,7 +229,7 @@ def test_generate_launches_product_with_progress_job(client, tmp_path, monkeypat
     """One-click generate + ``launch`` returns a job whose step-by-step status the
     UI polls; the product URL appears only once the job is done. The worker is
     stubbed so the test never runs uv / opens a port."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     calls = {}
 
@@ -261,10 +261,10 @@ def test_generate_status_unknown_job_is_404(client):
 
 def test_product_env_drops_parent_venv(monkeypatch):
     """The product's uv calls must NOT inherit the wizard's own VIRTUAL_ENV: the
-    wizard runs inside HarnessForge's venv (via ``uv run``), and on Windows the
+    wizard runs inside HarnessSmith's venv (via ``uv run``), and on Windows the
     product's ``uv sync`` would then fight the running parent over that venv's
     locked files and never finish. A launcher-set mirror is preserved."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     monkeypatch.setenv("VIRTUAL_ENV", "/wizard/.venv")
     monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/wizard/.venv")
@@ -278,7 +278,7 @@ def test_product_env_drops_parent_venv(monkeypatch):
 def test_product_env_falls_back_to_china_mirror_when_pypi_unreachable(monkeypatch):
     """No index pinned + official PyPI unreachable (e.g. GFW) -> the product's uv
     calls get the Tsinghua mirror filled in automatically."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     monkeypatch.setattr(app_mod, "_index_probe_cached", None)
     monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: False)
@@ -289,7 +289,7 @@ def test_product_env_falls_back_to_china_mirror_when_pypi_unreachable(monkeypatc
 
 def test_product_env_keeps_official_when_pypi_reachable(monkeypatch):
     """No index pinned + official PyPI reachable -> leave uv on its default index."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     monkeypatch.setattr(app_mod, "_index_probe_cached", None)
     monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: True)
@@ -301,7 +301,7 @@ def test_product_env_keeps_official_when_pypi_reachable(monkeypatch):
 def test_product_env_never_overrides_an_explicit_index(monkeypatch):
     """An explicitly-pinned index (e.g. set by the launcher) is never replaced,
     even when the probe would say PyPI is unreachable."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     monkeypatch.setattr(app_mod, "_index_probe_cached", None)
     monkeypatch.setattr(app_mod, "_pypi_reachable", lambda *a, **k: False)
@@ -314,7 +314,7 @@ def test_pypi_reachable_classifies_responses(monkeypatch):
     connection failure / timeout counts as unreachable."""
     import urllib.error
 
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     def http_error(*a, **k):
         raise urllib.error.HTTPError("u", 405, "no", {}, None)
@@ -332,7 +332,7 @@ def test_pypi_reachable_classifies_responses(monkeypatch):
 def test_status_streams_live_setup_log_tail(client, tmp_path):
     """While sync runs, the status endpoint tacks uv's latest output (read live
     from .setup.log) onto the job so the UI shows it progressing, not frozen."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     log = tmp_path / ".setup.log"
     log.write_text(
@@ -353,7 +353,7 @@ def test_run_launch_reports_sync_failure_without_hanging(tmp_path, monkeypatch):
     """A non-zero ``uv sync`` marks the sync step 'error' and records a message
     with the log path + tail, then the worker returns — the UI stops spinning
     instead of hanging on a stuck install."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     monkeypatch.setattr(
         app_mod, "_uv_sync", lambda target_dir: (124, "error: failed to fetch index")
@@ -374,7 +374,7 @@ def test_run_launch_provisions_portable_node_for_node_servers(tmp_path, monkeypa
     """When a Node-based MCP server is prefilled, the headless launch inserts a
     'node' step, provisions a portable Node, and prepends its bin dir to the
     product's PATH (so npx works) — the one-click flow that bypasses <slug>.bat/.sh."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     monkeypatch.setattr(app_mod, "_uv_sync", lambda td: (0, ""))
     monkeypatch.setattr(app_mod, "node_on_path", lambda: False)
@@ -407,7 +407,7 @@ def test_run_launch_provisions_portable_node_for_node_servers(tmp_path, monkeypa
 def test_run_launch_skips_node_download_when_node_present(tmp_path, monkeypatch):
     """If Node is already on PATH, the 'node' step is a no-op (no download) and the
     product launches with the unmodified PATH."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     monkeypatch.setattr(app_mod, "_uv_sync", lambda td: (0, ""))
     monkeypatch.setattr(app_mod, "node_on_path", lambda: True)
@@ -433,7 +433,7 @@ def test_ensure_proxy_env_fills_from_system_proxy(monkeypatch):
     """_product_env fills HTTP(S)_PROXY from the system proxy when unset (so uv sync
     + the product's npx servers reach the net through a corporate proxy), but never
     overrides one the user already set."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     monkeypatch.setattr(
         app_mod.urllib.request, "getproxies", lambda: {"https": "http://corp:8080"}
@@ -450,7 +450,7 @@ def test_ensure_proxy_env_fills_from_system_proxy(monkeypatch):
 
 def test_generate_does_not_launch_without_web(client, tmp_path, monkeypatch):
     """A CLI-only spec (no Web) is render-only even with ``launch`` requested."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     monkeypatch.setattr(
         app_mod, "_spawn_launch",
@@ -465,7 +465,7 @@ def test_generate_does_not_launch_without_web(client, tmp_path, monkeypatch):
 
 def test_generate_render_only_by_default(client, tmp_path, monkeypatch):
     """Without ``launch`` the generate stays render-only (no product spawned)."""
-    import harnessforge.wizard.app as app_mod
+    import harnessmith.wizard.app as app_mod
 
     monkeypatch.setattr(
         app_mod, "_spawn_launch",
@@ -478,7 +478,7 @@ def test_generate_render_only_by_default(client, tmp_path, monkeypatch):
 
 def test_core_dependencies_exclude_wizard_deps():
     """Isolation: fastapi/uvicorn live only in extras, never core `dependencies`,
-    so `uvx harnessforge new` and generated products never pull them."""
+    so `uvx harnessmith new` and generated products never pull them."""
     data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     core = " ".join(data["project"]["dependencies"]).lower()
     assert "fastapi" not in core and "uvicorn" not in core

@@ -16,15 +16,15 @@ from pathlib import Path
 
 import pytest
 
-from harnessforge.generator import (
+from harnessmith.generator import (
     REQUIREMENTS_NAME,
     generate,
     lock_dependencies,
     prewarm_mcp_servers,
     smoke_check,
 )
-from harnessforge.presets import preset_mcp_servers, preset_spec_path
-from harnessforge.spec import load_spec
+from harnessmith.presets import preset_mcp_servers, preset_spec_path
+from harnessmith.spec import load_spec
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_SPEC = REPO_ROOT / "examples" / "spec.yaml"
@@ -212,7 +212,7 @@ def test_golden_wizard_spec_generates_and_smoke_passes(tmp_path):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
-    from harnessforge.wizard.app import create_app
+    from harnessmith.wizard.app import create_app
 
     client = TestClient(create_app())
     # Structural-only form (what the slimmed wizard sends): the backend bakes the
@@ -246,14 +246,14 @@ def test_golden_wizard_spec_generates_and_smoke_passes(tmp_path):
 
 
 @pytest.mark.golden
-def test_uvx_harnessforge_new_smoke(tmp_path):
-    """`uvx --from <repo> harnessforge new ...` builds + runs the CLI one-shot."""
+def test_uvx_harnessmith_new_smoke(tmp_path):
+    """`uvx --from <repo> harnessmith new ...` builds + runs the CLI one-shot."""
     if shutil.which("uv") is None:
         pytest.skip("uv not on PATH")
     out = tmp_path / "uvx_out"
     proc = subprocess.run(
         [
-            "uvx", "--from", str(REPO_ROOT), "harnessforge", "new", str(out),
+            "uvx", "--from", str(REPO_ROOT), "harnessmith", "new", str(out),
             "--preset", "coding-assistant", "--no-git", "--no-verify", "--no-prewarm",
         ],
         capture_output=True,
@@ -277,7 +277,7 @@ def test_docker_build_and_run_mock_step(tmp_path):
     generate(spec, out, git_init=False)
     lock_dependencies(out)
 
-    tag = "harnessforge_golden_smoke"
+    tag = "harnessmith_golden_smoke"
     build = subprocess.run(
         ["docker", "build", "-t", tag, str(out)], capture_output=True, text=True
     )
@@ -308,7 +308,7 @@ def test_docker_mcp_baseline_bakes_and_runs_offline(tmp_path):
     dockerfile = (out / "Dockerfile").read_text(encoding="utf-8")
     assert "uvx mcp-server-fetch --help" in dockerfile and "UV_OFFLINE=1" in dockerfile
 
-    tag = "harnessforge_golden_mcp_baseline"
+    tag = "harnessmith_golden_mcp_baseline"
     build = subprocess.run(
         ["docker", "build", "-t", tag, str(out)], capture_output=True, text=True
     )
@@ -330,7 +330,7 @@ def test_docker_mcp_baseline_bakes_and_runs_offline(tmp_path):
 def test_golden_anthropic_profile_generates_locks_and_smoke_passes(tmp_path):
     """provider=anthropic -> generate -> lock -> sync + import + mock step +
     pytest (incl. tests/test_llm_anthropic.py: mapping + stream assembly)."""
-    from harnessforge.spec import LLMProfile
+    from harnessmith.spec import LLMProfile
 
     spec = load_spec(preset_spec_path("coding-assistant"))
     spec.llms.append(

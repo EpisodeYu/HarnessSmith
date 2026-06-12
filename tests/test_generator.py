@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from harnessforge.generator import TargetExistsError, generate, launch_script_stem
-from harnessforge.presets import preset_mcp_servers, preset_spec_path
-from harnessforge.spec import load_spec
+from harnessmith.generator import TargetExistsError, generate, launch_script_stem
+from harnessmith.presets import preset_mcp_servers, preset_spec_path
+from harnessmith.spec import load_spec
 
 EXAMPLE_SPEC = Path(__file__).resolve().parents[1] / "examples" / "spec.yaml"
 
@@ -195,7 +195,7 @@ def test_default_system_prompt_round_trips_and_matches_fallback(tmp_path, spec):
     """The baked default system prompt renders as a readable YAML literal block
     that round-trips byte-for-byte, and the generated harness/prompts.py reuses the
     same text as its empty-config fallback (so behavior is identical either way)."""
-    from harnessforge.scaffold import DEFAULT_SYSTEM_PROMPT
+    from harnessmith.scaffold import DEFAULT_SYSTEM_PROMPT
 
     # The generic example spec seeds exactly the canonical default.
     assert spec.prompts.system == DEFAULT_SYSTEM_PROMPT
@@ -628,7 +628,7 @@ def test_mcp_prefill_bakes_uvx_servers_into_dockerfile(tmp_path, preset_spec):
 
 def test_mcp_disabled_ignores_prefill(tmp_path, spec):
     """Prefill only applies when mcp.enabled — otherwise zero MCP footprint."""
-    from harnessforge.catalog import resolve_servers
+    from harnessmith.catalog import resolve_servers
 
     out = tmp_path / "nomcp"
     generate(spec, out, git_init=False, mcp_servers=resolve_servers(["fetch"]))
@@ -789,7 +789,7 @@ def test_memory_web_footprint_absent_when_disabled(tmp_path, spec):
     assert "/memory" not in web_py and "memory" not in web_py.lower()
 
 
-# --- One-click launch scripts (HarnessForge / <display name>) ---------------
+# --- One-click launch scripts (HarnessSmith / <display name>) ---------------
 
 
 @pytest.mark.parametrize(
@@ -807,7 +807,7 @@ def test_memory_web_footprint_absent_when_disabled(tmp_path, spec):
     ],
 )
 def test_launch_script_stem_sanitizes(display_name, project_slug, expected):
-    from harnessforge.spec import HarnessSpec
+    from harnessmith.spec import HarnessSpec
 
     spec = HarnessSpec(project_slug=project_slug, display_name=display_name)
     assert launch_script_stem(spec) == expected
@@ -900,7 +900,7 @@ def test_launch_node_bootstrap_only_when_a_node_server_is_prefilled(tmp_path):
     """The launcher offers a user-local portable Node ONLY when a Node-based MCP
     server (npx, e.g. desktop-commander) is prefilled — uvx-only prefills ride uv
     and get no Node logic. Node is fetched on demand, never bundled in the repo."""
-    from harnessforge.catalog import resolve_servers
+    from harnessmith.catalog import resolve_servers
 
     spec = load_spec(preset_spec_path("coding-assistant"))
     stem = launch_script_stem(spec)
@@ -963,7 +963,7 @@ def test_launch_bat_echo_safe_for_metachar_display_name(tmp_path):
     """A display name with cmd metacharacters (& < > |) must never reach an
     `echo` line — it would break batch parsing. The echoes use project_slug
     (always [a-z0-9_]); the raw display name lives only in REM comments."""
-    from harnessforge.spec import HarnessSpec
+    from harnessmith.spec import HarnessSpec
 
     spec = HarnessSpec(
         project_slug="agent_harness", display_name="A & B <c> | d"
@@ -983,7 +983,7 @@ def test_launch_bat_echo_safe_for_metachar_display_name(tmp_path):
 
 def test_launch_bat_fallback_uses_exe_to_avoid_self_shadow(tmp_path, spec):
     """The console-command fallback must target `<name>.exe`, never the bare
-    name. On Windows a bare `agent_harness` / `harnessforge` resolves to the
+    name. On Windows a bare `agent_harness` / `harnessmith` resolves to the
     sibling .bat first (cwd is searched before PATH, case-insensitively), which
     relaunches the launcher forever."""
     # Product launcher: the default example has stem == slug == agent_harness,
@@ -996,34 +996,34 @@ def test_launch_bat_fallback_uses_exe_to_avoid_self_shadow(tmp_path, spec):
     assert "where agent_harness >nul" not in bat  # bare would match the .bat
     assert "\nagent_harness %ACTION%" not in bat
 
-    # Generator launcher at the repo root (HarnessForge.bat vs harnessforge).
+    # Generator launcher at the repo root (HarnessSmith.bat vs harnessmith).
     root_bat = (
-        Path(__file__).resolve().parents[1] / "HarnessForge.bat"
+        Path(__file__).resolve().parents[1] / "HarnessSmith.bat"
     ).read_text(encoding="utf-8")
-    assert "where harnessforge.exe" in root_bat
-    assert "harnessforge.exe wizard --open" in root_bat
-    assert "\nharnessforge wizard --open" not in root_bat  # no bare relaunch
+    assert "where harnessmith.exe" in root_bat
+    assert "harnessmith.exe wizard --open" in root_bat
+    assert "\nharnessmith wizard --open" not in root_bat  # no bare relaunch
 
 
 def test_root_launchers_offer_web_and_cli_setup():
     """The repo-root one-click launchers let the user choose the web form or the
     interactive CLI wizard (the CLI path is what makes headless Linux usable)."""
     root = Path(__file__).resolve().parents[1]
-    sh = (root / "HarnessForge.sh").read_text(encoding="utf-8")
-    bat = (root / "HarnessForge.bat").read_text(encoding="utf-8")
+    sh = (root / "HarnessSmith.sh").read_text(encoding="utf-8")
+    bat = (root / "HarnessSmith.bat").read_text(encoding="utf-8")
 
     # A mode prompt with both options is presented in each launcher.
     assert "choose_mode" in sh and "CLI wizard" in sh and "Web wizard" in sh
     assert "Choose [1/2]" in sh and "Choose [1/2]" in bat
     assert "CLI wizard" in bat and "Web wizard" in bat
 
-    # The CLI branch routes to `harnessforge new` (the interactive wizard); the web
+    # The CLI branch routes to `harnessmith new` (the interactive wizard); the web
     # branch keeps the existing `wizard --open` form. The .bat keeps the `.exe`
     # console fallback so it never relaunches itself.
-    assert "run harnessforge new" in sh  # via `"$uv_bin" run` / `harnessforge new`
-    assert "uv run harnessforge new" in bat
-    assert "harnessforge.exe new" in bat
-    assert "run --extra wizard harnessforge wizard --open" in sh
+    assert "run harnessmith new" in sh  # via `"$uv_bin" run` / `harnessmith new`
+    assert "uv run harnessmith new" in bat
+    assert "harnessmith.exe new" in bat
+    assert "run --extra wizard harnessmith wizard --open" in sh
 
     # Flat goto in the .bat (the Windows fragility guard from Slice 7): no setlocal,
     # no `call :` subroutines.
@@ -1083,7 +1083,7 @@ def test_default_product_ships_dual_protocol(tmp_path, spec):
 
 
 def test_anthropic_profile_generates_client_dep_and_config(tmp_path, spec):
-    from harnessforge.spec import LLMProfile
+    from harnessmith.spec import LLMProfile
 
     spec.llms.append(
         LLMProfile(

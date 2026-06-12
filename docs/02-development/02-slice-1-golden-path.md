@@ -8,7 +8,7 @@
 
 ## 1. 交付物
 
-生成产物模板核心(framework-free,均在 `harnessforge/templates/`):
+生成产物模板核心(framework-free,均在 `harnessmith/templates/`):
 
 - `config.py` — 加载 `config.yaml` + `.env` + Pydantic 校验;密钥按 **env 引用名**解析(真值不入产物代码 / 不入 git)。
 - `llm.py` — openai SDK 适配,**Chat Completions + `tools`**,`base_url` provider-agnostic;先支持单 profile(角色路由留 Slice 2)。
@@ -35,8 +35,8 @@
 - 产物**测试依赖**走 uv 原生 `[dependency-groups] dev = ["pytest"]`(`uv sync` 默认安装),而非 `optional-dependencies`——否则 `uv run pytest` 会落到临时解释器、找不到包(已踩坑修复)。
 - **Docker** `ENTRYPOINT` 直接调用 venv 内 console script(非 `uv run`),`docker run` 零再同步、零联网即跑。
 - **生成产物提交可运行性文件**:`uv.lock` + `requirements.txt` 由生成器在生成后跑 `uv lock`/`uv export` 产出(非模板)。`config.py` 用 `pydantic-settings` 读取 `.env`(`extra="allow"`)+ `os.environ` 解析按名引用的密钥。
-- **生成器侧 subprocess 调 uv 时清洗环境**(剥离 `VIRTUAL_ENV`/`UV_PROJECT_ENV`/`PYTHONPATH` 等),否则在 `uv run`/`uvx harnessforge` 下会把父环境解释器泄漏进新仓库(已踩坑修复)。
-- **打包**:移除了 Slice 0 冗余的 `force-include`(模板/preset 均随 `packages=["harnessforge"]` 进 wheel;preset 数据文件 `spec.yaml` 也随之打包),否则 `uvx`/`uv build` 会因重复路径构建失败(此前只做 editable install 未触发)。
+- **生成器侧 subprocess 调 uv 时清洗环境**(剥离 `VIRTUAL_ENV`/`UV_PROJECT_ENV`/`PYTHONPATH` 等),否则在 `uv run`/`uvx harnessmith` 下会把父环境解释器泄漏进新仓库(已踩坑修复)。
+- **打包**:移除了 Slice 0 冗余的 `force-include`(模板/preset 均随 `packages=["harnessmith"]` 进 wheel;preset 数据文件 `spec.yaml` 也随之打包),否则 `uvx`/`uv build` 会因重复路径构建失败(此前只做 editable install 未触发)。
 
 ## 2. 任务拆解
 
@@ -46,7 +46,7 @@
 ### 2.2 可运行性保障(详见 `01-project-plan.md §7`)
 - uv 契约:产物带 `uv.lock` + `.python-version`,`uv sync` 一键就绪。
 - 默认 Docker:`docker build && docker run` 得到与宿主无关的环境。
-- 生成后冒烟自检默认开,`--no-verify` 可关;`harnessforge doctor` 预检。
+- 生成后冒烟自检默认开,`--no-verify` 可关;`harnessmith doctor` 预检。
 
 ### 2.3 黄金快照测试(本片的核心测试)
 用 coding-assistant preset 生成项目 → `uv sync && pytest` → mock LLM 跑通一次 function-calling(含一次工具调用)。
@@ -62,13 +62,13 @@
 - [x] 可观测:一次 run 产出结构正确的 JSONL trace + token/成本断言。(`...::test_mock_runs_one_tool_call` / `...::test_trace_records_tokens_and_cost`)
 - [x] 预算停止单测(步数/时间/**token**/成本超限即停)。(`...::test_budget_stop_on_max_steps|max_seconds|max_tokens|max_cost`)
 - [x] 密钥不入 git:`config.yaml`/`harness.spec.yaml` 不含明文密钥的断言。(`tests/test_generator.py::test_config_yaml_renders_from_spec_without_secrets` + Slice 0 快照断言)
-- [x] 生成器自身:spec 校验、模板渲染单测、`uvx harnessforge new` 冒烟。(`test_spec.py` / `test_generator.py` / `test_golden.py::test_uvx_harnessforge_new_smoke`)
+- [x] 生成器自身:spec 校验、模板渲染单测、`uvx harnessmith new` 冒烟。(`test_spec.py` / `test_generator.py` / `test_golden.py::test_uvx_harnessmith_new_smoke`)
 - [x] `ReadLints` clean。
 
 ## 4. 必须人审的决策点
 
 - [x] **验收立项假设**:生成产物够薄、可读、在任意环境可跑、零 agent 框架。**人已签字通过**(立项假设成立)。
-  - 供审参考(实测):核心循环 `loop.py` = 151 行(含 docstring,在 150–300 目标内);harness 核心 8 模块合计 ≈ 713 行;默认产物依赖仅 `openai/pydantic/pydantic-settings/pyyaml/typer`,零 agent 框架(`pyproject`/`uv.lock`/`requirements.txt` 三处断言);`uvx harnessforge new --preset coding-assistant` 一条命令 → 生成 → 锁依赖 → 冒烟自检全绿;`docker run` 零额外动作跑通 mock 一步。
+  - 供审参考(实测):核心循环 `loop.py` = 151 行(含 docstring,在 150–300 目标内);harness 核心 8 模块合计 ≈ 713 行;默认产物依赖仅 `openai/pydantic/pydantic-settings/pyyaml/typer`,零 agent 框架(`pyproject`/`uv.lock`/`requirements.txt` 三处断言);`uvx harnessmith new --preset coding-assistant` 一条命令 → 生成 → 锁依赖 → 冒烟自检全绿;`docker run` 零额外动作跑通 mock 一步。
 
 ## 5. 本 slice 注意
 

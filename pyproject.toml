@@ -1,5 +1,5 @@
 [project]
-name = "harnessforge"
+name = "harnessmith"
 version = "0.1.0"
 description = "Forge your own agent harness — a config-to-code generator with no agent-framework lock-in."
 readme = "README.md"
@@ -11,7 +11,7 @@ dependencies = [
     "jinja2>=3.1",
     "pydantic>=2.6",
     "pyyaml>=6.0",
-    # Powers the interactive `harnessforge new` setup wizard (the terminal twin of
+    # Powers the interactive `harnessmith new` setup wizard (the terminal twin of
     # the web form). Generator-side only — it never ships into a generated product
     # (products render their own pyproject), so the "thin product" rule is intact.
     "questionary>=2.0",
@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # The wizard (Slice 7) is a generator-side tool only; FastAPI/uvicorn live here,
-# NOT in the core `dependencies`, so `uvx harnessforge new` and the generated
+# NOT in the core `dependencies`, so `uvx harnessmith new` and the generated
 # product stay free of them.
 wizard = ["fastapi>=0.110", "uvicorn>=0.29"]
 # `dev` adds the wizard deps + httpx so the test suite can drive the wizard via
@@ -27,14 +27,14 @@ wizard = ["fastapi>=0.110", "uvicorn>=0.29"]
 dev = ["pytest>=8.0", "fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
 
 [project.scripts]
-harnessforge = "harnessforge.cli:app"
+harnessmith = "harnessmith.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["harnessforge"]
+packages = ["harnessmith"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

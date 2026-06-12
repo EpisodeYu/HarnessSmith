@@ -16,7 +16,7 @@
 
 ## 1. 交付物
 
-生成器侧(`harnessforge/`):
+生成器侧(`harnessmith/`):
 
 - `generator.py` — 新增**条件渲染机制**:按 spec 谓词跳过部分模板文件(`interfaces.web == false` 时不写 `web.py`、web 测试、web 静态页)。机制要可被后续 slice(MCP/wizard)复用,见 §2.1。
 - `pyproject.toml.j2` — 用 `{% if spec.interfaces.web %}` 条件块加 Web 依赖(`fastapi` + `uvicorn`);**关掉则整段不渲染**(满足"关 Web 不含 fastapi/uvicorn"门禁)。依赖落位见 §2.2 决策。
@@ -30,7 +30,7 @@
 - `harness/mock.py` — `MockLLM.stream()` 复用 `complete()` 后逐词回调 `on_delta`,离线可测流式。
 - `interfaces/cli.py` — `run` 增 `--stream/--no-stream`(默认 `false`,保持 Slice 1 行为)。
 
-生成产物侧——Web 接口(`harnessforge/templates/`,`interfaces.web` 门控):
+生成产物侧——Web 接口(`harnessmith/templates/`,`interfaces.web` 门控):
 
 - `src/<pkg>/interfaces/web.py` — FastAPI 应用,**薄**(实测 ≈ 139 行):
   - `GET /` — 单页前端(无构建,Tailwind CDN;`01-project-plan §6` 自主细节),含 chat 视图(带 stream 复选框)+ config 面板视图。
@@ -104,5 +104,5 @@
 - **核心改动克制**:进度事件复用既有 `Hooks`(不改 loop);token 级流式仅给 `loop.run()` 加一处可选 `on_delta` 分支(+4 行,实测 180 行仍在 150–300 薄区间),累积逻辑落在 `llm.py` 适配层。token 流式是人明确追加的 UX 需求,故接受这点核心改动;若再要扩展导致 loop 明显变厚,先停问人(`CLAUDE.md §6.8`)。
 - **密钥红线**(`CLAUDE.md §6.5`):`/config` 面板、SSE 事件、trace、日志任一路径出现明文 key 即失败。面板只可见 env 引用名;"密钥只写不回显面板" = L3,本片不做密钥编辑。
 - **不绑框架**:FastAPI/uvicorn 是通用 Web 库,**不是 agent 编排框架**,不违反定位红线(`01-project-plan §1` 措辞);但仅在 `web=true` 时进产物。
-- **配方 vs 活旋钮**(决策④,`01 §4`):`/config` 改的是运行期行为性配置(`config.yaml` 域);接口有无 / 模块 / 范式拓扑是结构性的,只能重新生成。Web 面板属**产物自持**,HarnessForge 不做中心化配置/托管。
+- **配方 vs 活旋钮**(决策④,`01 §4`):`/config` 改的是运行期行为性配置(`config.yaml` 域);接口有无 / 模块 / 范式拓扑是结构性的,只能重新生成。Web 面板属**产物自持**,HarnessSmith 不做中心化配置/托管。
 - **MCP 工具**(stdio + 远程 HTTP/SSE)挪到 Slice 4(2026-06-03 定向);**完整 HITL Web** 已排 Slice 10、**`/config` 热重载进阶、联网 MCP registry** 仍为 v1+,均不在本片(`00-overview §2` Slice 4 / Slice 10 / Slice 14+)。

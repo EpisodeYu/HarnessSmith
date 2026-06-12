@@ -19,11 +19,11 @@
 
 ## 1. 交付物
 
-- `harnessforge/spec.py` — `Prompts` 新增 `rules_files: list[str] = []`(生成期种子;`extra="forbid"` 下声明字段)。
+- `harnessmith/spec.py` — `Prompts` 新增 `rules_files: list[str] = []`(生成期种子;`extra="forbid"` 下声明字段)。
 - 产物 `harness/config.py`(模板)— `PromptsConfig` 新增 `rules_files`(运行期旋钮)。
 - 产物 `harness/prompts.py`(模板)— 新增 `_load_rules(config)`:按 `prompts.rules_files` 顺序读 markdown、拼成 "Project rules (always follow):" 段,插在 system 之后、skills/environment 之前;**始终生成**(空列表 = 零效果)。(注:原"system+persona 之后",`persona` 已于 2026-06-07 移除。)
 - 产物 `config.yaml`(模板)— 渲染 `prompts.rules_files`(seed 自 spec)+ 注释说明。
-- `harnessforge/templates/RULES.md.j2` — starter 规则文件,**仅当 `"RULES.md" in spec.prompts.rules_files` 时生成**(`generator.py` `CONDITIONAL_TEMPLATES`),否则产物零 rule 文件痕迹。
+- `harnessmith/templates/RULES.md.j2` — starter 规则文件,**仅当 `"RULES.md" in spec.prompts.rules_files` 时生成**(`generator.py` `CONDITIONAL_TEMPLATES`),否则产物零 rule 文件痕迹。
 - `coding-assistant` preset — seed `prompts.rules_files: [RULES.md]`(旗舰 preset 开箱演示)。
 - 测试:生成器快测 2(机制始终生成且 thin 不落 RULES.md;seed 时落 starter 且进快照)+ 产物自带测试 2(rule 注入生效、缺文件跳过;无 rule 时无段落)。
 - 文档:本片 + `AGENTS.md`/`README`(产物)+ `00-overview` §2/§3 + `01-project-plan` §5。

@@ -1,4 +1,4 @@
-# HarnessForge 立项方案 (MVP)
+# HarnessSmith 立项方案 (MVP)
 
 > 配套背景见 [00-research-and-feasibility.md](./00-research-and-feasibility.md)。
 >
@@ -12,7 +12,7 @@
 
 竞品空位:`create-agent-app` 绑 LangGraph、`create-google-adk-agent` 绑 ADK、`full-stack-ai-agent-template` 多框架且静态模板;无代码平台托管且隐藏 harness。**没有"无 agent 框架锁定 + 可视化配置 + 生成你拥有的薄 harness 代码"的对位项目。** 三个必须打透的差异点:
 - **无 agent 框架锁定(不是"无依赖")**:生成代码零 LangChain/LangGraph/ADK 等 **agent 编排框架**依赖,循环是你自己的。底座只用通用库(openai SDK / pydantic / typer 等),这些不是 agent 框架,不构成锁定。
-- **own-your-code(eject 即所得)**:产出独立仓库,可读可删改;**生成后不再依赖 HarnessForge**。
+- **own-your-code(eject 即所得)**:产出独立仓库,可读可删改;**生成后不再依赖 HarnessSmith**。
 - **配置即生成**:CLI/向导采集 spec → 一键渲染。
 
 > 措辞修正:初稿用 "framework-free" 容易被质疑"那 FastAPI/Pydantic 算不算框架"。真实主张是**不绑定 agent 编排框架**,故全文统一表述为"无 agent 框架锁定"。
@@ -22,7 +22,7 @@
 **目标用户(MVP 阶段)**:先服务**作者本人 / 独立开发者**——想从零拥有一份可读可改、不绑框架的 agent harness,本地自用为主。这一画像直接决定 MVP 取舍:**不需要** Web 配置面板、多人协作密钥管理、生产级权限;**需要**一条"几分钟生成 → 跑通 → 易改"的路径。AI infra / 内部工具团队是 v1 之后再考虑的扩展人群。
 
 **成功指标(以"时间到价值 + 代码可拥有"衡量,而非"功能写完")**:
-- `harnessforge new --preset coding-assistant` 后 **5 分钟内**:生成项目 → 配好一个 key → mock/真实跑通一次带工具调用的对话。
+- `harnessmith new --preset coding-assistant` 后 **5 分钟内**:生成项目 → 配好一个 key → mock/真实跑通一次带工具调用的对话。
 - 生成产物核心代码(`harness/` 目录)保持**精简可通读**(目标量级:核心循环 150–300 行,整体远小于一个框架)。
 - 使用者能在 **30 分钟内新增一个自定义 tool 并跑通**(加函数 + 注册,不动循环)。
 - 生成项目 `uv sync && pytest` 全绿;`pyproject.toml` 不含 langchain/langgraph/adk。
@@ -84,7 +84,7 @@
 - 单一 `config.yaml`(非密钥:llms/roles/context/tools/interfaces)+ `.env`(密钥真值,gitignored);`config.yaml` 只存 env 引用名(如 `api_key_env: OPENAI_API_KEY`)。
 - `harness/config.py` 启动加载 + Pydantic 校验,作为全局唯一入口。**运行期热重载推迟到 L3**(MVP 改配置后重启即可,本地自用足够)。
 - 生成期 `HarnessSpec` 与运行期 `config.yaml` 字段对齐,降低认知负担。
-- **配方 vs 活旗钮(控制面边界,人已定向)**:`spec` = 生成什么 + 初值;`config.yaml` = 运行期**权威**源,**行为性配置(模型/profile、prompt、预算数值、启用工具、context 参数、定价…)全部运行期可改**;**结构性配置**(有无某接口/模块、范式与拓扑 = 决定生成哪些**代码**)只能重新生成或将来 `forge add` 增量生成。运行期配置面板**生成进产物自身的 Web 接口**(产物自持),**HarnessForge 不做中心化配置管理/托管**——守"生成后不再依赖 HarnessForge"。故行为性字段尽量下沉到运行期,`spec` 仅作初值种子。
+- **配方 vs 活旗钮(控制面边界,人已定向)**:`spec` = 生成什么 + 初值;`config.yaml` = 运行期**权威**源,**行为性配置(模型/profile、prompt、预算数值、启用工具、context 参数、定价…)全部运行期可改**;**结构性配置**(有无某接口/模块、范式与拓扑 = 决定生成哪些**代码**)只能重新生成或将来 `forge add` 增量生成。运行期配置面板**生成进产物自身的 Web 接口**(产物自持),**HarnessSmith 不做中心化配置管理/托管**——守"生成后不再依赖 HarnessSmith"。故行为性字段尽量下沉到运行期,`spec` 仅作初值种子。
 
 **权限与控制面:两轴划分(口径,人 2026-06-03 定向)** —— 把"配方 vs 活旋钮"显式拆成两条正交的轴,后续切片(尤其 Slice 4 工具 allowlist)按此归类,化解"配置越往运行期搬、生成器越像白写 harness"的焦虑:生成器的价值锚点在**结构轴(代码 / 能力的有无)**,不在行为轴的"值"。
 
@@ -101,7 +101,7 @@
 
 ## 5. 架构
 
-两层:**生成器(HarnessForge 本体)** 与 **生成产物(独立 harness 仓库)**。
+两层:**生成器(HarnessSmith 本体)** 与 **生成产物(独立 harness 仓库)**。
 
 ```mermaid
 flowchart LR
@@ -125,14 +125,14 @@ flowchart LR
   repo --> repoInner
 ```
 
-生成器目录(仓库根 `/home/s1yu/HarnessForge`,独立 git repo,MIT;支持 `uvx harnessforge new` 免安装一次性运行):
-- `harnessforge/spec.py` — `HarnessSpec`(version/project_slug/**`display_name`**(Slice 7,人类可读显示名,渲染进产物 web 标题/header + README 标题,空则回落 `project_slug`;wizard 由它派生 slug;纯标签不进 `config.yaml`)/**`language`**(Slice 7,产物 web 默认 UI 语言 `en`/`zh`,种子化 web 默认、运行期浏览器可切;wizard 语言选择贯穿至此;Agent 回答语言靠模型按输入自动判断 / 产物 Prompts 改)/llms(每 profile 含 **`provider: openai|anthropic`**,Slice 12,默认 `openai`;`anthropic` 走原生 Messages;**双协议内建,2026-06-11 人定向**——每个产物恒渲染 `harness/llm_anthropic.py` + 恒带 `anthropic` 依赖,字段只定 config.yaml 初始值,运行期面板/yaml 可切)/roles/prompts(`system`/**`rules_files`**(Slice 6B,全局 rule 文件种子,渲染进运行期 `config.yaml`);`persona` 于 2026-06-07 移除——只是 system 后的冗余拼接段,见 `02-development/04-slice-3-product-web.md §4`)/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces(`cli`/`web`/**`tui`**(Slice 13,opt-in 全屏终端 TUI=Textual,默认 `false`、关掉零痕迹不含 `textual`,与 `web` 同级))/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/**memory.enabled**(Slice 8B,跨会话长期记忆开关;后端/路径/上限走运行期 `config.yaml memory`,不进 spec)/observability(**budget 块已于 2026-06-11 从 spec 移除**:per-LLM cost 单价/限额是运行期 profile 字段 `input/output/cached_input_cost_per_million` + `cost_limit`,只在 `config.yaml`,Web Budget 页编辑,不进 spec);context(Slice 7 起 wizard 采集并**种子化** `config.yaml` 的 context 块,沿用 rules_files 式 seed)/rag/secrets backend 字段预留但 MVP 不全实现)。
-- `harnessforge/generator.py` — 渲染模板 → 写出仓库 + 拷入 `harness.spec.yaml` + `git init` + `uv lock` + 重跑警告不覆盖 + 生成后冒烟自检(`uv sync`+`pytest`+mock 跑一步)。
-- `harnessforge/cli.py` — Typer 入口(`new`、`--spec`、`--preset`、交互模式、`doctor` 预检、`--no-verify` 关闭冒烟自检)。
-- `harnessforge/catalog/mcp_servers.yaml` — 精选静态 MCP catalog(L2)。
-- `harnessforge/presets/` — **现有仅 coding-assistant(L1)**;rag-research 骨架 + 极薄 example 为 backlog(见 `03 §D-3`,实现说明 2026-06-08:目录下只有 `coding-assistant`)。
-- `harnessforge/templates/` — 生成产物 Jinja2 模板。
-- `harnessforge/wizard/`(L2)— FastAPI + 单页静态表单。
+生成器目录(仓库根 `/home/s1yu/HarnessSmith`,独立 git repo,MIT;支持 `uvx harnessmith new` 免安装一次性运行):
+- `harnessmith/spec.py` — `HarnessSpec`(version/project_slug/**`display_name`**(Slice 7,人类可读显示名,渲染进产物 web 标题/header + README 标题,空则回落 `project_slug`;wizard 由它派生 slug;纯标签不进 `config.yaml`)/**`language`**(Slice 7,产物 web 默认 UI 语言 `en`/`zh`,种子化 web 默认、运行期浏览器可切;wizard 语言选择贯穿至此;Agent 回答语言靠模型按输入自动判断 / 产物 Prompts 改)/llms(每 profile 含 **`provider: openai|anthropic`**,Slice 12,默认 `openai`;`anthropic` 走原生 Messages;**双协议内建,2026-06-11 人定向**——每个产物恒渲染 `harness/llm_anthropic.py` + 恒带 `anthropic` 依赖,字段只定 config.yaml 初始值,运行期面板/yaml 可切)/roles/prompts(`system`/**`rules_files`**(Slice 6B,全局 rule 文件种子,渲染进运行期 `config.yaml`);`persona` 于 2026-06-07 移除——只是 system 后的冗余拼接段,见 `02-development/04-slice-3-product-web.md §4`)/tools/**paradigms**(Slice 5,多选 `Literal["agent","plan","ask"]`,默认 `["agent"]`)/interfaces(`cli`/`web`/**`tui`**(Slice 13,opt-in 全屏终端 TUI=Textual,默认 `false`、关掉零痕迹不含 `textual`,与 `web` 同级))/**mcp.enabled**(Slice 4)/**skills.enabled**(Slice 6,标准 Agent Skills 开关;技能目录走运行期 `config.yaml skills.dirs`,不进 spec)/**memory.enabled**(Slice 8B,跨会话长期记忆开关;后端/路径/上限走运行期 `config.yaml memory`,不进 spec)/observability(**budget 块已于 2026-06-11 从 spec 移除**:per-LLM cost 单价/限额是运行期 profile 字段 `input/output/cached_input_cost_per_million` + `cost_limit`,只在 `config.yaml`,Web Budget 页编辑,不进 spec);context(Slice 7 起 wizard 采集并**种子化** `config.yaml` 的 context 块,沿用 rules_files 式 seed)/rag/secrets backend 字段预留但 MVP 不全实现)。
+- `harnessmith/generator.py` — 渲染模板 → 写出仓库 + 拷入 `harness.spec.yaml` + `git init` + `uv lock` + 重跑警告不覆盖 + 生成后冒烟自检(`uv sync`+`pytest`+mock 跑一步)。
+- `harnessmith/cli.py` — Typer 入口(`new`、`--spec`、`--preset`、交互模式、`doctor` 预检、`--no-verify` 关闭冒烟自检)。
+- `harnessmith/catalog/mcp_servers.yaml` — 精选静态 MCP catalog(L2)。
+- `harnessmith/presets/` — **现有仅 coding-assistant(L1)**;rag-research 骨架 + 极薄 example 为 backlog(见 `03 §D-3`,实现说明 2026-06-08:目录下只有 `coding-assistant`)。
+- `harnessmith/templates/` — 生成产物 Jinja2 模板。
+- `harnessmith/wizard/`(L2)— FastAPI + 单页静态表单。
 
 生成产物仓库骨架(无 agent 框架):
 - `pyproject.toml` — 最小依赖:`openai`、`pydantic`、`pydantic-settings`、`pyyaml`、`typer`;`fastapi`/`uvicorn`、`mcp`、`sqlite-vec`、`keyring` 按 spec 开关进 extra;**断言无 langchain/langgraph/adk**。
@@ -149,7 +149,7 @@ flowchart LR
 - `src/<pkg>/harness/memory.py`(Slice 8B,opt-in)— 跨会话长期记忆:薄注册表 `@register_memory`(同 tools/context/budget/paradigms,按名分发)+ 内置 `file` 后端(自维护 markdown 笔记 `.harness/memory.md`,每轮注入系统提示、工具驱动写入、不落密钥)。后端契约 `recall`/`record` + 可选 `tools()`/`on_session_end`/`on_compact`;用户可换自有后端。仅 `spec.memory.enabled` 时生成(关闭零痕迹);记忆 ≠ RAG。运行期 `config.yaml memory` 旋钮:`backend`/`path`/`inject_max_chars`/`read_only` + **`policy`**(可选指令,塑形"记什么/何时写",随记忆注入)+ **`auto_consolidate`**。**整理 `consolidate`**(笔记超 `inject_max_chars` 后用专用 **`memory` 角色**(记忆管理 LLM,未设回落第一个 profile)重写精简,手动 CLI `memory consolidate`/Web 按钮,或 `auto_consolidate` 在 CLI `chat` 会话结束自动)——**走会话边界/手动、不进回复 hot path**(对标 LangMem/Mem0/Letta 的 background formation,2026-06-08 增量)。Web 产物含 **Memory 配置 tab**(同上旋钮 + 笔记编辑/整理/清空)。
 - `src/<pkg>/harness/trace.py` — 每次 run 的 JSONL trace + token/成本计数(`add_usage` 同时写入下面的持久账本)。
 - `src/<pkg>/harness/usage.py`(2026-06-11,始终生成)— 按 LLM 持久 cost 账本 `UsageLedger`(`.harness/usage.json`,按 profile name 累计 token,cost 由 profile 单价派生;`cost_limit` 到达即 block_stop 该 LLM + 提醒,`stop_reason="llm_budget"`)。统计口径=主 generation + compaction;清空手动(Web Budget 页 / CLI `usage`)。
-- `src/<pkg>/harness/debuglog.py`(2026-06-10 增量,始终生成)— 可选**本地 debug 日志**:运行期 `config.yaml observability.debug`/`debug_dir`(默认关,不进 spec;web /config 可观测页可实时开关)。loop/工具/LLM/MCP/session/config 生命周期一行一条(`Trace.event` 镜像剔除私密字段 + 关键点直记),**只记名称/计数/耗时/错误类型,绝不记消息内容、工具参数/结果或密钥**;只落本机(`logs/` gitignored),绝不上传。生成器自身亦有**常开** debug 日志(`harnessforge/debuglog.py` → `~/.harnessforge/logs/debug.log`,滚动 ~1MB,`HARNESSFORGE_LOG_DIR` 可改)覆盖渲染/lock/冒烟/wizard/Node 引导各阶段。
+- `src/<pkg>/harness/debuglog.py`(2026-06-10 增量,始终生成)— 可选**本地 debug 日志**:运行期 `config.yaml observability.debug`/`debug_dir`(默认关,不进 spec;web /config 可观测页可实时开关)。loop/工具/LLM/MCP/session/config 生命周期一行一条(`Trace.event` 镜像剔除私密字段 + 关键点直记),**只记名称/计数/耗时/错误类型,绝不记消息内容、工具参数/结果或密钥**;只落本机(`logs/` gitignored),绝不上传。生成器自身亦有**常开** debug 日志(`harnessmith/debuglog.py` → `~/.harnessmith/logs/debug.log`,滚动 ~1MB,`HARNESSMITH_LOG_DIR` 可改)覆盖渲染/lock/冒烟/wizard/Node 引导各阶段。
 - `src/<pkg>/harness/prompts.py` — 系统提示拼装(system + **全局 rule 文件注入**(Slice 6B,`prompts.rules_files` 列出的 markdown 每轮注入,开放 `AGENTS.md`/`CLAUDE.md`/`.cursor/rules` 模式;空=零效果)+ skills/environment L2)。
 - `src/<pkg>/harness/context.py`(L2)— truncate / summarize;usage 驱动触发(`window_pct`/`max_tokens`,真实 `prompt_tokens` 经 `ContextInfo` 注入)+ 单工具结果截断(`max_tool_result_chars`)+ 溢出强制压缩(`fit(force=True)`)。
 - `src/<pkg>/harness/rag.py`(L3)。
@@ -161,20 +161,20 @@ flowchart LR
 ## 6. 关键技术决策
 
 已定(用户拍板):
-- 名称 **HarnessForge**;生成器包/CLI `harnessforge`,产物默认包名 `agent_harness`(spec `project_slug` 可覆盖)。产物**显示名**走 spec `display_name`(人类可读,用于 UI 标题/README;空则回落 `project_slug`);wizard 输入显示名并由它派生 `project_slug`(snake_case 包名/文件夹)。
-- 仓库 `/home/s1yu/HarnessForge`,独立 git repo,**MIT**;GitHub `EpisodeYu/HarnessForge`。
+- 名称 **HarnessSmith**(2026-06-12 人定向整体改名,原名 HarnessForge,因 PyPI 撞名,详见 §11);生成器包/CLI `harnessmith`,产物默认包名 `agent_harness`(spec `project_slug` 可覆盖)。产物**显示名**走 spec `display_name`(人类可读,用于 UI 标题/README;空则回落 `project_slug`);wizard 输入显示名并由它派生 `project_slug`(snake_case 包名/文件夹)。
+- 仓库 `/home/s1yu/HarnessSmith`,独立 git repo,**MIT**;GitHub `EpisodeYu/HarnessSmith`。
 - LLM 底座:**openai 官方 SDK + base_url**(provider-agnostic)。
 - 循环:**原生 function-calling**(非文本解析 ReAct)。
 
 本版新增/明确:
 - **LLM API 面:走 Chat Completions + `tools`,不用 Responses API。** 理由:Responses 基本是 OpenAI 专属,而绝大多数第三方/本地 OpenAI 兼容端点(vLLM、together、groq 等)只实现 `/v1/chat/completions`;选 Chat Completions 才能兑现 provider-agnostic + base_url 的承诺。
 - **安全(轻量,本地自用)**:MVP 不做沙箱/keyring/写不回显面板/全链路 redaction。只保两条硬约束——(1) **密钥不入 git**:`config.yaml`/`harness.spec.yaml` 只存 env 引用名,真值放 `.env`(gitignored);(2) **高风险工具(shell/写文件)默认不内置 / 默认关,仅 allowlist 显式开启**。HITL 确认与更强 redaction 推迟到有真实多环境/共享需求时再加。**实现说明(Slice 10 已落地 HITL `ConfirmHooks`;Slice 11 人 2026-06-09 签字)**:**约束 (2) 对 wizard 产物有意松动**——wizard 默认启用 desktop-commander(shell + 全盘文件读写)并默认 `confirm: high`,把"全关"换成"默认预置 + HITL 逐次放行"(威胁模型 A 护栏,非安全边界;真隔离仍靠 Docker / 生成期不编译,见 §4)。仅限 wizard 产物;preset/CLI 默认仍维持高风险默认关。另:**Slice 11 的产物 Web MCP 管理面可增删/编辑 MCP server = 新安全面**(网页可让产物 spawn 任意本地命令),按本地可信定位,勿对公网暴露,详见 `02-development/12-slice-11-mcp-management.md`。
-- **API/SDK 版本与发布**:Python 3.11+;依赖 pin 版本;MCP/sqlite-vec 等仅在对应 L2/L3 模块引入并标平台要求;发布前查 PyPI 包名 `harnessforge` 是否重名;模板与产物的兼容靠 spec `version` 字段标注。
+- **API/SDK 版本与发布**:Python 3.11+;依赖 pin 版本;MCP/sqlite-vec 等仅在对应 L2/L3 模块引入并标平台要求;发布前查 PyPI 包名 `harnessmith` 是否重名;模板与产物的兼容靠 spec `version` 字段标注。
 - **可运行性契约**:产物以 **uv** 为唯一环境契约(带 `uv.lock` + `.python-version`,uv 自动管 Python 与隔离 venv);**默认生成 `Dockerfile` + `.devcontainer`** 作为环境无关的运行保障(前期即纳入,非可选);生成器**默认对新仓库冒烟自检**(`uv sync` + `pytest` + mock 跑一步),`requirements.txt` 提供 pip 兜底。详见 §7。
 
 自主细节(实现时可调):模板引擎 Jinja2;spec 用 Pydantic v2 + YAML;运行期配置 pydantic-settings;Web 无构建单页(Tailwind CDN);context 默认 `truncate`(summarize 为 L2 可选)。
 
-**明确不做(保护定位)**:不做生产级权限系统、云托管、**通用多 agent 编排框架 / 工作流编排 DSL / 动态图引擎 / 运行期范式抽象层**、在线 MCP registry、沙箱、**HarnessForge 侧的中心化配置管理/托管**(产物自持配置,守"生成后不再依赖 HarnessForge")。(注:**跨会话长期记忆不在本列——它非红线,已于 2026-06-07 排入 v1 并完成(Slice 8B)**,见 §3 L3 顶部排期更新与 `02-development/095-slice-8b-memory.md`;它做成了薄+spec 开关(`memory.enabled`,默认关、关闭零痕迹)+不落密钥+薄 `@register_memory` 注册表,**不得演变为云托管记忆服务**。)
+**明确不做(保护定位)**:不做生产级权限系统、云托管、**通用多 agent 编排框架 / 工作流编排 DSL / 动态图引擎 / 运行期范式抽象层**、在线 MCP registry、沙箱、**HarnessSmith 侧的中心化配置管理/托管**(产物自持配置,守"生成后不再依赖 HarnessSmith")。(注:**跨会话长期记忆不在本列——它非红线,已于 2026-06-07 排入 v1 并完成(Slice 8B)**,见 §3 L3 顶部排期更新与 `02-development/095-slice-8b-memory.md`;它做成了薄+spec 开关(`memory.enabled`,默认关、关闭零痕迹)+不落密钥+薄 `@register_memory` 注册表,**不得演变为云托管记忆服务**。)
 
 > **multi-agent 措辞细化(人已签,2026-06)**:红线是"**通用编排框架**",不是"≥2 个 agent"。**允许一个具体的、固定拓扑、生成为自有代码的 multi-agent 模式**(supervisor / "agent 即 tool",子 agent = 再跑一个 `run()`),**opt-in、排 v1+、不进默认产物**;它只是薄 loop 的组合,无运行期抽象层。详见 §3 L3 与 `02-development/00-overview.md §3` 决策表。
 
@@ -182,10 +182,10 @@ flowchart LR
 
 目标:让生成产物在用户各异的环境中**开箱即跑**,把环境配置负担降到最低,并由生成器**主动验证**可运行性。原则:**复用 uv + 容器两条成熟路径,不自造环境/依赖/版本管理层,也不为减依赖而手写 Web/SSE 轮子**。
 
-1. **uv 作为唯一环境契约**:产物随仓库带 `pyproject.toml` + `uv.lock` + `.python-version`。uv 自动下载匹配的托管 Python(用户无需预装 3.14)、自动建隔离 venv(不污染全局)、`uv sync` 一键就绪。README 首条命令即 `uv sync` → `uv run <pkg> run`;生成器本体走 `uvx harnessforge new`,全链路 uv 一致。
+1. **uv 作为唯一环境契约**:产物随仓库带 `pyproject.toml` + `uv.lock` + `.python-version`。uv 自动下载匹配的托管 Python(用户无需预装 3.14)、自动建隔离 venv(不污染全局)、`uv sync` 一键就绪。README 首条命令即 `uv sync` → `uv run <pkg> run`;生成器本体走 `uvx harnessmith new`,全链路 uv 一致。
 2. **依赖最小化由 spec 决定**:默认产物只含纯 Python / 通用 wheel 依赖(`openai` / `pydantic` / `pydantic-settings` / `pyyaml` / `typer`),零编译、任意 OS 可装。Web(`fastapi`/`uvicorn`)、MCP(`mcp`)、RAG(`sqlite-vec`)、keyring 等按 spec 开关进 `optional-dependencies`,未启用则不安装——"生成什么才依赖什么"。
 3. **生成期锁定**:生成器写完仓库后跑 `uv lock`(universal resolution,跨平台),用户拿到已解析好的确定依赖集,避免解析漂移。
-4. **生成后冒烟自检(默认开)**:生成器对新仓库执行 `uv sync` → import 自检 → mock LLM 跑一步 function-calling → `pytest -q`,全绿才报"可运行",失败给可读错误与修复建议;`--no-verify` 可关。另提供 `harnessforge doctor` 预检(uv 是否在、网络是否通、磁盘/权限)。
+4. **生成后冒烟自检(默认开)**:生成器对新仓库执行 `uv sync` → import 自检 → mock LLM 跑一步 function-calling → `pytest -q`,全绿才报"可运行",失败给可读错误与修复建议;`--no-verify` 可关。另提供 `harnessmith doctor` 预检(uv 是否在、网络是否通、磁盘/权限)。
 5. **Docker 一等公民(默认生成,前期纳入)**:每个产物默认生成 `Dockerfile` + `.dockerignore` + `.devcontainer/`(基于官方 `ghcr.io/astral-sh/uv` 镜像)。`docker build && docker run` 即得到与宿主完全无关的确定运行环境;Web 接口暴露端口,CLI 可进容器交互。面向"环境实在各异 / 不想动本机"的用户,这是最强的可运行性兜底,故**不作为可选项,前期即随产物产出**。
 6. **pip 兜底路径**:`uv export --format requirements-txt` 同时产出 `requirements.txt`,README 提供 `python -m venv` + `pip install -e .` 备选;主推 uv,但不强制用户安装 uv。
 7. **原生依赖兜底(L3)**:`sqlite-vec` 落地时配 numpy 余弦的纯 Python 兜底,缺平台 wheel 也能跑 RAG。
@@ -204,7 +204,7 @@ flowchart LR
 - 可观测:一次 run 产出结构正确的 JSONL trace + token/成本计数断言。
 - 护栏:按 LLM cost 限额单测(账本跨 run 累计、cost 由单价派生、`cost_limit` 到达 block_stop 并 `stop_reason="llm_budget"`、手动清空、compaction 计入对应 profile)。
 - 密钥不入 git:`config.yaml`/`harness.spec.yaml` 不含明文密钥的断言。
-- 生成器自身:spec 校验、模板渲染单测、`uvx harnessforge new` 冒烟;`ReadLints` 无新增告警。
+- 生成器自身:spec 校验、模板渲染单测、`uvx harnessmith new` 冒烟;`ReadLints` 无新增告警。
 - coding-assistant preset 能成功生成并通过其 pytest。
 
 **Non-blocker(L2/L3,做到即验,不卡 MVP)**:
@@ -227,12 +227,12 @@ flowchart LR
 
 - **环境多样性 / 可运行性**:不同 OS / Python 版本 / 无 uv / 无网络都可能让产物跑不起来。对策见 §7:uv 契约(自动管 Python + 隔离 venv)+ 默认最小依赖 + **默认产出 Docker** + 生成后冒烟自检 + pip 兜底。
 - **scope 蔓延**:严守分层,L3 坚决推迟;每个 slice 必须端到端可跑再进下一片。
-- **差异化锐度**:README/向导文案强调"把你原本会手写的 harness 生成出来,且生成后不再依赖 HarnessForge"。
+- **差异化锐度**:README/向导文案强调"把你原本会手写的 harness 生成出来,且生成后不再依赖 HarnessSmith"。
 - **provider 兼容**:以 Chat Completions + base_url 为准;`tool_calls` 在不同 provider 的细微差异需在 `llm.py` 收敛。
 - **增强项复杂度**:trace/预算/context 要薄、默认可关,避免侵蚀"薄 harness"卖点。
 - **(L2/L3)依赖漂移与平台兼容**:MCP/sqlite-vec pin 版本、catalog 标来源日期、sqlite-vec 标平台要求并备 numpy 余弦兜底。
 
 ## 11. 命名(已定)
 
-- 项目名 **HarnessForge** —— 寓意"锻造你自己的 harness",最贴合 eject/生成 + 自有的差异化定位。
-- 生成器 CLI/包:`harnessforge`;PyPI/仓库名同名(发布前需查重)。
+- 项目名 **HarnessSmith** —— harness + smith(仿 locksmith/wordsmith 构词),寓意"打造你自己的 harness 的工匠",保留品类词 harness 与锻造气质,最贴合 eject/生成 + 自有的差异化定位。(2026-06-12 人定向整体改名:原名 HarnessForge,因 PyPI `harnessforge` 于 2026-05 被同领域项目注册;`harnessmith` 经 PyPI/GitHub/npm/web 查重确认无撞名。)
+- 生成器 CLI/包:`harnessmith`;PyPI/仓库名同名(已查重,PyPI 含规范化变体均未被占用)。

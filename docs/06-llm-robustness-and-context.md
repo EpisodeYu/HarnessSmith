@@ -11,7 +11,7 @@
 ## 实现决策落定(人 2026-06-11 签字,按此执行)
 
 1. **LLM 配置丰富化**:常用采样参数升一等(`top_p` / `frequency_penalty` / `presence_penalty` / `seed` / `stop`,均"仅 set 时发")+ 通用 `extra_body: dict` 透传兜底(覆盖 `top_k` / `enable_thinking` / `thinking_budget` 等非标准参数)。全部进 `LLMProfileConfig`(运行期),web `/config` LLM 卡片 **Advanced(默认折叠)**,留空=用 provider 默认。
-2. **上下文窗口 = per-profile `context_window`(默认不填)**:`window_pct` 触发**仅当该 profile 设了 `context_window`** 才生效;未设时不做百分比预压缩,靠 A1(单工具结果截断)+ B2(溢出自救)兜底——**永不误伤大窗口(如 1M)模型**。不做跨端自动探测(对标 Cursor/LiteLLM 靠人工维护的模型注册表,与本项目"provider-agnostic + 生成后不依赖 HarnessForge"定位冲突)。
+2. **上下文窗口 = per-profile `context_window`(默认不填)**:`window_pct` 触发**仅当该 profile 设了 `context_window`** 才生效;未设时不做百分比预压缩,靠 A1(单工具结果截断)+ B2(溢出自救)兜底——**永不误伤大窗口(如 1M)模型**。不做跨端自动探测(对标 Cursor/LiteLLM 靠人工维护的模型注册表,与本项目"provider-agnostic + 生成后不依赖 HarnessSmith"定位冲突)。
 3. **触发改真实 usage 驱动**:上一步真实 `prompt_tokens` 回喂触发条件(`ContextInfo`),字符估算仅作首调用兜底;**默认 triggers 由 `max_tokens:192000` 改为 `window_pct:0.85`**。
 4. **注册表向后兼容**:自定义 `@register_condition` 的旧 `(messages, threshold)` 2 参签名仍可用(`should_compact` 按 arity 决定是否传 `info`),守"可扩展"核心卖点。
 

@@ -1,4 +1,4 @@
-# CLAUDE.md — HarnessForge 项目守则
+# CLAUDE.md — HarnessSmith 项目守则
 
 > Agent 进入本项目（**vibe coding 模式**）入场必读。本文件是 Agent 工作的**硬约束**。
 > 项目定位 / 范围 / 决策以 `docs/01-project-plan.md` 为准；开发节奏与切片门禁见 `docs/02-development/00-overview.md`。
@@ -44,8 +44,8 @@
 
 你写的是一个**生成器**,它渲染出**独立的生成产物仓库**。任何时候分清你在改哪一层:
 
-- 改 `harnessforge/`(生成器本体):spec / 渲染引擎 / CLI / 向导 / catalog / presets。
-- 改 `harnessforge/templates/`(产物模板):渲染后才是用户拿到的代码。
+- 改 `harnessmith/`(生成器本体):spec / 渲染引擎 / CLI / 向导 / catalog / presets。
+- 改 `harnessmith/templates/`(产物模板):渲染后才是用户拿到的代码。
 - **测试必须覆盖"生成产物"本身**:生成 → `uv sync` → `pytest` → mock LLM 跑通一次工具调用,而不只是测生成器。
 
 ## 5. 目标驱动 + 测试硬门槛(按生成器项目定制)
@@ -69,7 +69,7 @@
 
 - 全量黄金快照(示例 spec + 每个 preset 各生成并 `pytest`)。
 - **Docker 冒烟**:生成产物 `docker build` 成功 + `docker run` 跑通 mock 一步。
-- `uvx harnessforge new` 冒烟。
+- `uvx harnessmith new` 冒烟。
 
 任一项失败 → 该功能**未完成**,先修,不要急着开下一项。
 

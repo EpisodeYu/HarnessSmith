@@ -8,10 +8,10 @@
 
 ## 1. 交付物
 
-- `harnessforge/spec.py` — `HarnessSpec` Pydantic v2 模型,**字段集(v0.1 定稿)**:`version` / `project_slug` / `llms`(profile 列表占位)/ `roles` / `prompts`(system/persona,Slice 1 消费;**`persona` 已于 2026-06-07 移除**——只是 system 后的冗余拼接,见 `04-slice-3-product-web.md §4`)/ `tools`(占位)/ `interfaces` / `observability` / `budget`(max_steps/max_seconds/max_cost_usd,Slice 1 落地预算停止)。context / rag / secrets backend 字段**预留但本片不展开**。全模型 `extra="forbid"`。
-- `harnessforge/generator.py` — 加载 spec(YAML)→ Jinja2 渲染 `templates/` → 写出独立仓库 → 写入 `harness.spec.yaml`(spec 快照)→ `git init`;**重跑检测到目标非空则报错不覆盖**(`TargetExistsError`)。
-- `harnessforge/cli.py` — Typer 入口,先实现 `new <dir> --spec <spec.yaml>`(含 `--git/--no-git`)。非法 spec → exit 2;重跑非空目录 → 警告 exit 1。
-- `harnessforge/templates/` — 最小模板(`.j2`):`pyproject.toml` + `README.md` + `.env.example` + `LICENSE` + `.gitignore` + 空 `src/<pkg>/__init__.py`。
+- `harnessmith/spec.py` — `HarnessSpec` Pydantic v2 模型,**字段集(v0.1 定稿)**:`version` / `project_slug` / `llms`(profile 列表占位)/ `roles` / `prompts`(system/persona,Slice 1 消费;**`persona` 已于 2026-06-07 移除**——只是 system 后的冗余拼接,见 `04-slice-3-product-web.md §4`)/ `tools`(占位)/ `interfaces` / `observability` / `budget`(max_steps/max_seconds/max_cost_usd,Slice 1 落地预算停止)。context / rag / secrets backend 字段**预留但本片不展开**。全模型 `extra="forbid"`。
+- `harnessmith/generator.py` — 加载 spec(YAML)→ Jinja2 渲染 `templates/` → 写出独立仓库 → 写入 `harness.spec.yaml`(spec 快照)→ `git init`;**重跑检测到目标非空则报错不覆盖**(`TargetExistsError`)。
+- `harnessmith/cli.py` — Typer 入口,先实现 `new <dir> --spec <spec.yaml>`(含 `--git/--no-git`)。非法 spec → exit 2;重跑非空目录 → 警告 exit 1。
+- `harnessmith/templates/` — 最小模板(`.j2`):`pyproject.toml` + `README.md` + `.env.example` + `LICENSE` + `.gitignore` + 空 `src/<pkg>/__init__.py`。
   - **实现说明**:`harness.spec.yaml` **不是模板**,由生成器按校验后的 spec 快照写出(见 2.2),保证它是真实快照而非静态占位。`.gitignore` 为自主新增(忽略 `.env` 与 trace 目录,落实"密钥不入 git")。
 - `tests/` — `test_spec.py`(spec 校验:合法/非法字段/缺必填/坏 slug/roles 指向未知 profile/budget 非正值)+ `test_generator.py`(渲染:文件结构、占位替换、快照回环、`.env` 仅 env 名、无框架断言、重跑不覆盖、git init)。
 - 一份**示例 `examples/spec.yaml`**(最小可生成,含 `prompts`/`budget` 示例)。
@@ -30,7 +30,7 @@
 - `git init` 生成的仓库(可经 `--no-git` 关闭)。
 
 ### 2.3 CLI
-- `harnessforge new <dir> --spec <spec.yaml>`,渲染并落盘;`--git/--no-git` 控制是否 `git init`。
+- `harnessmith new <dir> --spec <spec.yaml>`,渲染并落盘;`--git/--no-git` 控制是否 `git init`。
 
 ## 3. 退出门禁(全绿才算完成)
 

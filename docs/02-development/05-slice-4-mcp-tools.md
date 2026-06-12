@@ -18,23 +18,23 @@
   - **生成期(唯一必须,结构性)**:`spec.mcp.enabled`。为真才渲染 `harness/mcp.py`、把 `mcp` 依赖写进 `pyproject`/`uv.lock`/`requirements.txt`、在 `config.py`/`config.yaml` 渲染 `mcp:` 段。运行期变不出来(不能凭空装依赖/生代码),所以它是"薄"的边界。
   - **运行期(全可改,行为性)**:连哪些 server(stdio 的 `command/args/env` 或远程的 `url/auth_env`)、每个 tool 是否 allowlist、用哪种传输——全落 `config.yaml`,加/删/换 server **不用重新生成**;tool allowlist 还能走 Slice 3 `/config` 面板当场改。
 - **传输:stdio + 远程 HTTP/SSE 都做**(人 2026-06-03 定向)。某 server 配了 `command` 走 stdio、配了 `url` 走远程——**运行期按 config 形态自动选**,不引入第二个生成期开关(软确认,§4)。**联网 MCP registry**(自动拉取 server 清单)仍**不做**(v1+)。
-- **catalog 挪到 Slice 5**:`harnessforge/catalog/mcp_servers.yaml` 不编译进产物,只是 `wizard`(Slice 5)/CLI 帮用户**预填 `config.yaml` server 条目**的便捷数据源("点一下 GitHub MCP"省得手敲 URL)。**Slice 4 不依赖 catalog 即可跑通**(server 直接写 `config.yaml`);本片不立 catalog 文件。
+- **catalog 挪到 Slice 5**:`harnessmith/catalog/mcp_servers.yaml` 不编译进产物,只是 `wizard`(Slice 5)/CLI 帮用户**预填 `config.yaml` server 条目**的便捷数据源("点一下 GitHub MCP"省得手敲 URL)。**Slice 4 不依赖 catalog 即可跑通**(server 直接写 `config.yaml`);本片不立 catalog 文件。
 - **配方 vs 活旋钮兑现**:MCP 能力有无=结构性=spec(一个 bool);server/tool/传输=行为性=运行期。用户**天然能自带 server**(改 `config.yaml` 即可),无需经 spec/catalog 把关——故无"白名单"概念。**真正的安全闸 = 运行期 tool allowlist + 风险标记(高风险默认关)+ 密钥按 env 名注入**(见 §5)。
 - **两轴 / 天花板 vs 地板(口径,见 `01 §4`)**:MCP 的**结构天花板 = `mcp.enabled`**(能力代码有无);开启后用户天然能自带 server、运行期 allowlist 在已发现工具里**只收窄不扩张**。故 MCP 是**模型 A 护栏**(可信用户防手滑 + 高风险默认关),**不是对不可信收件人的强制边界**——`/config` / `config.yaml` 改 allowlist 不构成安全保证;真要对手级隔离须靠容器 / 自托管 / server 后端凭证作用域(守"不做生产级权限系统")。上一条"安全闸"按此理解为护栏(模型 A),非强制(模型 B)。
 - **复用既有机制,不另起炉灶**:条件渲染走 Slice 3 的 `generator.CONDITIONAL_TEMPLATES`;依赖落位沿用 Slice 3 方案 A(开关为真直接进 `dependencies`);MCP 工具注册进**同一个** `tools.Registry`、走**同一套** `config.enabled_tool_names()` + `registry.active_names(...)` allowlist、走**既有** `loop`/`trace`,**`loop.py` 与 `tools.Registry` 核心零改动**。
 
 ## 1. 交付物
 
-生成器侧(`harnessforge/`):
+生成器侧(`harnessmith/`):
 
-- `harnessforge/spec.py` — `HarnessSpec` 新增 `mcp: Mcp`(`Mcp` 子模型,`extra="forbid"`)。**最小形态**:`enabled: bool = False`;可选 `servers`(初值种子,仅用于把示例 server 预写进生成的 `config.yaml`,**非生成期语义**,可省)。**字段需人审签字(§4①)**。
+- `harnessmith/spec.py` — `HarnessSpec` 新增 `mcp: Mcp`(`Mcp` 子模型,`extra="forbid"`)。**最小形态**:`enabled: bool = False`;可选 `servers`(初值种子,仅用于把示例 server 预写进生成的 `config.yaml`,**非生成期语义**,可省)。**字段需人审签字(§4①)**。
 - `generator.py` — 在 `CONDITIONAL_TEMPLATES` 注册 MCP 模板谓词(`lambda spec: spec.mcp.enabled`):`harness/mcp.py`、`tests/test_mcp.py`、`tests/_mcp_dummy_server.py` 仅在开启时写出。
 - `pyproject.toml.j2` — `{% if spec.mcp.enabled %}` 条件块加 `mcp` 依赖(pin 版本);**关掉则整段不渲染**(满足"关 MCP 不含 `mcp`"门禁,三处:`pyproject`/`uv.lock`/`requirements.txt`)。
 - `config.py.j2` — `{% if spec.mcp.enabled %}` 条件块:`import` MCP 运行期模型 + 给 `Config` 加 `mcp` 字段;**关掉时 `config.py` 无 mcp 字段、无 import、无 MCP 痕迹**。
 - `config.yaml.j2` — 开启时渲染带注释的 `mcp:` 段(`servers:` 可空或写 spec 初值种子);若有初值 server,顺带把其工具按 allowlist 写进 `tools:`(高风险默认 `enabled: false`,沿用 Slice 1 约定)。
 - 一份 **mcp-enabled 测试 fixture spec**(`mcp.enabled: true`)供黄金 / 集成测试;`coding-assistant` preset **保持不开 MCP**(golden 仍薄)。
 
-生成产物侧(`harnessforge/templates/`,`mcp.enabled` 门控,默认不生成):
+生成产物侧(`harnessmith/templates/`,`mcp.enabled` 门控,默认不生成):
 
 - `src/<pkg>/harness/mcp.py` — **薄** MCP 适配层(目标 100–150 行,超薄即停问人 `CLAUDE.md §6.8`):
   - `McpServerConfig` / `McpConfig`(运行期 Pydantic 模型,`extra="forbid"`):`servers: list`,每条 `name` + 二选一形态——**stdio**(`command` / `args` / 可选 `env`:要转发进子进程的 **env 变量名**列表,真值经 `.env`/进程环境解析,**绝不在 config 里存明文**)或**远程**(`url` / 可选 `auth_env`:Bearer token 的 env 名 / 可选自定义 header env 映射)。
@@ -106,5 +106,5 @@
 - **不绑框架**:`mcp` 是协议 SDK,**不是 agent 编排框架**,不违反定位红线(`01 §1`);但仅在 `mcp.enabled` 时进产物。
 - **密钥红线**(`CLAUDE.md §6.5`):stdio 的 `env` 与远程的 `auth_env`/header **只存 env 变量名**,真值经 `.env`/进程环境用既有 `resolve_env` 解析后注入子进程 / 请求头;**绝不把真值写进 spec/catalog/config.yaml/trace/日志**。高风险工具默认关,仅 allowlist 显式开(沿用 Slice 1)。MCP 工具的参数/结果进 trace 时与现有 `tool_call`/`tool_result` 同路径,注意不把含密钥的实参回显(由用户对自带 server 负责)。
 - **传输**:stdio + 远程 HTTP/SSE 都做(人 2026-06-03 定向);**`/config` 改 server 热重连**已排 **Slice 11 MCP 健康/管理**;**联网 MCP registry、`forge add` 增量接 server** 仍为 v1+,不在本片(`00-overview §2` Slice 11 / Slice 14+ / `01 §3` L3)。
-- **配方 vs 活旋钮**(决策④,`01 §4`):MCP 能力有无 = 结构性(spec,重新生成);server/tool/传输 = 行为性(运行期 `config.yaml` / `/config`)。MCP 配置面属**产物自持**,HarnessForge 不做中心化配置/托管。
+- **配方 vs 活旋钮**(决策④,`01 §4`):MCP 能力有无 = 结构性(spec,重新生成);server/tool/传输 = 行为性(运行期 `config.yaml` / `/config`)。MCP 配置面属**产物自持**,HarnessSmith 不做中心化配置/托管。
 - **catalog 漂移**(Slice 5 再细化):server 经 `npx`/`uvx` 拉取时注意 pin 版本(`01 §10` 依赖漂移与平台兼容)。

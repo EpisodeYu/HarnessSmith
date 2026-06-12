@@ -1,6 +1,6 @@
 # 测试报告 · 功能 + 可扩展性(2026-06-08)
 
-> 用本机 LiteLLM 真实 key 对 HarnessForge **已完成功能(Slice 0–8B)** 做的一次全面功能测试,
+> 用本机 LiteLLM 真实 key 对 HarnessSmith **已完成功能(Slice 0–8B)** 做的一次全面功能测试,
 > 外加一次**开发者视角的可扩展性审计**(按 `AGENTS.md` 实际动手扩展各能力,看是否真的"方便自定义")。
 >
 > **本报告只记录发现,未改任何代码 / 模板**(人指示"暂不修改代码")。每条 finding 带复现证据 + 建议;
@@ -194,13 +194,13 @@ tumbling 窗口语义正确;自定义 `@register_budget_condition` 进 `BUDGET_C
 
 ### 2.11 preset 金路径(coding-assistant)+ wizard(inline)
 
-- **coding-assistant**:`harnessforge new --preset` 走完 `uv sync`+产物 pytest+mock(exit 0);接 LiteLLM 真实一轮 `256/4=64`(调 calculator);
+- **coding-assistant**:`harnessmith new --preset` 走完 `uv sync`+产物 pytest+mock(exit 0);接 LiteLLM 真实一轮 `256/4=64`(调 calculator);
   config 预填 MCP 基线正确(fetch/git_status 开、git_commit/desktop-commander 关);RULES.md 生成并注入;pyproject 无框架——**通过**。
 - **wizard**:`GET /` 返回 17KB 表单,路由 `/spec`、`/generate`、`/meta`;只采集结构项(paradigms/web/mcp),行为字段烤默认——**符合设计**。
 
 | id | kind/sev | layer | 标题 | 证据 / 建议 |
 |----|----------|-------|------|------|
-| DOC-PRESETS | doc / low | docs | 多处文档声称存在 `rag-research`(骨架)/ 极薄 `example` preset,实际**只有 `coding-assistant`** | `ls harnessforge/presets/` 仅 `coding-assistant`;但 `01-project-plan.md` L49/L133、`00-overview.md` L119、`03-feature-landscape.md` L157 都把 rag-research/example 当已有 preset 写。建议:统一为"现有 preset = coding-assistant",其余标注为 backlog(`03 §6 D-3` 已列为待补)|
+| DOC-PRESETS | doc / low | docs | 多处文档声称存在 `rag-research`(骨架)/ 极薄 `example` preset,实际**只有 `coding-assistant`** | `ls harnessmith/presets/` 仅 `coding-assistant`;但 `01-project-plan.md` L49/L133、`00-overview.md` L119、`03-feature-landscape.md` L157 都把 rag-research/example 当已有 preset 写。建议:统一为"现有 preset = coding-assistant",其余标注为 backlog(`03 §6 D-3` 已列为待补)|
 
 ---
 
@@ -277,7 +277,7 @@ tumbling 窗口语义正确;自定义 `@register_budget_condition` 进 `BUDGET_C
 
 ### 附:复现要点
 
-- 测试床:`/home/s1yu/HarnessForge/generate/ft_full`(`.venv/bin/ft_full`,config 已设 `qwen-plus`、`.env` 已接 LiteLLM)。
+- 测试床:`/home/s1yu/HarnessSmith/generate/ft_full`(`.venv/bin/ft_full`,config 已设 `qwen-plus`、`.env` 已接 LiteLLM)。
 - 隔离跑:`cp config.yaml /tmp/x.yaml` 改 state 目录 → `.venv/bin/ft_full <cmd> --config /tmp/x.yaml`。
 - 扩展点 in-proc 探针:`.venv/bin/python` 直接 `import ft_full.harness.*` 注册并跑 loop(镜像 `cli.py` 接线)。
-- 原始 sweep 结构化结果:`/tmp/claude-1000/-home-s1yu-HarnessForge/7fa5242e-.../tasks/wmxi1sya7.output`(10 个区报告 JSON)。
+- 原始 sweep 结构化结果:`/tmp/claude-1000/-home-s1yu-HarnessSmith/7fa5242e-.../tasks/wmxi1sya7.output`(10 个区报告 JSON)。
