@@ -52,6 +52,7 @@
 
 ## 5. 本 slice 注意 / 留给后续
 
+- **基座 `system` 默认(实现说明 2026-06-12)**:rule 文件仍拼在 `system` 之后,但 `prompts.system` 的缺省值已从 `"You are a helpful assistant."` 换成一版薄通用 agent 基座(对标 Claude Code/Codex/Cursor/opencode 的共性准则:agent 身份 + 用工具别瞎猜 + 诚实不编造 + 简洁少 emoji + 最小改动 + 规则文件优先)。单一文本同源于 `scaffold.DEFAULT_SYSTEM_PROMPT` / 产物 `harness/prompts.py` 的 `_DEFAULT_SYSTEM`(逐字一致),并以 YAML 字面块烤进 `config.yaml`(可见可改)。仅改默认文本,不动 `_load_rules` 注入机制。
 - **wizard(Slice 7)需覆盖 `prompts.rules_files`**:已在 `08-slice-7-wizard.md` §2.1 高级组登记。
 - **配置级 shell hook(Claude Code/Cursor 风格,事件→shell 命令、可 veto)= v1+ backlog**(`00-overview §2` Slice 14+):代码级 `Hooks` 已覆盖同等能力(own-code 写子类即可),且与 Slice 10 HITL 确认 hook 重叠、引入"配置跑任意 shell"新安全面,故缓做。
 - **不做**:rule 的 glob / 描述触发 auto-attach(Cursor 进阶特性)——MVP 只做"always-apply 文件列表"薄版;按需触发交给 SKILL(Slice 6)。

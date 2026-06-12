@@ -8,6 +8,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from harnessforge.scaffold import DEFAULT_SYSTEM_PROMPT
 from harnessforge.spec import HarnessSpec, load_spec
 
 EXAMPLE_SPEC = Path(__file__).resolve().parents[1] / "examples" / "spec.yaml"
@@ -20,7 +21,7 @@ def test_example_spec_is_valid():
     assert [p.name for p in spec.llms] == ["default"]
     assert spec.roles == {"generation": "default"}
     assert spec.interfaces.cli is True
-    assert spec.prompts.system == "You are a helpful assistant."
+    assert spec.prompts.system == DEFAULT_SYSTEM_PROMPT
 
 
 def test_defaults_fill_in_minimal_spec():

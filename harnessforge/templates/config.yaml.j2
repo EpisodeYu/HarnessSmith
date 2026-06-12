@@ -73,7 +73,11 @@ roles:
 {% endif %}{% if spec.memory.enabled and "memory" not in roles %}  # memory: {{ (llms[0].name if llms else "default") }}       # long-term memory manager (used by `memory consolidate`)
 {% endif %}
 prompts:
-{% if spec.prompts.system %}  system: {{ spec.prompts.system | tojson }}
+{% if spec.prompts.system %}  # The base system prompt (a runtime knob — edit it freely). Rendered as a YAML
+  # literal block so it stays readable and editable. rules_files below are appended
+  # to it every turn; keep this thin and put project/domain specifics in those.
+  system: |-
+{{ spec.prompts.system | trim | indent(width=4, first=True) }}
 {% endif %}  # Always-apply project rules: markdown files injected into EVERY system
   # prompt (the open AGENTS.md / CLAUDE.md / .cursor rules pattern). Drop a file,
   # list it here — no regeneration needed. A missing file is skipped. A CLAUDE.md

@@ -16,7 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from harnessforge.cli_wizard import WizardAborted, build_spec, run_wizard
-from harnessforge.scaffold import slugify
+from harnessforge.scaffold import DEFAULT_SYSTEM_PROMPT, slugify
 
 
 @pytest.mark.parametrize(
@@ -57,7 +57,7 @@ def test_build_spec_bakes_behavioral_defaults_from_structural_answers():
     # baked behavioral defaults (env-var NAMES only, no guessed model)
     assert spec.llms and spec.llms[0].name == "default" and spec.llms[0].model == ""
     assert spec.llms[0].api_key_env == "OPENAI_API_KEY"
-    assert spec.prompts.system == "You are a helpful assistant."
+    assert spec.prompts.system == DEFAULT_SYSTEM_PROMPT
     assert servers == []
 
 

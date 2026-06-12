@@ -200,7 +200,9 @@ prompt verbatim (a missing file is skipped, so it's never an error):
 
 ```yaml
 prompts:
-  system: "You are a focused coding assistant."
+  system: |-                # the base prompt (a thin, general default ships here)
+    You are a capable AI assistant. Use the available tools when they help, and
+    be honest and concise.
   rules_files:
     - RULES.md            # ships as a starter; edit it freely
     - .cursor/rules.md    # or reuse rules you already keep for other tools

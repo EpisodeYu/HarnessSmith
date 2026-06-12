@@ -143,7 +143,7 @@ def test_baked_defaults_fill_behavioral_fields(client):
     assert "name: default" in y                # default LLM profile (scaffold)
     assert "gpt-4o-mini" not in y              # no guessed model
     assert "api_key_env: OPENAI_API_KEY" in y  # env NAME only
-    assert "You are a helpful assistant." in y  # default system prompt
+    assert "You are a capable AI assistant." in y  # default system prompt (baked)
     # Cost accounting / limits are runtime-only (config.yaml's Budget page), never
     # in the spec — so the baked spec has no budget block.
     assert "budget:" not in y

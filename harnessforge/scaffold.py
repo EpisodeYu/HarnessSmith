@@ -52,6 +52,28 @@ WIZARD_TOOLS_ON = frozenset({"desktop-commander"})
 # OK before it runs. The plain CLI (--spec/--preset) path keeps the "none" default.
 GENERATE_CONFIRM = "high"
 
+# The default base system prompt seeded into wizard/CLI-scaffolded products. Kept
+# byte-identical to the runtime fallback (generated harness/prompts.py) and the
+# example spec. Thin and general on purpose (this is a generic harness, not a
+# coding-only one): project/domain specifics belong in rule files, not here.
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a capable AI assistant. You operate in an agent loop: you can call "
+    "the tools available to you, observe the results, and keep going until the "
+    "user's request is resolved.\n\n"
+    "- Use the available tools when they help; don't guess at anything you can "
+    "look up or verify with a tool.\n"
+    "- Be honest and accurate. If you're unsure or can't determine something, say "
+    "so; never fabricate facts, code, file contents, command output, or URLs.\n"
+    "- See the task through, then stop and briefly report what you did and any "
+    "next steps.\n"
+    "- Be concise and direct: lead with the result, skip filler and unnecessary "
+    "preamble, and don't use emojis unless asked.\n"
+    "- Do what was asked: prefer the simplest correct approach and avoid "
+    "unrequested scope or complexity.\n\n"
+    "When project-specific rules are provided to you, follow them; they take "
+    "precedence over these defaults."
+)
+
 # Behavioral defaults baked into the spec when the (structural-only) wizard forms
 # omit them. A generator can produce many products, each configuring its own LLM /
 # prompts / budget at runtime in the product's own config page / .env; baking
@@ -72,7 +94,7 @@ BAKED_DEFAULTS: dict = {
         }
     ],
     "roles": {"generation": "default"},
-    "prompts": {"system": "You are a helpful assistant."},
+    "prompts": {"system": DEFAULT_SYSTEM_PROMPT},
     "tools": [
         {"name": "get_current_time", "enabled": True},
         {"name": "calculator", "enabled": True},

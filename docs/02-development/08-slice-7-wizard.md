@@ -50,7 +50,7 @@
 ### 2.1 生成器 wizard:结构-only 表单 + 烤默认(决策 B)
 - **首控件 = 语言**;前端 i18n 字典覆盖全部可见文案,切换即换(零新增依赖)。
 - **UI 只暴露结构**:基本(显示名→slug、`paradigms` 多选+默认、语言)+ 能力(`interfaces.web`、`mcp.enabled`+catalog 多选、`skills.enabled`、`memory.enabled`(Slice 8B 新增))+ 产出。**不展示** llms/prompts/tools/context/budget/observability/roles。
-- **后端烤默认值**(`app.py _BAKED_DEFAULTS`,仅缺省时填):默认 LLM profile(`name=default`/`model=""`(留空)/`api_key_env=OPENAI_API_KEY`/`base_url_env=OPENAI_BASE_URL`)+ `roles.generation=default` + `prompts.system="You are a helpful assistant."` + 内置工具(get_current_time/calculator)开 + `budget.max_steps=8`;context/observability 走 `config.yaml` 模板默认。**model 故意留空**:一键向导从不问用哪个模型,猜一个(如 gpt-4o-mini)只会在非 OpenAI provider 上 400;产物在用户于配置页填好 model 前**门控对话**(web `hasLLM` 要求非空 model)。env-var 名仍预填,用户在**产物配置页 / `.env`** 里补 model + key。显式传入(或手写 spec)优先于默认。
+- **后端烤默认值**(`app.py _BAKED_DEFAULTS`,仅缺省时填):默认 LLM profile(`name=default`/`model=""`(留空)/`api_key_env=OPENAI_API_KEY`/`base_url_env=OPENAI_BASE_URL`)+ `roles.generation=default` + `prompts.system=`薄通用默认基座(`scaffold.DEFAULT_SYSTEM_PROMPT`:agent 身份 + 用工具别瞎猜 + 诚实不编造 + 简洁少 emoji + 最小改动 + 规则文件优先;2026-06-12 取代旧的 "You are a helpful assistant.")+ 内置工具(get_current_time/calculator)开 + `budget.max_steps=8`;context/observability 走 `config.yaml` 模板默认。**model 故意留空**:一键向导从不问用哪个模型,猜一个(如 gpt-4o-mini)只会在非 OpenAI provider 上 400;产物在用户于配置页填好 model 前**门控对话**(web `hasLLM` 要求非空 model)。env-var 名仍预填,用户在**产物配置页 / `.env`** 里补 model + key。显式传入(或手写 spec)优先于默认。
 - **显示名→slug**:前端 `lower / 非字母数字→_ / 去首尾_ / 数字开头补_`;用户改过 slug 后不再自动覆盖;后端按 `spec._SLUG_RE` 兜底校验。
 
 ### 2.2 后端校验 + 产出

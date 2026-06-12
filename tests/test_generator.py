@@ -191,6 +191,28 @@ def test_config_yaml_renders_from_spec_without_secrets(tmp_path, preset_spec):
     assert "sk-" not in config  # never a real secret value
 
 
+def test_default_system_prompt_round_trips_and_matches_fallback(tmp_path, spec):
+    """The baked default system prompt renders as a readable YAML literal block
+    that round-trips byte-for-byte, and the generated harness/prompts.py reuses the
+    same text as its empty-config fallback (so behavior is identical either way)."""
+    from harnessforge.scaffold import DEFAULT_SYSTEM_PROMPT
+
+    # The generic example spec seeds exactly the canonical default.
+    assert spec.prompts.system == DEFAULT_SYSTEM_PROMPT
+
+    out = tmp_path / "thin"
+    generate(spec, out, git_init=False)
+    config = yaml.safe_load((out / "config.yaml").read_text(encoding="utf-8"))
+    # Multi-line literal block survives a yaml round-trip unchanged (no escaping,
+    # no trailing newline, blank lines between paragraphs preserved).
+    assert config["prompts"]["system"] == DEFAULT_SYSTEM_PROMPT
+
+    prompts_py = (out / "src" / "agent_harness" / "harness" / "prompts.py").read_text(
+        encoding="utf-8"
+    )
+    assert DEFAULT_SYSTEM_PROMPT in prompts_py  # runtime fallback == baked seed
+
+
 def test_debug_log_is_generated_off_by_default_and_gitignored(tmp_path, preset_spec):
     """The opt-in local debug log ships in every product: module present,
     config knob rendered (default off), and its dir never reaches git."""
