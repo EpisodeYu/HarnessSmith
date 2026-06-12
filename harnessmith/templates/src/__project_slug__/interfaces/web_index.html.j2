@@ -558,16 +558,25 @@
       buildCfgTabs();
       renderSessionList();
       updateMainTitle();
+      refreshSendButton();  // restore "Stop" if the active conversation is mid-turn
     }
     // Language is chosen on the System tab (#sys-lang); see its handler below.
 
     // ---- chat -----------------------------------------------------------
-    function line(text, cls) {
+    // Every transcript element is appended to a VIEW's own container (see the
+    // sessions section): conversations render independently, so several can
+    // stream at once and switching views can't mix their output. The page only
+    // auto-scrolls for the view that is actually on screen.
+    function scrollChat(view) {
+      if (view === activeView) log.scrollTop = log.scrollHeight;
+    }
+
+    function line(view, text, cls) {
       const el = document.createElement("div");
       el.className = cls || "text-slate-700";
       el.textContent = text;
-      log.appendChild(el);
-      log.scrollTop = log.scrollHeight;
+      view.container.appendChild(el);
+      scrollChat(view);
       return el;
     }
 
@@ -581,7 +590,7 @@
     // "Thinking…"; when the answer begins it collapses to "Thought for Ns" (click
     // to reread). On reload it renders collapsed as "Reasoning". Appended to the
     // log on creation.
-    function reasoningBox() {
+    function reasoningBox(view) {
       const box = document.createElement("details");
       box.className = "hf-block rounded-md border border-slate-200 bg-slate-50 px-2 py-1";
       box.open = true;
@@ -597,8 +606,8 @@
       const body = document.createElement("div");
       body.className = "mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-slate-400";
       box.append(summary, body);
-      log.appendChild(box);
-      log.scrollTop = log.scrollHeight;
+      view.container.appendChild(box);
+      scrollChat(view);
       const started = Date.now();
       let hasText = false;
       return {
@@ -609,7 +618,7 @@
           hasText = true;
           body.textContent += text;
           body.scrollTop = body.scrollHeight;
-          log.scrollTop = log.scrollHeight;
+          scrollChat(view);
         },
         // End of a live thinking phase: swap the animated label for the elapsed
         // time and collapse (the body stays behind the chevron).
@@ -628,7 +637,7 @@
     // A collapsible tool-call block: one summary line (status dot + tool name +
     // a one-line arg/command preview), expandable to full arguments + result.
     // Dim/secondary to the answer, matching Cursor/Claude/Zed tool rendering.
-    function toolBlock(name, argsStr) {
+    function toolBlock(view, name, argsStr) {
       const box = document.createElement("details");
       box.className = "hf-block rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs";
       const summary = document.createElement("summary");
@@ -659,8 +668,8 @@
       resSec.cap.classList.add("hidden"); resSec.pre.classList.add("hidden");
       wrap.append(argsSec.cap, argsSec.pre, resSec.cap, resSec.pre);
       box.append(summary, wrap);
-      log.appendChild(box);
-      log.scrollTop = log.scrollHeight;
+      view.container.appendChild(box);
+      scrollChat(view);
       return {
         el: box,
         setResult(result) {
@@ -670,7 +679,7 @@
           resSec.pre.classList.remove("hidden");
           resSec.pre.textContent = result;
           if (isErr) resSec.pre.classList.add("text-red-700");
-          log.scrollTop = log.scrollHeight;
+          scrollChat(view);
         },
       };
     }
@@ -679,8 +688,8 @@
     // ask_question, or — later — HITL tool confirmation). The answer is POSTed
     // back to /chat/{run_id}/respond, which unblocks the waiting loop. Themed and
     // inline (no native browser dialogs).
-    function renderAskCard(data) {
-      const runId = currentRunId;
+    function renderAskCard(view, data) {
+      const runId = view.runId;
       const isApproval = data.kind === "approval";
       const card = document.createElement("div");
       // Approval (HITL confirmation) gets an amber "action needed" tint; a model
@@ -735,7 +744,9 @@
         card.className = "whitespace-pre-wrap text-sm " +
           (isApproval ? "text-amber-700" : "text-indigo-700");
         card.textContent = (isApproval ? "🔒 " : "❓ ") + data.prompt + " → " + summary;
-        log.scrollTop = log.scrollHeight;
+        scrollChat(view);
+        view.pendingAsk = false;  // the sidebar's amber "waiting for you" dot clears
+        renderSessionList();
         fetch("/chat/" + encodeURIComponent(runId) + "/respond", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -836,8 +847,10 @@
         bar.append(send, skip);
         card.appendChild(bar);
       }
-      log.appendChild(card);
-      log.scrollTop = log.scrollHeight;
+      view.container.appendChild(card);
+      scrollChat(view);
+      view.pendingAsk = true;  // amber dot in the sidebar while an answer is awaited
+      renderSessionList();
     }
 
     async function loadParadigms() {
@@ -855,19 +868,69 @@
     loadParadigms();
 
     // ---- chat sessions (AI-Studio-style left sidebar) ------------------
-    let currentSession = null;   // id of the open session (null = unsaved draft)
-    let currentTitle = "";       // its title (shown in the main header)
+    // Each conversation owns a VIEW: its own DOM container plus its run state
+    // (EventSource, run id, streaming flag, context-meter figures). #log is just
+    // the viewport the active container is mounted in, so several conversations
+    // can stream in parallel — switching views re-mounts a container, it never
+    // touches another conversation's run. The map holds the active view plus any
+    // streaming ones; idle views are dropped on switch and re-fetched from the
+    // server on reopen (disk is authoritative — each step is checkpointed there).
+    let viewSeq = 0;
+    const views = new Map();     // key -> view (key = session id, or draft-N until minted)
+    let activeView = null;       // the view mounted in #log
     let sessionsCache = [];      // last /sessions payload (relabel on lang switch)
     let editingId = null;        // row being inline-renamed
     let confirmingId = null;     // row showing the inline delete confirmation
-    let currentRunId = null;     // id of the in-flight run (for POST /chat/{id}/stop)
-    let activeES = null;         // the open EventSource while streaming
-    let streaming = false;       // true while a turn is in flight (Send -> Stop)
-    // Context meter: the generation profile's window (from the run event; null when
-    // unset) and the last step's real prompt_tokens drive the ring next to Send.
-    let ctxMeterWindow = null;
 
-    function chatIsEmpty() { return !currentSession && log.children.length === 0; }
+    function makeView(sessionId) {
+      const container = document.createElement("div");
+      container.className = "space-y-2";
+      const view = {
+        key: sessionId || ("draft-" + (++viewSeq)),
+        sessionId: sessionId || null,  // null until the server mints one (session event)
+        container,
+        title: "",
+        preview: "",       // first sent message (labels a not-yet-saved live row)
+        es: null,          // open EventSource while streaming
+        runId: null,       // in-flight run id (for POST /chat/{id}/stop|respond)
+        streaming: false,
+        pendingAsk: false, // an ask card awaits the user (sidebar dot turns amber)
+        ctxWindow: null,   // context-meter figures, per conversation
+        ctxUsed: 0,
+      };
+      views.set(view.key, view);
+      return view;
+    }
+
+    function viewFor(sessionId) {
+      for (const v of views.values()) if (v.sessionId === sessionId) return v;
+      return null;
+    }
+
+    // Mount a view in the viewport and repaint everything that reflects it (title,
+    // context meter, Send/Stop button, sidebar highlight). Idle views other than
+    // the mounted one are dropped — their sessions reload from disk on reopen.
+    function showView(view) {
+      activeView = view;
+      if (view.container.parentNode !== log) {
+        log.innerHTML = "";  // detach the previous container (it lives on in its view)
+        log.appendChild(view.container);
+      }
+      for (const [key, v] of views) {
+        if (v !== view && !v.streaming) views.delete(key);
+      }
+      log.scrollTop = log.scrollHeight;
+      refreshSendButton();
+      updateCtxMeter(view.ctxUsed);
+      show("chat");
+      renderSessionList();
+      updateMainTitle();
+    }
+
+    function chatIsEmpty() {
+      return activeView && !activeView.sessionId && !activeView.streaming
+        && activeView.container.children.length === 0;
+    }
 
     // Compact token count: 940 -> "940", 12500 -> "12K", 1000000 -> "1M".
     function fmtTok(n) {
@@ -884,14 +947,15 @@
     function updateCtxMeter(used) {
       const arc = $("ctx-meter-arc"), label = $("ctx-meter-label"), pop = $("ctx-meter-pop");
       if (!arc) return;
+      const win = activeView ? activeView.ctxWindow : null;
       used = Math.max(0, Math.round(Number(used) || 0));
-      if (ctxMeterWindow && ctxMeterWindow > 0) {
-        const ratio = used / ctxMeterWindow;
+      if (win && win > 0) {
+        const ratio = used / win;
         const clamped = Math.min(1, Math.max(0, ratio));
         arc.style.strokeDashoffset = (CTX_C * (1 - clamped)).toFixed(2);
         arc.style.stroke = ratio >= 0.95 ? "#dc2626" : ratio >= 0.85 ? "#d97706" : "#0f172a";
         label.textContent = used ? Math.round(ratio * 100) + "%" : "";
-        pop.textContent = fmtTok(used) + "/" + fmtTok(ctxMeterWindow) + " token (" + Math.round(ratio * 100) + "%)";
+        pop.textContent = fmtTok(used) + "/" + fmtTok(win) + " token (" + Math.round(ratio * 100) + "%)";
       } else {
         arc.style.strokeDashoffset = CTX_C.toFixed(2);  // flat ring: no window to fill against
         arc.style.stroke = "#94a3b8";
@@ -899,21 +963,50 @@
         pop.textContent = used ? (fmtTok(used) + " token · " + t("ctx_meter_nowin")) : t("ctx_meter_empty");
       }
     }
-    function resetCtxMeter() { updateCtxMeter(0); }
 
     function updateMainTitle() {
       const inConfig = !$("view-config").classList.contains("hidden");
-      $("main-title").textContent = inConfig ? t("nav_config") : (currentTitle || t("chat_untitled"));
+      const title = activeView ? activeView.title : "";
+      $("main-title").textContent = inConfig ? t("nav_config") : (title || t("chat_untitled"));
+    }
+
+    // The pulsing "this conversation has a run in flight" dot; amber while an ask
+    // card is waiting for the user, emerald while the agent is just working.
+    function liveDot(view) {
+      const dot = document.createElement("span");
+      dot.className = "shrink-0 animate-pulse text-[10px] "
+        + (view.pendingAsk ? "text-amber-600" : "text-emerald-600");
+      dot.textContent = "●";
+      return dot;
     }
 
     function renderSessionList() {
       const box = $("session-list");
       box.innerHTML = "";
+      // Streaming conversations not on disk yet (a draft's first turn hasn't
+      // checkpointed) still get a row, so a backgrounded run is always reachable.
+      const cachedIds = new Set(sessionsCache.map((s) => s.id));
+      for (const v of views.values()) {
+        if (!v.streaming || (v.sessionId && cachedIds.has(v.sessionId))) continue;
+        const row = document.createElement("div");
+        row.className = "flex items-center gap-1 rounded-lg px-1 "
+          + (v === activeView ? "bg-slate-200" : "hover:bg-slate-100");
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "min-w-0 flex-1 truncate px-1 py-1.5 text-left"
+          + (v === activeView ? " font-medium" : "");
+        open.textContent = v.title || v.preview || t("chat_untitled");
+        open.addEventListener("click", () => showView(v));
+        row.append(liveDot(v), open);
+        box.appendChild(row);
+      }
       if (!sessionsCache.length) {
-        const empty = document.createElement("p");
-        empty.className = "px-2 py-2 text-xs text-slate-400";
-        empty.textContent = t("chat_sessions_empty");
-        box.appendChild(empty);
+        if (!box.children.length) {
+          const empty = document.createElement("p");
+          empty.className = "px-2 py-2 text-xs text-slate-400";
+          empty.textContent = t("chat_sessions_empty");
+          box.appendChild(empty);
+        }
         return;
       }
       for (const s of sessionsCache) {
@@ -958,9 +1051,11 @@
           continue;
         }
 
-        const active = s.id === currentSession;
+        const active = !!(activeView && s.id === activeView.sessionId);
         row.className = "flex items-center gap-0.5 rounded-lg px-1 "
           + (active ? "bg-slate-200" : "hover:bg-slate-100");
+        const live = viewFor(s.id);
+        if (live && live.streaming) row.appendChild(liveDot(live));
         const label = s.title || s.preview || t("chat_untitled");
         const open = document.createElement("button");
         open.type = "button";
@@ -1000,7 +1095,9 @@
           });
           if (resp.ok) {
             s.title = next;
-            if (s.id === currentSession) { currentTitle = next; updateMainTitle(); }
+            const v = viewFor(s.id);
+            if (v) v.title = next;
+            updateMainTitle();
           }
         } catch (err) { /* keep the old title on failure */ }
       }
@@ -1014,8 +1111,12 @@
         if (!resp.ok) { renderSessionList(); return; }
       } catch (err) { renderSessionList(); return; }
       sessionsCache = sessionsCache.filter((x) => x.id !== s.id);
-      if (s.id === currentSession) {
-        currentSession = null; currentTitle = ""; log.innerHTML = ""; updateMainTitle();
+      const v = viewFor(s.id);
+      if (v) {
+        // Deleting a conversation with a run in flight stops the run too.
+        if (v.streaming) { stopRun(v); endStream(v); }
+        views.delete(v.key);
+        if (v === activeView) { showView(makeView(null)); return; }
       }
       renderSessionList();
     }
@@ -1031,24 +1132,24 @@
     // A replayed user message + an inline "edit" control (re-ask). `turn` is the
     // user-turn ordinal; clicking edit turns the line into a textarea, then an
     // in-page confirm ("discards the rest"), then regenerates from that turn.
-    function addUserLine(text, turn) {
+    function addUserLine(view, text, turn) {
       const row = document.createElement("div");
       row.className = "flex items-start gap-2 font-semibold";
       const span = document.createElement("div");
       span.className = "min-w-0 flex-1 whitespace-pre-wrap";
       span.textContent = "you: " + text;
       row.appendChild(span);
-      if (currentSession && turn >= 0 && !streaming) {
+      if (view.sessionId && turn >= 0 && !view.streaming) {
         const edit = document.createElement("button");
         edit.type = "button";
         edit.className = "shrink-0 text-xs font-normal text-slate-400 hover:text-slate-700";
         edit.textContent = "✎";
         edit.title = t("reask_edit");
-        edit.addEventListener("click", () => beginReask(row, turn, text));
+        edit.addEventListener("click", () => beginReask(view, row, turn, text));
         row.appendChild(edit);
       }
-      log.appendChild(row);
-      log.scrollTop = log.scrollHeight;
+      view.container.appendChild(row);
+      scrollChat(view);
       return row;
     }
 
@@ -1057,33 +1158,33 @@
     // reasoning_display on the final answer) becomes a collapsed reasoning box,
     // and each tool call becomes a collapsed tool block whose result is filled in
     // from the matching `tool` message (by tool_call_id).
-    function renderHistory(messages) {
-      log.innerHTML = "";
+    function renderHistory(view, messages) {
+      view.container.innerHTML = "";
       let turn = -1;
       const toolMap = {};  // tool_call_id -> tool block awaiting its result
       for (const m of messages || []) {
-        if (m.role === "user") { turn += 1; addUserLine(m.content || "", turn); }
+        if (m.role === "user") { turn += 1; addUserLine(view, m.content || "", turn); }
         else if (m.role === "assistant") {
           const reasoning = m.reasoning_content || m.reasoning_display;
-          if (reasoning) { const rb = reasoningBox(); rb.append(reasoning); rb.finishReload(); }
-          if (m.content) line(m.content, "text-slate-900 whitespace-pre-wrap");
+          if (reasoning) { const rb = reasoningBox(view); rb.append(reasoning); rb.finishReload(); }
+          if (m.content) line(view, m.content, "text-slate-900 whitespace-pre-wrap");
           for (const call of m.tool_calls || []) {
             const fn = call.function || {};
             if (fn.name === "ask_question") continue;  // shown inline, not as a tool block
-            toolMap[call.id] = toolBlock(fn.name || "", fn.arguments || "");
+            toolMap[call.id] = toolBlock(view, fn.name || "", fn.arguments || "");
           }
         } else if (m.role === "tool") {
           const tb = toolMap[m.tool_call_id];
           if (tb) tb.setResult(m.content || "");
-          else line("← " + (m.content || ""), "text-emerald-700");
+          else line(view, "← " + (m.content || ""), "text-emerald-700");
         }
       }
     }
 
     // Re-ask: edit a historical question, confirm in-page, then regenerate from
     // that turn (the server truncates everything after it — destructive, not a fork).
-    function beginReask(row, turn, text) {
-      if (streaming) return;
+    function beginReask(view, row, turn, text) {
+      if (view.streaming) return;
       row.innerHTML = "";
       row.className = "rounded-lg border border-slate-300 bg-white p-2 space-y-2";
       const ta = document.createElement("textarea");
@@ -1095,18 +1196,18 @@
       send.type = "button";
       send.className = "rounded bg-slate-800 px-3 py-1 text-xs text-white";
       send.textContent = t("reask_send");
-      send.addEventListener("click", () => confirmReask(row, turn, ta.value));
+      send.addEventListener("click", () => confirmReask(view, row, turn, ta.value));
       const cancel = document.createElement("button");
       cancel.type = "button";
       cancel.className = "px-2 py-1 text-xs text-slate-500";
       cancel.textContent = t("session_cancel");
-      cancel.addEventListener("click", () => { if (currentSession) openSession(currentSession); });
+      cancel.addEventListener("click", () => { if (view.sessionId) openSession(view.sessionId); });
       bar.append(send, cancel);
       row.append(ta, bar);
       ta.focus();
     }
 
-    function confirmReask(row, turn, newText) {
+    function confirmReask(view, row, turn, newText) {
       const trimmed = (newText || "").trim();
       if (!trimmed) return;
       const bar = document.createElement("div");
@@ -1116,7 +1217,7 @@
       const ok = document.createElement("button");
       ok.type = "button"; ok.className = "shrink-0 rounded bg-amber-600 px-2 py-0.5 text-white";
       ok.textContent = t("reask_confirm");
-      ok.addEventListener("click", () => commitReask(turn, trimmed));
+      ok.addEventListener("click", () => commitReask(view, turn, trimmed));
       const no = document.createElement("button");
       no.type = "button"; no.className = "shrink-0 px-2 py-0.5 text-slate-500";
       no.textContent = t("session_cancel");
@@ -1128,46 +1229,46 @@
     // Reload the authoritative history, cut it at this user turn, replay it, then
     // regenerate by sending the edited question with edit_turn (the server saves
     // the truncated+new body over the old one).
-    async function commitReask(turn, text) {
-      if (!currentSession) return;
+    async function commitReask(view, turn, text) {
+      if (!view.sessionId || view.streaming) return;
       try {
-        const data = await (await fetch("/sessions/" + encodeURIComponent(currentSession))).json();
+        const data = await (await fetch("/sessions/" + encodeURIComponent(view.sessionId))).json();
         const msgs = data.messages || [];
         let count = -1, cut = msgs.length;
         for (let i = 0; i < msgs.length; i++) {
           if (msgs[i].role === "user") { count += 1; if (count === turn) { cut = i; break; } }
         }
-        renderHistory(msgs.slice(0, cut));
+        renderHistory(view, msgs.slice(0, cut));
       } catch (err) { /* fall back to whatever's on screen */ }
       startChat(text, { editTurn: turn });
     }
 
+    // Open a session: a streaming view is re-mounted live (its run kept going in
+    // the background); an idle one is re-fetched from disk (authoritative,
+    // including turns checkpointed while it ran unwatched).
     async function openSession(id) {
       if (!id) return;
-      abandonStream();
+      const live = viewFor(id);
+      if (live && live.streaming) { showView(live); return; }
+      if (live) views.delete(live.key);
       try {
         const data = await (await fetch("/sessions/" + encodeURIComponent(id))).json();
-        currentSession = id;
+        const view = makeView(id);
         const meta = sessionsCache.find((s) => s.id === id);
-        currentTitle = meta ? (meta.title || "") : "";
-        renderHistory(data.messages);
-        resetCtxMeter();  // a loaded session's context size is unknown until its next turn
-        show("chat");
-        renderSessionList();
-        updateMainTitle();
-      } catch (err) { line("error loading session", "text-red-600"); }
+        view.title = meta ? (meta.title || "") : "";
+        renderHistory(view, data.messages);
+        showView(view);  // context size is unknown until its next turn (meter resets)
+      } catch (err) {
+        if (activeView) line(activeView, "error loading session", "text-red-600");
+      }
     }
 
-    // Point 3: a fresh empty draft — clicking "New chat" again is a no-op, and an
-    // empty draft is never persisted (the server only saves on a completed turn).
+    // A fresh empty draft — clicking "New chat" again is a no-op, an empty draft
+    // is never persisted (the server only saves on a completed turn), and a
+    // conversation left mid-stream keeps running in the background (live dot).
     $("chat-new").addEventListener("click", () => {
-      abandonStream();
       if (chatIsEmpty()) { show("chat"); return; }
-      currentSession = null; currentTitle = ""; log.innerHTML = "";
-      resetCtxMeter();
-      show("chat");
-      renderSessionList();
-      updateMainTitle();
+      showView(makeView(null));
     });
 
     // Context meter: click toggles a popover with the exact used/window figures;
@@ -1177,40 +1278,36 @@
       $("ctx-meter-pop").classList.toggle("hidden");
     });
     document.addEventListener("click", () => $("ctx-meter-pop").classList.add("hidden"));
-    resetCtxMeter();
 
+    showView(makeView(null));  // start on a fresh empty draft
     loadSessions();
-    updateMainTitle();
 
-    // While a turn is in flight the Send button becomes a Stop button (clicking it
-    // POSTs /chat/{run_id}/stop). Driven here so a forgotten reset can't strand it.
-    function setStreaming(on) {
-      streaming = on;
+    // The Send button reflects the ACTIVE conversation only: it becomes Stop while
+    // that conversation's turn is in flight (background runs keep their own state).
+    function refreshSendButton() {
+      const on = !!(activeView && activeView.streaming);
       const btn = $("chat-send");
       btn.textContent = on ? t("chat_stop") : t("chat_send");
       btn.classList.toggle("bg-red-600", on);
       btn.classList.toggle("bg-slate-800", !on);
     }
-    function endStream(es) {
-      if (es) es.close();
-      if (activeES === es) activeES = null;
-      currentRunId = null;
-      setStreaming(false);
+    // A view's run is over (final / stopped / error): close its stream, clear its
+    // run state, and repaint whatever reflects it (button, sidebar live dot).
+    function endStream(view) {
+      if (view.es) view.es.close();
+      view.es = null;
+      view.runId = null;
+      view.streaming = false;
+      view.pendingAsk = false;
+      refreshSendButton();
+      renderSessionList();
     }
-    // Stop the running turn: the server sets the cancel token, the loop ends at the
-    // next boundary, emits `stopped`, and saves the partial conversation (resumable).
-    function stopChat() {
-      if (!currentRunId) return;
-      fetch("/chat/" + encodeURIComponent(currentRunId) + "/stop", { method: "POST" }).catch(() => {});
-    }
-    // Leaving the current conversation mid-stream (New chat / opening another
-    // session) stops the in-flight run first — same semantics as closing the tab:
-    // the partial turn is saved resumable, and the old run's events can't leak
-    // into the view of the conversation being switched to.
-    function abandonStream() {
-      if (!streaming) return;
-      stopChat();
-      endStream(activeES);
+    // Stop a view's running turn: the server sets the cancel token, the loop ends
+    // at the next boundary, emits `stopped`, and saves the partial conversation
+    // (resumable).
+    function stopRun(view) {
+      if (!view.runId) return;
+      fetch("/chat/" + encodeURIComponent(view.runId) + "/stop", { method: "POST" }).catch(() => {});
     }
 
     // Run one turn over SSE. `opts.editTurn` (re-ask) regenerates from a past user
@@ -1218,24 +1315,29 @@
     // form submit and by re-ask.
     function startChat(message, opts) {
       opts = opts || {};
+      const view = activeView;  // every handler below binds to THIS conversation
+      if (!view || view.streaming) return;
       const mode = (opts.mode != null) ? opts.mode : $("mode").value;
       const stream = streamEnabled();  // System tab toggle (default enabled)
-      line("you" + (mode ? " (" + mode + ")" : "") + ": " + message, "font-semibold");
+      line(view, "you" + (mode ? " (" + mode + ")" : "") + ": " + message, "font-semibold");
+      if (!view.preview) view.preview = message;  // labels a not-yet-saved live row
 
       let answer = null;        // the live answer text element (null until first token)
       let thinkBox = null;      // the live reasoning box for the current thinking phase
       const toolQueue = [];     // tool blocks awaiting their result (FIFO; calls run sequentially)
       let url = "/chat?message=" + encodeURIComponent(message) + "&stream=" + stream;
       if (mode) url += "&mode=" + encodeURIComponent(mode);
-      if (currentSession) url += "&session=" + encodeURIComponent(currentSession);
+      if (view.sessionId) url += "&session=" + encodeURIComponent(view.sessionId);
       if (opts.editTurn != null) url += "&edit_turn=" + encodeURIComponent(opts.editTurn);
       const es = new EventSource(url);
-      activeES = es;
-      setStreaming(true);
+      view.es = es;
+      view.streaming = true;
+      refreshSendButton();
+      renderSessionList();  // the live dot appears
       // Immediate "thinking …" so the page reacts the instant you send — before the
       // first event arrives. It becomes the live reasoning box if the model streams
       // reasoning, or is dropped (empty) the moment real output begins.
-      thinkBox = reasoningBox();
+      thinkBox = reasoningBox(view);
 
       // End the current thinking phase: collapse it to "Thought for Ns" if it
       // streamed anything, else drop the empty placeholder. Called when real output
@@ -1246,48 +1348,65 @@
         thinkBox = null;
       }
 
+      // The run is over (final / stopped / error). A finished BACKGROUND view is
+      // dropped: its next open re-fetches the authoritative history from disk.
+      function finishStream() {
+        endStream(view);
+        if (view !== activeView) views.delete(view.key);
+      }
+
       es.addEventListener("run", (ev) => {
         const d = JSON.parse(ev.data);
-        currentRunId = d.run_id;  // enable Stop for this run
-        ctxMeterWindow = d.context_window || null;  // generation profile's window (may be unset)
+        view.runId = d.run_id;  // enable Stop for this run
+        view.ctxWindow = d.context_window || null;  // generation profile's window (may be unset)
       });
       es.addEventListener("step", (ev) => {
         const d = JSON.parse(ev.data);  // real prompt_tokens of the context just sent
-        if (d.prompt_tokens != null) updateCtxMeter(d.prompt_tokens);
+        if (d.prompt_tokens != null) {
+          view.ctxUsed = d.prompt_tokens;
+          if (view === activeView) updateCtxMeter(view.ctxUsed);
+        }
       });
       es.addEventListener("session", (ev) => {
-        currentSession = JSON.parse(ev.data).id;  // remember it so the next turn resumes
+        const id = JSON.parse(ev.data).id;  // remember it so the next turn resumes
+        if (view.sessionId !== id) {
+          views.delete(view.key);  // re-key the draft under its minted session id
+          view.sessionId = id;
+          view.key = id;
+          views.set(id, view);
+        }
       });
       es.addEventListener("title", (ev) => {
         const d = JSON.parse(ev.data);
-        currentTitle = d.title || "";
-        updateMainTitle();
+        view.title = d.title || "";
+        if (view === activeView) updateMainTitle();
         const meta = sessionsCache.find((s) => s.id === d.id);
-        if (meta) { meta.title = currentTitle; renderSessionList(); }
+        if (meta) meta.title = view.title;
+        renderSessionList();
       });
       // Thinking channel: reasoning streams into a dim, collapsible box (one per
       // thinking phase). A phase after a tool result opens a fresh box.
       es.addEventListener("thinking", (ev) => {
-        if (!thinkBox) thinkBox = reasoningBox();
+        if (!thinkBox) thinkBox = reasoningBox(view);
         thinkBox.append(JSON.parse(ev.data).text);
       });
       es.addEventListener("token", (ev) => {
         closeThinking();  // the answer has begun -> collapse the reasoning box
-        if (answer === null) answer = line("", "text-slate-900 whitespace-pre-wrap");
+        if (answer === null) answer = line(view, "", "text-slate-900 whitespace-pre-wrap");
         answer.textContent += JSON.parse(ev.data).text;
-        log.scrollTop = log.scrollHeight;
+        scrollChat(view);
       });
       es.addEventListener("ask", (ev) => {
         closeThinking();
         answer = null;  // a later text run starts a NEW line BELOW the card
-        renderAskCard(JSON.parse(ev.data));  // inline card; answer POSTs to /respond
+        renderAskCard(view, JSON.parse(ev.data));  // inline card; answer POSTs to /respond
       });
       es.addEventListener("tool_call", (ev) => {
         closeThinking();
         const d = JSON.parse(ev.data);
         answer = null;  // close the current text run so the next one lands below this
         if (d.name === "ask_question") return;  // shown as the ask card instead
-        toolQueue.push(toolBlock(d.name, d.arguments));
+        toolQueue.push(toolBlock(view, d.name, d.arguments));
       });
       es.addEventListener("tool_result", (ev) => {
         const d = JSON.parse(ev.data);
@@ -1295,33 +1414,34 @@
         if (d.name === "ask_question") return;  // the answer is already on the card
         const tb = toolQueue.shift();
         if (tb) tb.setResult(d.result);
-        else line("← " + d.name + ": " + d.result, "text-emerald-700");
+        else line(view, "← " + d.name + ": " + d.result, "text-emerald-700");
       });
       es.addEventListener("error", (ev) => {
         closeThinking();
-        if (ev.data) line("error: " + ev.data, "text-red-600");
-        endStream(es);
+        if (ev.data) line(view, "error: " + ev.data, "text-red-600");
+        finishStream();
       });
       es.addEventListener("stopped", (ev) => {
         closeThinking();
         const d = JSON.parse(ev.data);
-        line(t("chat_stopped") + " · steps=" + d.steps, "text-xs text-amber-600");
-        endStream(es);
+        line(view, t("chat_stopped") + " · steps=" + d.steps, "text-xs text-amber-600");
+        finishStream();
         loadSessions();  // the partial turn is saved — refresh the picker
       });
       es.addEventListener("final", (ev) => {
         closeThinking();
         const d = JSON.parse(ev.data);
-        if (answer === null) line(d.answer, "text-slate-900 whitespace-pre-wrap");
-        line("[" + d.mode + "] [" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=" + d.cost_usd, "text-xs text-slate-400");
-        endStream(es);
+        if (answer === null) line(view, d.answer, "text-slate-900 whitespace-pre-wrap");
+        line(view, "[" + d.mode + "] [" + d.stop_reason + "] steps=" + d.steps + " tokens=" + d.tokens + " cost=" + d.cost_usd, "text-xs text-slate-400");
+        finishStream();
         loadSessions();  // refresh the picker (new session appears / preview updates)
       });
     }
 
     $("chat-form").addEventListener("submit", (e) => {
       e.preventDefault();
-      if (streaming) { stopChat(); return; }  // the button is "Stop" mid-turn
+      // The button is "Stop" while the ACTIVE conversation has a turn in flight.
+      if (activeView && activeView.streaming) { stopRun(activeView); return; }
       if (!hasLLM()) { show("config"); showCfg("llm"); return; }
       const message = $("msg").value.trim();
       if (!message) return;

@@ -424,16 +424,22 @@ def test_index_has_sidebar_session_layout():
     assert "window.prompt" not in body and "window.confirm" not in body
 
 
-def test_index_stops_stream_on_session_switch():
-    """Leaving the current conversation mid-stream (New chat / opening another
-    session) stops the in-flight run and closes its EventSource first, so the old
-    run's events can't leak into the newly shown conversation (the partial turn is
-    saved resumable server-side — same semantics as closing the tab)."""
+def test_index_runs_sessions_in_parallel_views():
+    """Each conversation owns a VIEW (its own DOM container + run state), so
+    several sessions can stream in parallel within one page: switching away
+    re-mounts a container and leaves the background run going (live dot in the
+    sidebar), and one run's events can never render into another conversation."""
     body = _client().get("/").text
-    assert "function abandonStream()" in body
-    assert "stopChat();" in body and "endStream(activeES);" in body
-    # both leave-the-conversation paths go through it: openSession + New chat
-    assert body.count("abandonStream();") >= 2
+    assert "function makeView(" in body and "function showView(" in body
+    assert "views.set(" in body and "function viewFor(" in body
+    # transcript helpers write to the view's own container, never a shared log
+    assert "view.container.appendChild" in body
+    # switching no longer kills the in-flight run (the old serializing helper)
+    assert "abandonStream" not in body
+    # a streaming conversation is marked in the sidebar (amber while asking)
+    assert "function liveDot(" in body and "pendingAsk" in body
+    # a streaming view is re-mounted live; Stop acts on the ACTIVE view's run
+    assert "live.streaming" in body and "stopRun(activeView)" in body
 
 
 def test_registries_lists_registered_extensions():
@@ -935,8 +941,8 @@ def test_index_has_stop_and_reask_ui():
     """The chat ships the Stop button flow (run id + /stop + stopped) and in-page
     re-ask (edit/confirm), with no native confirm/prompt dialogs."""
     body = _client().get("/").text
-    assert "function startChat" in body and "function stopChat" in body
-    assert "function setStreaming" in body
+    assert "function startChat" in body and "function stopRun" in body
+    assert "function refreshSendButton" in body
     assert "/stop" in body and 'addEventListener("run"' in body
     assert 'addEventListener("stopped"' in body
     assert "beginReask" in body and "commitReask" in body and "edit_turn" in body
