@@ -2093,3 +2093,267 @@ def test_config_extensions_import_and_hooks_mount(tmp_path, monkeypatch):
     finally:
         PARADIGMS.pop("extmode", None)
         sys.modules.pop("my_ext", None)
+
+
+# --- hooks: list form, parametrization, tool policy/redaction, composition -----
+
+def _write_hooks_module(tmp_path, monkeypatch, name="hooks_ext"):
+    """Write a small importable module with a couple of Hooks subclasses, one of
+    which takes a constructor argument (to test parametrized mounting)."""
+    (tmp_path / f"{name}.py").write_text(
+        "from {{ project_slug }}.harness.hooks import Hooks\n"
+        "class A(Hooks):\n"
+        "    def __init__(self, tag='a'):\n"
+        "        self.tag = tag\n"
+        "class B(Hooks):\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    return name
+
+
+def test_load_hooks_legacy_string_returns_single_instance(tmp_path, monkeypatch):
+    """The old ``hooks: "pkg:Class"`` string form still mounts one hook (not wrapped)."""
+    import sys
+
+    from {{ project_slug }}.harness.extensions import load_hooks, mounted_hook_names
+
+    name = _write_hooks_module(tmp_path, monkeypatch)
+    config = _config(tmp_path, hooks=f"{name}:A")
+    try:
+        hooks = load_hooks(config)
+        assert type(hooks).__name__ == "A"
+        assert mounted_hook_names(config) == [f"{name}:A"]
+    finally:
+        sys.modules.pop(name, None)
+
+
+def test_load_hooks_list_composes_in_order_and_parametrizes(tmp_path, monkeypatch):
+    """The list form mounts several hooks (composed, in listed order) and passes a
+    per-hook ``config`` to its constructor."""
+    import sys
+
+    from {{ project_slug }}.harness.extensions import load_hooks, mounted_hook_names
+    from {{ project_slug }}.harness.hooks import CompositeHooks
+
+    name = _write_hooks_module(tmp_path, monkeypatch)
+    config = _config(
+        tmp_path,
+        hooks=[{"class": f"{name}:A", "config": {"tag": "z"}}, f"{name}:B"],
+    )
+    try:
+        hooks = load_hooks(config)
+        assert isinstance(hooks, CompositeHooks)
+        assert [type(h).__name__ for h in hooks._hooks] == ["A", "B"]
+        assert hooks._hooks[0].tag == "z"  # config -> ClassName(**config)
+        assert mounted_hook_names(config) == [f"{name}:A", f"{name}:B"]
+    finally:
+        sys.modules.pop(name, None)
+
+
+def test_load_hooks_skips_disabled_entries(tmp_path, monkeypatch):
+    """``enabled: false`` keeps an entry in config but never mounts it."""
+    import sys
+
+    from {{ project_slug }}.harness.extensions import load_hooks, mounted_hook_names
+
+    name = _write_hooks_module(tmp_path, monkeypatch)
+    config = _config(
+        tmp_path,
+        hooks=[{"class": f"{name}:A", "enabled": False}, {"class": f"{name}:B"}],
+    )
+    try:
+        hooks = load_hooks(config)
+        assert type(hooks).__name__ == "B"  # only one enabled -> single instance
+        assert mounted_hook_names(config) == [f"{name}:B"]
+    finally:
+        sys.modules.pop(name, None)
+
+
+def test_load_hooks_bad_entry_is_a_clean_config_error(tmp_path):
+    """A malformed dotted path surfaces as a ConfigError, not a traceback."""
+    from {{ project_slug }}.harness.config import ConfigError
+    from {{ project_slug }}.harness.extensions import load_hooks
+
+    config = _config(tmp_path, hooks="not-a-valid-path")
+    with pytest.raises(ConfigError):
+        load_hooks(config)
+
+
+def test_before_tool_policy_refuses_before_execution(tmp_path):
+    """A hook's ``before_tool`` returning a string refuses the call: the tool never
+    runs and the refusal becomes its ERROR observation."""
+    from {{ project_slug }}.harness.paradigms import run_tool
+
+    ran = {"v": False}
+    registry = Registry()
+
+    @registry.tool(name="danger", description="mutating")
+    def danger() -> str:
+        ran["v"] = True
+        return "did it"
+
+    class Gate(Hooks):
+        def before_tool(self, call):
+            return "ERROR: blocked by policy"
+
+    out = run_tool(
+        registry, ToolCall(id="c", name="danger", arguments="{}"),
+        Gate(), Trace(enabled=False), allowed={"danger"},
+    )
+    assert out == "ERROR: blocked by policy"
+    assert ran["v"] is False  # the tool body never executed
+
+
+def test_after_tool_redacts_result_for_model_and_trace(tmp_path):
+    """A hook's ``after_tool`` rewrite is what both the model AND the trace see, so a
+    secret in a result can be scrubbed (not merely masked)."""
+    from {{ project_slug }}.harness.paradigms import run_tool
+
+    registry = Registry()
+
+    @registry.tool(name="leaky", description="returns a secret")
+    def leaky() -> str:
+        return "token sk-SECRET tail"
+
+    class Redact(Hooks):
+        def after_tool(self, call, result):
+            return result.replace("sk-SECRET", "[redacted]")
+
+    trace = Trace(trace_dir=str(tmp_path / "t"), enabled=True)
+    out = run_tool(
+        registry, ToolCall(id="c", name="leaky", arguments="{}"),
+        Redact(), trace, allowed={"leaky"},
+    )
+    trace.close()
+    assert out == "token [redacted] tail"
+    events = [json.loads(line) for line in trace.path.read_text().splitlines()]
+    results = [e.get("result") for e in events if e["event"] == "tool_result"]
+    assert results == ["token [redacted] tail"]  # trace recorded the rewritten value
+    assert all("sk-SECRET" not in (r or "") for r in results)
+
+
+def test_after_tool_redaction_flows_through_agent_loop(tmp_path):
+    """Golden: a redacting hook mounted on a full run() means the model's tool
+    observation in history is the redacted one."""
+    registry = Registry()
+
+    @registry.tool(name="leak", description="returns a secret")
+    def leak() -> str:
+        return "key=sk-SECRET"
+
+    class Redact(Hooks):
+        def after_tool(self, call, result):
+            return result.replace("sk-SECRET", "[redacted]")
+
+    config = _config(tmp_path, tools=[{"name": "leak", "enabled": True}])
+    client = MockLLM(script=[ScriptedCall("leak", {}), "done"])
+    result = run("go", client=client, config=config, registry=registry, hooks=Redact())
+
+    assert result.answer == "done"
+    tool_msgs = [m for m in result.messages if m.get("role") == "tool"]
+    assert tool_msgs and all("sk-SECRET" not in m["content"] for m in tool_msgs)
+    assert any(m["content"] == "key=[redacted]" for m in tool_msgs)
+
+
+def test_composite_hooks_observer_runs_in_listed_order():
+    from {{ project_slug }}.harness.hooks import CompositeHooks
+
+    seq: list[str] = []
+
+    class A(Hooks):
+        def before_step(self, step, messages):
+            seq.append("A")
+
+    class B(Hooks):
+        def before_step(self, step, messages):
+            seq.append("B")
+
+    CompositeHooks([A(), B()]).before_step(0, [])
+    assert seq == ["A", "B"]
+
+
+def test_composite_before_tool_short_circuits_on_first_refusal():
+    from {{ project_slug }}.harness.hooks import CompositeHooks
+
+    seen: list[str] = []
+
+    class Reject(Hooks):
+        def before_tool(self, call):
+            return "ERROR: no"
+
+    class Later(Hooks):
+        def before_tool(self, call):
+            seen.append("later")
+            return None
+
+    out = CompositeHooks([Reject(), Later()]).before_tool(
+        ToolCall(id="c", name="x", arguments="{}")
+    )
+    assert out == "ERROR: no"
+    assert seen == []  # the first refusal short-circuits the rest
+
+
+def test_composite_before_tool_fails_closed_on_exception():
+    from {{ project_slug }}.harness.hooks import CompositeHooks
+
+    class Boom(Hooks):
+        def before_tool(self, call):
+            raise RuntimeError("bug")
+
+    out = CompositeHooks([Boom()]).before_tool(
+        ToolCall(id="c", name="x", arguments="{}")
+    )
+    assert out is not None and "refused" in out.lower()  # a broken guard refuses
+
+
+def test_composite_after_tool_chains_redactors():
+    from {{ project_slug }}.harness.hooks import CompositeHooks
+
+    class R1(Hooks):
+        def after_tool(self, call, result):
+            return result.replace("a", "1")
+
+    class R2(Hooks):
+        def after_tool(self, call, result):
+            return result.replace("b", "2")
+
+    out = CompositeHooks([R1(), R2()]).after_tool(
+        ToolCall(id="c", name="x", arguments="{}"), "ab"
+    )
+    assert out == "12"  # each hook sees the prior hook's output
+
+
+def test_composite_after_tool_fails_open_keeps_prior_result():
+    from {{ project_slug }}.harness.hooks import CompositeHooks
+
+    class Keep(Hooks):
+        def after_tool(self, call, result):
+            return result + "!"
+
+    class Boom(Hooks):
+        def after_tool(self, call, result):
+            raise RuntimeError("bug")
+
+    out = CompositeHooks([Keep(), Boom()]).after_tool(
+        ToolCall(id="c", name="x", arguments="{}"), "x"
+    )
+    assert out == "x!"  # Boom raised but the prior result is never lost
+
+
+def test_composite_observer_isolates_a_failing_hook():
+    from {{ project_slug }}.harness.hooks import CompositeHooks
+
+    hits: list[str] = []
+
+    class Boom(Hooks):
+        def before_step(self, step, messages):
+            raise RuntimeError("bug")
+
+    class Good(Hooks):
+        def before_step(self, step, messages):
+            hits.append("good")
+
+    CompositeHooks([Boom(), Good()]).before_step(0, [])  # must not raise
+    assert hits == ["good"]

@@ -195,10 +195,15 @@ sessions:
 # Runtime extension points (optional). `extensions` imports your own modules at
 # startup so their @register_* run (custom tools / paradigms / context
 # conditions / memory backends that live outside the built-in files). `hooks`
-# mounts a Hooks subclass (logging / guardrails / redaction / HITL) by dotted
-# path — the CLI and web load it automatically. See harness/extensions.py + AGENTS.md.
+# mounts one or more Hooks subclasses (logging / guardrails / tool gating /
+# redaction / HITL) — the CLI and web apply them automatically. See
+# harness/extensions.py + AGENTS.md.
 extensions: []
-# hooks: "{{ project_slug }}.harness.hooks:Hooks"   # "package.module:ClassName"
+# hooks: "{{ project_slug }}.harness.hooks:Hooks"   # single (legacy string form)
+# hooks:                                            # OR a list (compose several)
+#   - class: "{{ project_slug }}.harness.hooks:Hooks"
+#     enabled: true
+#     config: {}                                    # passed as ClassName(**config)
 {% if spec.mcp.enabled %}
 # MCP tool servers (runtime knob — add/remove without regenerating, or use the
 # web "MCP" tab). Each server uses stdio (set `command`) OR remote Streamable HTTP

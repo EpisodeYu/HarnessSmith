@@ -132,9 +132,11 @@ confirm: high            # none (default) | high | all | [list, of, tool, names]
 This is a **guardrail** (it stops a trusted user / model fat-fingering a dangerous
 tool), **not a security boundary**: code you own can bypass it, and a capability you
 truly want unavailable should not be compiled in at all (don't allowlist it). For a
-hard guarantee against a misbehaving model, run in a container. Confirmation lives at
-the **tool-execution boundary** (`run_tool` → `interaction.confirm_tool`), not in a
-hook, so `hooks.before_tool` stays a pure observer.
+hard guarantee against a misbehaving model, run in a container. Confirmation is the
+built-in **human** layer at the tool-execution boundary (`run_tool` →
+`interaction.confirm_tool`); the **code** layer right next to it is a hook's
+`before_tool` (a returned string refuses a call before HITL even asks) — see
+[Plug in a hook](#plug-in-a-hook).
 
 ## Swap the model / provider
 
@@ -225,8 +227,8 @@ files plus the active list. Paths must stay inside the project directory.
 
 ## Plug in a hook
 
-Subclass `Hooks` to add logging, guardrails, redaction, or human-in-the-loop
-confirmation — without changing the loop:
+Subclass `Hooks` to add logging, metrics, guardrails, tool gating, or result
+redaction — without changing the loop:
 
 ```python
 # src/{{ project_slug }}/harness/hooks.py (or your own module)
@@ -235,20 +237,57 @@ from {{ project_slug }}.harness.hooks import Hooks
 class AuditHooks(Hooks):
     def before_tool(self, call):
         print(f"about to call {call.name} with {call.arguments}")
+        return None  # return a string to REFUSE the call (see below)
 ```
 
 Hook points: `before_step`, `after_step`, `before_tool`, `after_tool`,
-`on_error`.
+`on_error`. The two tool hooks double as a thin **policy** layer:
 
-**Mount it without editing any interface code** — point `config.yaml` at the
-class by dotted path; the CLI (`run` / `chat`) and the web UI load it automatically:
+- **`before_tool(call)`** — return `None` to allow (the default observer
+  behavior) or a **string to refuse** the call. The string becomes the tool's
+  `ERROR` observation and the tool never runs. This is the code-level gate,
+  checked *before* HITL confirmation (so an auto-refusal doesn't prompt you) and
+  *under* the allowlist (a hook can only refuse a tool, never grant one).
+- **`after_tool(call, result)`** — return `None` to keep the result or a
+  **string to replace** it. The rewritten value is what the model AND the trace
+  see, so a secret in a result can be scrubbed (not just masked):
 
-```yaml
-hooks: "{{ project_slug }}.harness.hooks:AuditHooks"   # "package.module:ClassName"
+```python
+class SecurityHooks(Hooks):
+    def before_tool(self, call):
+        if call.name == "shell" and "rm -rf" in call.arguments:
+            return "ERROR: refused by policy (destructive shell command)"
+
+    def after_tool(self, call, result):
+        return result.replace("sk-", "[redacted]")  # scrub key-shaped tokens
 ```
 
-(From your own code you can still pass an instance directly:
-`run(..., hooks=AuditHooks())`. The web composes your hook *with* its streaming
+**Mount one or more without editing any interface code** — list them in
+`config.yaml`; the CLI (`run` / `chat`) and the web UI apply them automatically.
+The legacy single-string form still works:
+
+```yaml
+hooks: "{{ project_slug }}.harness.hooks:AuditHooks"   # single (legacy string)
+```
+
+The list form composes several (run in listed order) and can pass constructor
+arguments per hook + toggle each:
+
+```yaml
+hooks:
+  - class: "{{ project_slug }}.harness.hooks:AuditHooks"
+    enabled: true
+    config: {redact_args: true}          # passed as AuditHooks(redact_args=True)
+  - "{{ project_slug }}.harness.hooks:SecurityHooks"   # a bare string also works
+```
+
+Composition rules: `before_tool` short-circuits on the first refusal (and a hook
+that *raises* there fails **closed** — the call is refused); `after_tool` chains
+(each hook sees the prior one's output) and a hook that raises is skipped, keeping
+the prior result (fail-**open**); the observer methods fan out to every hook and a
+raised exception is isolated. `{{ project_slug }} info`{% if interfaces.web %} / `GET /registries`{% endif %} lists the
+mounted hooks. (From your own code you can still pass an instance directly:
+`run(..., hooks=AuditHooks())`. The web composes your hooks *with* its streaming
 hook, so a guardrail you mount here also runs under `serve`.)
 
 ## Load standalone extension modules
@@ -268,11 +307,16 @@ extensions:
 The CLI, `serve`, and `{{ project_slug }} info` import these first, so your
 registrations show up in `info`{% if interfaces.web %} / `GET /registries`{% endif %} and are selectable by name. `info`
 also lists every registered tool with its risk level and whether the allowlist has
-it enabled — the one CLI view of what's armed before a non-interactive run. A
-config name that still doesn't resolve is reported: hard errors for a role's
-profile / a paradigm / the context strategy (fail-fast), and a warning for a
-context condition{% if spec.memory.enabled %} / memory backend{% endif %} that isn't registered (skipped at runtime —
-likely a typo or a module you forgot to list here).
+it enabled, plus the imported extension modules and the mounted hooks — the one CLI
+view of what's armed before a non-interactive run. A config name that still doesn't
+resolve is reported: hard errors for a role's profile / a paradigm / the context
+strategy (fail-fast), and a warning for a context condition{% if spec.memory.enabled %} / memory backend{% endif %} that isn't
+registered (skipped at runtime — likely a typo or a module you forgot to list here).
+{% if interfaces.web %}
+The web **System** tab edits `extensions` / `hooks` directly (with a read-only
+mirror of what's registered in code). Because adding an `extensions` module imports
+local code on Save, `/config` is a **local-trust** admin surface — never expose it
+on a public network (same posture as the MCP page).{% endif %}
 
 ## Add a paradigm
 

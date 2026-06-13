@@ -840,8 +840,9 @@ def info(
     config = load_config(config_path)
     # Best-effort: import config.extensions so custom @register_* show up below.
     # info is diagnostic, so a bad module is a warning here, never fatal.
+    imported: list[str] = []
     try:
-        import_extensions(config)
+        imported = import_extensions(config)
     except ConfigError as exc:
         typer.secho(f"warning: {exc}", fg=typer.colors.YELLOW, err=True)
 
@@ -892,6 +893,24 @@ def info(
 
     _section("memory backends (registered):", list(MEMORY_BACKENDS), {config.memory.backend})
 {% endif %}
+    # Extension wiring: which standalone modules were imported (so their
+    # @register_* ran) and which Hooks are mounted (logging / guardrails / tool
+    # policy / redaction). A bad path was already warned about above / surfaces at
+    # run; here we just list what config.yaml asks for.
+    from ..harness.extensions import mounted_hook_names
+
+    typer.secho("extensions (imported modules):", fg=typer.colors.CYAN)
+    for name in imported:
+        typer.echo(f"  - {name}")
+    if not imported:
+        typer.echo("  (none)")
+    typer.secho("hooks (mounted):", fg=typer.colors.CYAN)
+    mounted = mounted_hook_names(config)
+    for name in mounted:
+        typer.echo(f"  - {name}")
+    if not mounted:
+        typer.echo("  (none)")
+
 
 @app.command()
 def usage(

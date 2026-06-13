@@ -631,6 +631,79 @@ def test_registries_lists_registered_extensions():
     assert "budget_conditions" not in data  # per-run budget conditions are gone
 
 
+def test_registries_includes_hooks_and_extensions():
+    """The System page mirrors mounted hooks + imported extension modules, so
+    /registries surfaces both (empty by default)."""
+    data = _client().get("/registries").json()
+    assert data["hooks"] == []
+    assert data["extensions"] == []
+
+
+def test_config_post_edits_hooks_list_and_persists(tmp_path):
+    """The list form of hooks round-trips through /config (documented ``class`` key)
+    and is written back to config.yaml so it survives a restart."""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "llms:\n  - name: default\n    model: mock-model\n"
+        "roles:\n  generation: default\n"
+        "observability:\n  trace: false\n"
+        "sessions:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(mock=True, config_path=cfg_path))
+    hook_path = "{{ project_slug }}.harness.hooks:Hooks"  # a real, importable no-op hook
+    resp = client.post(
+        "/config",
+        json={"hooks": [{"class": hook_path, "enabled": True, "config": {}}]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["hooks"][0]["class"] == hook_path  # documented key, not class_path
+
+    assert client.get("/config").json()["hooks"][0]["class"] == hook_path
+    assert client.get("/registries").json()["hooks"] == [hook_path]
+    text = cfg_path.read_text(encoding="utf-8")
+    assert "class:" in text and "class_path" not in text  # persisted with the alias
+    assert load_config(cfg_path).hooks[0].class_path == hook_path  # reloadable
+
+
+def test_config_post_editing_extensions_imports_the_module(tmp_path, monkeypatch):
+    """Adding an extensions module via /config imports it so its @register_* run and
+    it shows up in /registries — wiring already-present code, not adding structure."""
+    import sys
+
+    from {{ project_slug }}.harness.paradigms import PARADIGMS
+
+    (tmp_path / "web_ext.py").write_text(
+        "from {{ project_slug }}.harness.paradigms import register_paradigm, RunResult\n"
+        "from {{ project_slug }}.harness.trace import Trace\n"
+        "@register_paradigm('webext')\n"
+        "def run(user_input, *, config, trace=None, **kwargs):\n"
+        "    return RunResult(answer='x', steps=0, stop_reason='final',\n"
+        "                     trace=trace or Trace(enabled=False), mode='webext')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    client = _client()
+    try:
+        resp = client.post("/config", json={"extensions": ["web_ext"]})
+        assert resp.status_code == 200
+        reg = client.get("/registries").json()
+        assert "web_ext" in reg["extensions"]
+        assert "webext" in reg["paradigms"]
+    finally:
+        PARADIGMS.pop("webext", None)
+        sys.modules.pop("web_ext", None)
+
+
+def test_config_post_rejects_bad_extensions_module():
+    """A non-importable extensions module fails the save cleanly (400) and leaves
+    the running config untouched."""
+    client = _client()
+    resp = client.post("/config", json={"extensions": ["no_such_module_xyz_123"]})
+    assert resp.status_code == 400
+    assert client.get("/config").json()["extensions"] == []  # unchanged
+
+
 def test_config_get_exposes_names_not_secrets():
     resp = _client().get("/config")
     assert resp.status_code == 200
@@ -816,6 +889,16 @@ def test_index_has_system_tab_and_theme_toggle():
     assert 'data-theme="light"' in body and 'data-theme="dark"' in body  # light/dark only
     assert 'data-theme="system"' not in body  # no follow-system option
     assert "/system/config-export" in body and "/system/config-import" in body
+
+
+def test_index_has_extensions_and_hooks_editors():
+    """The System tab exposes the extensions/hooks editors + a read-only mirror of
+    what's registered in code, with the local-trust warning."""
+    body = _client().get("/").text
+    assert 'id="cfg-extensions"' in body and 'id="cfg-ext-add"' in body
+    assert 'id="cfg-hooks"' in body and 'id="cfg-hook-add"' in body
+    assert 'id="cfg-registered"' in body
+    assert "sys_ext_warn" in body  # the "keep /config local-only" caveat
 
 
 def test_index_has_streaming_toggle_on_system_tab():

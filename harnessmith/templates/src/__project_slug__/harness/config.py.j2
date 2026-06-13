@@ -378,6 +378,23 @@ class McpConfig(BaseModel):
 
 
 {% endif %}
+class HookConfig(BaseModel):
+    """One mounted Hooks subclass — the list form of ``config.hooks``.
+
+    ``class`` is the dotted ``package.module:ClassName`` path; ``enabled: false``
+    keeps an entry in the file but skips mounting it; ``config`` is handed to the
+    class constructor as ``ClassName(**config)`` so a hook can be parameterized
+    from config.yaml (redact patterns, verbosity, ...). A hook that takes config
+    must accept those keywords in ``__init__``. See ``harness/extensions.py``.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    class_path: str = Field(alias="class")
+    enabled: bool = True
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -394,11 +411,18 @@ class Config(BaseModel):
     # Runtime extension points (no spec field). ``extensions`` lists dotted module
     # paths imported at startup so their ``@register_*`` run (custom tools /
     # paradigms / context conditions / memory backends living outside the
-    # built-in files). ``hooks`` names a Hooks subclass ("package.module:ClassName")
-    # the CLI/web mount automatically — logging / guardrails / redaction / HITL
-    # without editing the loop. See ``harness/extensions.py``.
+    # built-in files). ``hooks`` mounts one or more Hooks subclasses the CLI/web
+    # apply automatically — logging / guardrails / tool gating / redaction / HITL
+    # without editing the loop. Two shapes, both accepted:
+    #   hooks: "package.module:ClassName"          # single, legacy string form
+    #   hooks:                                      # list form (compose several)
+    #     - class: "package.module:AuditHooks"
+    #       enabled: true
+    #       config: {redact_args: true}            # passed as ClassName(**config)
+    #     - "package.module:MetricsHooks"          # a bare string also works
+    # Listed hooks run in order; see ``harness/extensions.py`` / ``harness/hooks.py``.
     extensions: list[str] = Field(default_factory=list)
-    hooks: str | None = None
+    hooks: str | list[str | HookConfig] | None = None
     # HITL tool confirmation (opt-in guardrail; default off). Which tools must
     # pause for the user's OK before they run: ``"none"`` (default — confirm
     # nothing, so the golden path is untouched), ``"high"`` (only ``risk="high"``

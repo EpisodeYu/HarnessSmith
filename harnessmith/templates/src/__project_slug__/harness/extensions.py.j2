@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import importlib
 
-from .config import Config, ConfigError
-from .hooks import Hooks
+from .config import Config, ConfigError, HookConfig
+from .hooks import CompositeHooks, Hooks
 
 
 def import_extensions(config: Config) -> list[str]:
@@ -43,28 +43,70 @@ def import_extensions(config: Config) -> list[str]:
     return imported
 
 
-def load_hooks(config: Config) -> Hooks:
-    """Instantiate the ``Hooks`` subclass named in ``config.hooks`` (``"pkg.mod:Class"``).
-
-    Returns a plain no-op ``Hooks()`` when unset. The class is imported and
-    constructed with no arguments; anything else is a clean ``ConfigError``.
+def _normalize_hooks(config: Config) -> list[HookConfig]:
+    """Coerce ``config.hooks`` (``None`` | ``str`` | list of str/HookConfig) into a
+    uniform list of :class:`HookConfig`. The legacy single-string form becomes a
+    one-element list; bare strings inside the list become unconfigured entries.
     """
-    spec = (config.hooks or "").strip()
+    spec = config.hooks
     if not spec:
-        return Hooks()
+        return []
+    if isinstance(spec, str):
+        return [HookConfig(class_path=spec.strip())] if spec.strip() else []
+    out: list[HookConfig] = []
+    for item in spec:
+        if isinstance(item, str):
+            if item.strip():
+                out.append(HookConfig(class_path=item.strip()))
+        else:  # pydantic already coerced a dict entry into a HookConfig at load
+            out.append(item)
+    return out
+
+
+def _instantiate_hook(entry: HookConfig) -> Hooks:
+    """Import + construct one hook from its ``HookConfig``; clean ``ConfigError`` on
+    any problem. ``config`` (if any) is passed as keyword args to the constructor."""
+    spec = entry.class_path.strip()
     module_name, sep, class_name = spec.partition(":")
     if not sep or not class_name.strip():
         raise ConfigError(
-            f"invalid hooks {spec!r}: use the form 'package.module:ClassName'"
+            f"invalid hooks entry {spec!r}: use the form 'package.module:ClassName'"
         )
     try:
         module = importlib.import_module(module_name)
-        instance = getattr(module, class_name)()
+        cls = getattr(module, class_name)
+        instance = cls(**entry.config) if entry.config else cls()
     except Exception as exc:
         raise ConfigError(f"failed to load hooks {spec!r}: {exc}") from exc
     if not isinstance(instance, Hooks):
         raise ConfigError(f"hooks {spec!r} is not a Hooks subclass")
     return instance
+
+
+def load_hooks(config: Config) -> Hooks:
+    """Instantiate and compose the hooks named in ``config.hooks``.
+
+    Accepts the legacy single string (``"pkg.mod:Class"``) or the list form
+    (compose several, each optionally parameterized via its ``config`` and toggled
+    by ``enabled``). Returns a plain no-op ``Hooks()`` when none are enabled, the
+    single instance when exactly one is mounted, or a :class:`CompositeHooks`
+    fanning out to all of them in listed order. A bad entry is a clean
+    ``ConfigError`` (not a traceback) so a typo in ``hooks:`` is actionable.
+    """
+    entries = [entry for entry in _normalize_hooks(config) if entry.enabled]
+    if not entries:
+        return Hooks()
+    instances = [_instantiate_hook(entry) for entry in entries]
+    if len(instances) == 1:
+        return instances[0]
+    return CompositeHooks(instances)
+
+
+def mounted_hook_names(config: Config) -> list[str]:
+    """Dotted paths of the ENABLED hooks in ``config.hooks`` — for ``info`` /
+    ``GET /registries`` discoverability. Pure inspection: imports nothing and
+    instantiates nothing (a bad path surfaces when :func:`load_hooks` runs)."""
+    return [entry.class_path.strip() for entry in _normalize_hooks(config) if entry.enabled]
 
 
 def check_config(config: Config) -> tuple[list[str], list[str]]:

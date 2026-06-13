@@ -220,12 +220,27 @@ def run_tool(
     ``cancel`` makes the wait abortable: a Stop while the tool runs abandons the
     wait within ~0.2s (the tool finishes on a daemon thread, discarded) and this
     call's observation becomes an interrupted ERROR — see :class:`ToolInterrupted`.
+
+    Hooks are also the thin tool-POLICY layer: ``before_tool`` may RETURN a string
+    to refuse the call before it runs (a code-level gate, checked before HITL so an
+    auto-refusal doesn't prompt the user; allowlist still narrows on top, so a hook
+    can only refuse — never grant — a tool); ``after_tool`` may RETURN a string to
+    rewrite/redact the result the model AND the trace then see (e.g. scrub a secret
+    that came back in output). Returning ``None`` from either is the pure-observer
+    behavior.
     """
-    hooks.before_tool(call)
+    # before_tool is observer + optional policy gate: a returned string refuses the
+    # call (checked before allowlist/HITL so a guard fires uniformly and an
+    # auto-refusal never bothers the user). The SSE/observer side still sees every
+    # attempt because this is always called, symmetric with after_tool below.
+    policy_refusal = hooks.before_tool(call)
     trace.event("tool_call", name=call.name, arguments=call.arguments)
     started = time.monotonic()
     outcome = "ok"
-    if allowed is not None and call.name not in allowed:
+    if policy_refusal is not None:
+        result = policy_refusal
+        outcome = "refused (policy)"
+    elif allowed is not None and call.name not in allowed:
         result = f"ERROR: tool {call.name!r} is not available in this mode"
         outcome = "refused (not offered in this mode)"
     else:
@@ -247,9 +262,13 @@ def run_tool(
                 # Only the error CLASS goes to the debug log — its message may
                 # embed the tool's arguments, which the log never records.
                 outcome = f"error ({type(exc).__name__})"
+    # after_tool may redact/rewrite the result; the rewritten value is what both the
+    # model and the trace record (so a secret can be scrubbed here, not just masked).
+    rewritten = hooks.after_tool(call, result)
+    if rewritten is not None:
+        result = rewritten
     log.debug("tool %s -> %s in %.2fs", call.name, outcome, time.monotonic() - started)
     trace.event("tool_result", name=call.name, result=result)
-    hooks.after_tool(call, result)
     return _truncate_result(result, max_result_chars)
 
 

@@ -39,7 +39,7 @@ from ..harness.context import CONDITIONS, STRATEGIES
 from ..harness.usage import UsageLedger
 {% if spec.memory.enabled %}from ..harness.memory import BACKENDS as _MEMORY_BACKENDS
 {% endif %}from ..harness.debuglog import log, setup as setup_debug_log
-from ..harness.extensions import import_extensions, load_hooks
+from ..harness.extensions import import_extensions, load_hooks, mounted_hook_names
 from ..harness.hooks import Hooks
 from ..harness.interaction import (
     AskResponse,
@@ -62,6 +62,12 @@ _INDEX_HTML = (Path(__file__).parent / "web_index.html").read_text(encoding="utf
 _EDITABLE_FIELDS = (
     "llms", "roles", "prompts", "tools", "context", "paradigms",
     "observability",
+    # Runtime extension wiring. Editable here because /config is a LOCAL-TRUST
+    # admin surface (same threat model as the MCP page, which can spawn local
+    # commands): adding an `extensions` module imports arbitrary local code, so
+    # never expose /config publicly. Structural code (whether a paradigm/module
+    # EXISTS) is still generation-time only; this just wires already-present code.
+    "extensions", "hooks",
 {% if spec.memory.enabled %}    "memory",
 {% endif %})
 
@@ -94,13 +100,20 @@ class _StreamHooks(Hooks):
             },
         ))
 
-    def before_tool(self, call: ToolCall) -> None:
-        self._inner.before_tool(call)
+    def before_tool(self, call: ToolCall) -> str | None:
+        # Forward the user hook's policy decision (a returned string refuses the
+        # call) while still surfacing the attempt to the UI.
+        refusal = self._inner.before_tool(call)
         self._q.put(("tool_call", {"name": call.name, "arguments": call.arguments}))
+        return refusal
 
-    def after_tool(self, call: ToolCall, result: str) -> None:
-        self._inner.after_tool(call, result)
-        self._q.put(("tool_result", {"name": call.name, "result": result}))
+    def after_tool(self, call: ToolCall, result: str) -> str | None:
+        # Let the user hook redact/rewrite the result; the UI shows what the model
+        # actually gets (the rewritten value when one was returned).
+        rewritten = self._inner.after_tool(call, result)
+        shown = rewritten if rewritten is not None else result
+        self._q.put(("tool_result", {"name": call.name, "result": shown}))
+        return rewritten
 
     def on_error(self, where: str, error: Exception) -> None:
         self._inner.on_error(where, error)
@@ -760,15 +773,22 @@ def create_app(
     @app.get("/registries")
     def registries() -> dict:
         """What's registered in code — the extension universe behind the config
-        dropdowns. A custom ``@register_paradigm`` / ``@register_strategy`` /
+        dropdowns.         A custom ``@register_paradigm`` / ``@register_strategy`` /
         ``@register_condition`` shows up here once its module is imported, so the
         panel can offer it (and flag a config name that isn't registered).
         ``/config`` holds what's currently *selected*; this holds what *exists*.
+
+        ``extensions`` (imported modules) and ``hooks`` (mounted classes) round out
+        the picture: the System page renders them read-only next to its editors so
+        the wiring in code and in config.yaml is visible side by side.
         """
+        config = app.state.config
         return {
             "paradigms": list(PARADIGMS),
             "strategies": list(STRATEGIES),
             "conditions": list(CONDITIONS),
+            "extensions": list(config.extensions),
+            "hooks": mounted_hook_names(config),
 {% if spec.memory.enabled %}            "memory": list(_MEMORY_BACKENDS),
 {% endif %}        }
 
@@ -967,7 +987,11 @@ def create_app(
     @app.get("/config")
     def get_config() -> dict:
         # model_dump holds only env-var NAMES (api_key_env), never secret values.
-        return app.state.config.model_dump(mode="json", include=set(_EDITABLE_FIELDS))
+        # by_alias keeps the documented `class` key for hooks entries (the field is
+        # `class_path` internally because `class` is a Python keyword).
+        return app.state.config.model_dump(
+            mode="json", include=set(_EDITABLE_FIELDS), by_alias=True
+        )
 
     @app.get("/env-status")
     def env_status() -> dict[str, bool]:
@@ -1065,14 +1089,20 @@ def create_app(
     @app.post("/config")
     async def set_config(request: Request):
         patch = await request.json()
-        current = app.state.config.model_dump(mode="json")
+        current = app.state.config.model_dump(mode="json", by_alias=True)
         for key in _EDITABLE_FIELDS:  # secrets/structural keys are ignored
             if key in patch:
                 current[key] = patch[key]
         try:
-            app.state.config = Config.model_validate(current)
+            new_config = Config.model_validate(current)
+            # Import any newly-added extensions module so its @register_* run now
+            # and show up in /registries; a bad module name fails the save cleanly
+            # (and leaves the running config untouched). Removing a module here
+            # cannot un-import it — that takes a restart (documented).
+            import_extensions(new_config)
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        app.state.config = new_config
         # Re-arm the local debug log so the Observability toggle takes effect
         # immediately (no restart). Section NAMES only — values never logged here.
         obs = app.state.config.observability
@@ -1094,7 +1124,7 @@ def create_app(
         # never in _EDITABLE_FIELDS, so only env-var NAMES ever reach the file.
         if app.state.config_path is not None:
             updates = app.state.config.model_dump(
-                mode="json", include=set(_EDITABLE_FIELDS), exclude_none=True
+                mode="json", include=set(_EDITABLE_FIELDS), exclude_none=True, by_alias=True
             )
             try:
                 save_config(updates, app.state.config_path)
@@ -1103,7 +1133,9 @@ def create_app(
                     {"error": f"applied in-process but could not write config.yaml: {exc}"},
                     status_code=500,
                 )
-        return app.state.config.model_dump(mode="json", include=set(_EDITABLE_FIELDS))
+        return app.state.config.model_dump(
+            mode="json", include=set(_EDITABLE_FIELDS), by_alias=True
+        )
 
     @app.get("/system/config-export")
     def export_config() -> Response:
@@ -1119,7 +1151,7 @@ def create_app(
             text = Path(path).read_text(encoding="utf-8")
         else:
             text = yaml.safe_dump(
-                app.state.config.model_dump(mode="json", exclude_none=True),
+                app.state.config.model_dump(mode="json", exclude_none=True, by_alias=True),
                 sort_keys=False, allow_unicode=True,
             )
         return Response(

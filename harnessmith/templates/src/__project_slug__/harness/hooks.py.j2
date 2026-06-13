@@ -1,17 +1,38 @@
 """Lifecycle hooks — the no-touch extension point.
 
-Subclass :class:`Hooks`, override only what you need, and pass an instance to
-``run()``. Guardrails, logging, redaction, and human-in-the-loop confirmation
-all live here without ever editing the loop.
+Subclass :class:`Hooks`, override only what you need, and mount it via
+``config.yaml`` (``hooks:``) or pass an instance to ``run()``. Guardrails,
+logging, redaction, tool gating, and human-in-the-loop confirmation all live here
+without ever editing the loop.
+
+Two of the tool hooks are also a thin **policy** layer (no separate "middleware"
+machinery): ``before_tool`` may RETURN a string to refuse a call before it runs,
+and ``after_tool`` may RETURN a string to rewrite/redact a result before the model
+(and the trace) see it. Returning ``None`` from either is the pure-observer
+behavior. Mount several hooks at once (``hooks:`` as a list) and they compose —
+see :class:`CompositeHooks`.
 """
 
 from __future__ import annotations
 
+from .debuglog import log
 from .llm import LLMResponse, ToolCall
 
 
 class Hooks:
-    """Default no-op hooks. Override methods in a subclass to extend behavior."""
+    """Default no-op hooks. Override methods in a subclass to extend behavior.
+
+    Observer methods (``before_step`` / ``after_step`` / ``on_error``) return
+    nothing. The two tool methods are observer-by-default but may act as a policy:
+
+    - ``before_tool`` returns ``None`` to allow the call (the default) or a
+      ``str`` to REFUSE it — that string becomes the tool's ERROR observation and
+      the tool never runs (checked before HITL confirmation, so an auto-refusal
+      doesn't bother the user).
+    - ``after_tool`` returns ``None`` to keep the result (the default) or a ``str``
+      to REPLACE it — used to redact/trim a result; the rewritten value is what the
+      model sees AND what the trace records (so a secret can be scrubbed here).
+    """
 
     def before_step(self, step: int, messages: list[dict]) -> None:
         ...
@@ -19,11 +40,77 @@ class Hooks:
     def after_step(self, step: int, response: LLMResponse) -> None:
         ...
 
-    def before_tool(self, call: ToolCall) -> None:
-        ...
+    def before_tool(self, call: ToolCall) -> str | None:
+        return None
 
-    def after_tool(self, call: ToolCall, result: str) -> None:
-        ...
+    def after_tool(self, call: ToolCall, result: str) -> str | None:
+        return None
 
     def on_error(self, where: str, error: Exception) -> None:
         ...
+
+
+class CompositeHooks(Hooks):
+    """Run several :class:`Hooks` as one, in the order they were given.
+
+    Mounted automatically when ``config.hooks`` lists more than one class (see
+    ``harness/extensions.py``). Composition rules:
+
+    - **Observer methods** (``before_step`` / ``after_step`` / ``on_error``) fan
+      out to every hook. A hook that raises is isolated (logged, then skipped) so
+      one bad observer can't break the loop — fail-open.
+    - **``before_tool``** is a short-circuit gate: the FIRST hook that returns a
+      string refuses the call (later hooks are not consulted). A hook that raises
+      is treated as a refusal — fail-closed, because a broken guard must not let a
+      call through.
+    - **``after_tool``** chains: each hook sees the result the previous one
+      produced, so multiple redactors stack. A hook that raises keeps the prior
+      result (fail-open — never lose the observation).
+    """
+
+    def __init__(self, hooks: list[Hooks]) -> None:
+        self._hooks = list(hooks)
+
+    def before_step(self, step: int, messages: list[dict]) -> None:
+        for hook in self._hooks:
+            try:
+                hook.before_step(step, messages)
+            except Exception as exc:  # an observer must never break the loop
+                log.debug("hook %s.before_step raised: %s", type(hook).__name__, type(exc).__name__)
+
+    def after_step(self, step: int, response: LLMResponse) -> None:
+        for hook in self._hooks:
+            try:
+                hook.after_step(step, response)
+            except Exception as exc:
+                log.debug("hook %s.after_step raised: %s", type(hook).__name__, type(exc).__name__)
+
+    def before_tool(self, call: ToolCall) -> str | None:
+        for hook in self._hooks:
+            try:
+                refusal = hook.before_tool(call)
+            except Exception as exc:  # a broken guard fails CLOSED (refuse)
+                log.debug("hook %s.before_tool raised: %s", type(hook).__name__, type(exc).__name__)
+                return f"ERROR: tool {call.name!r} refused by a failing policy ({type(exc).__name__})"
+            if refusal is not None:
+                return refusal
+        return None
+
+    def after_tool(self, call: ToolCall, result: str) -> str | None:
+        changed = False
+        for hook in self._hooks:
+            try:
+                rewritten = hook.after_tool(call, result)
+            except Exception as exc:  # keep the prior result (fail-open)
+                log.debug("hook %s.after_tool raised: %s", type(hook).__name__, type(exc).__name__)
+                continue
+            if rewritten is not None:
+                result, changed = rewritten, True
+        return result if changed else None
+
+    def on_error(self, where: str, error: Exception) -> None:
+        for hook in self._hooks:
+            try:
+                hook.on_error(where, error)
+            except Exception as exc:
+                log.debug("hook %s.on_error raised: %s", type(hook).__name__, type(exc).__name__)

@@ -305,6 +305,28 @@
             <button type="button" data-stream="0" class="rounded px-3 py-0.5 text-sm" data-i18n="sys_stream_off">Disable</button>
           </div>
         </div>
+        <div class="space-y-3 border-t pt-3">
+          <div>
+            <h4 class="text-sm font-medium" data-i18n="sys_ext_label">Extensions &amp; hooks</h4>
+            <p class="text-xs text-amber-600" data-i18n="sys_ext_warn">Adding an extension module imports local code on Save. Keep /config local-only — never expose it on a public network.</p>
+          </div>
+          <div class="space-y-1">
+            <label class="text-xs font-medium text-slate-600" data-i18n="sys_ext_modules">Extension modules</label>
+            <p class="text-xs text-slate-500" data-i18n="sys_ext_modules_hint">Dotted module paths imported at startup so their @register_* run (custom tools / paradigms / …).</p>
+            <div id="cfg-extensions" class="space-y-1"></div>
+            <button id="cfg-ext-add" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="sys_ext_add">+ Add module</button>
+          </div>
+          <div class="space-y-1">
+            <label class="text-xs font-medium text-slate-600" data-i18n="sys_hooks_label">Hooks</label>
+            <p class="text-xs text-slate-500" data-i18n="sys_hooks_hint">Hooks classes (package.module:ClassName) for logging / guardrails / tool policy / redaction. Run in listed order; config is JSON passed to the constructor.</p>
+            <div id="cfg-hooks" class="space-y-2"></div>
+            <button id="cfg-hook-add" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="sys_hooks_add">+ Add hook</button>
+          </div>
+          <div class="space-y-1">
+            <label class="text-xs font-medium text-slate-600" data-i18n="sys_reg_label">Registered in code</label>
+            <p id="cfg-registered" class="whitespace-pre-wrap font-mono text-xs text-slate-500"></p>
+          </div>
+        </div>
         <div class="space-y-1 border-t pt-3">
           <h4 class="text-sm font-medium" data-i18n="sys_export_label">Export configuration</h4>
           <p class="text-xs text-slate-500" data-i18n="sys_export_hint">Download config.yaml with every setting except secrets.</p>
@@ -388,6 +410,21 @@
         sys_import_confirm: "Import replaces your current configuration. Continue?",
         sys_import_done: "imported",
         sys_import_failed: "nothing to import",
+        sys_ext_label: "Extensions & hooks",
+        sys_ext_warn: "Adding an extension module imports local code on Save. Keep /config local-only — never expose it on a public network.",
+        sys_ext_modules: "Extension modules",
+        sys_ext_modules_hint: "Dotted module paths imported at startup so their @register_* run (custom tools / paradigms / …).",
+        sys_ext_add: "+ Add module",
+        sys_ext_ph: "agent_harness.ext.my_tools",
+        sys_hooks_label: "Hooks",
+        sys_hooks_hint: "Hooks classes (package.module:ClassName) for logging / guardrails / tool policy / redaction. Run in listed order; config is JSON passed to the constructor.",
+        sys_hooks_add: "+ Add hook",
+        sys_hooks_ph: "package.module:ClassName",
+        sys_hooks_cfg_ph: "config JSON, e.g. {\"redact_args\": true}",
+        sys_hooks_enabled: "enabled",
+        sys_reg_label: "Registered in code",
+        sys_reg_none: "(nothing imported yet)",
+        remove: "remove",
         profiles_label: "LLM profiles", profile_add: "+ Add profile", profile_remove: "remove",
         test_btn: "Test", test_running: "testing…", test_timeout: "timed out — endpoint not responding",
         roles_label: "Roles", roles_hint: "Bind each role to a profile above.",
@@ -517,6 +554,21 @@
         sys_import_confirm: "导入会替换当前配置,确定继续?",
         sys_import_done: "已导入",
         sys_import_failed: "没有可导入的内容",
+        sys_ext_label: "扩展与 Hooks",
+        sys_ext_warn: "保存时新增扩展模块会触发本机代码 import。/config 仅供本地可信使用——切勿暴露到公网。",
+        sys_ext_modules: "扩展模块",
+        sys_ext_modules_hint: "启动时 import 的点分模块路径,使其 @register_* 生效(自定义工具 / 范式 / …)。",
+        sys_ext_add: "+ 添加模块",
+        sys_ext_ph: "agent_harness.ext.my_tools",
+        sys_hooks_label: "Hooks",
+        sys_hooks_hint: "Hooks 类(package.module:ClassName),用于日志 / 护栏 / 工具策略 / 脱敏。按列表顺序执行;config 为传给构造函数的 JSON。",
+        sys_hooks_add: "+ 添加 hook",
+        sys_hooks_ph: "package.module:ClassName",
+        sys_hooks_cfg_ph: "config JSON,如 {\"redact_args\": true}",
+        sys_hooks_enabled: "启用",
+        sys_reg_label: "代码中已注册",
+        sys_reg_none: "(尚未 import 任何模块)",
+        remove: "删除",
         profiles_label: "LLM 配置", profile_add: "+ 添加配置", profile_remove: "删除",
         test_btn: "测试", test_running: "测试中…", test_timeout: "超时——端点无响应",
         roles_label: "角色", roles_hint: "把每个角色绑定到上面的某个配置。",
@@ -1653,7 +1705,7 @@
     let ruleFiles = [];
     // What's registered in code (GET /registries): the universe the Context +
     // Paradigms dropdowns are built from. A configured name missing here is flagged.
-    let reg = { paradigms: [], strategies: [], conditions: []{% if spec.memory.enabled %}, memory: [] {% endif %} };
+    let reg = { paradigms: [], strategies: [], conditions: [], extensions: [], hooks: []{% if spec.memory.enabled %}, memory: [] {% endif %} };
     // Per-LLM accrued usage from GET /usage ([{name, model, prompt_tokens, ...,
     // cost, limit, over}]); drives the Budget tab's used-tokens + derived cost.
     let usageRows = [];
@@ -2298,7 +2350,91 @@
       $("cfg-mem-oversized").classList.toggle("hidden", !memInfo.oversized);
       $("cfg-mem-status").textContent = "";
     }
-{% endif %}    function renderConfig() {
+{% endif %}    // --- Extensions & hooks (System tab) ---------------------------------
+    function extRow(value) {
+      const row = document.createElement("div");
+      row.className = "ext-row flex items-center gap-2";
+      const inp = document.createElement("input");
+      inp.className = "ext-mod flex-1 rounded-lg border px-3 py-1 font-mono text-xs";
+      inp.placeholder = t("sys_ext_ph");
+      inp.value = value || "";
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "ext-remove rounded-lg border px-2 py-1 text-xs";
+      rm.textContent = t("remove");
+      rm.addEventListener("click", () => { row.remove(); refreshDirty(); });
+      row.append(inp, rm);
+      return row;
+    }
+    function hookRow(entry) {
+      // entry may be a string (legacy single/list form) or {class, enabled, config}.
+      const cls = typeof entry === "string" ? entry : (entry.class || "");
+      const enabled = typeof entry === "string" ? true : entry.enabled !== false;
+      const config = (entry && typeof entry === "object" && entry.config) || {};
+      const row = document.createElement("div");
+      row.className = "hook-row space-y-1 rounded-lg border p-2";
+      const top = document.createElement("div");
+      top.className = "flex items-center gap-2";
+      const clsInp = document.createElement("input");
+      clsInp.className = "hk-class flex-1 rounded-lg border px-3 py-1 font-mono text-xs";
+      clsInp.placeholder = t("sys_hooks_ph");
+      clsInp.value = cls;
+      const lbl = document.createElement("label");
+      lbl.className = "flex items-center gap-1 whitespace-nowrap text-xs";
+      const en = document.createElement("input");
+      en.type = "checkbox"; en.className = "hk-enabled"; en.checked = enabled;
+      const enTxt = document.createElement("span");
+      enTxt.setAttribute("data-i18n", "sys_hooks_enabled");
+      enTxt.textContent = t("sys_hooks_enabled");
+      lbl.append(en, enTxt);
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "hk-remove rounded-lg border px-2 py-1 text-xs";
+      rm.textContent = t("remove");
+      rm.addEventListener("click", () => { row.remove(); refreshDirty(); });
+      top.append(clsInp, lbl, rm);
+      const cfgTa = document.createElement("textarea");
+      cfgTa.className = "hk-config w-full rounded-lg border px-3 py-1 font-mono text-xs";
+      cfgTa.rows = 1;
+      cfgTa.placeholder = t("sys_hooks_cfg_ph");
+      cfgTa.value = Object.keys(config).length ? JSON.stringify(config) : "";
+      // Flag invalid JSON live (dropped to {} on Save, like extra_body).
+      cfgTa.addEventListener("input", () => {
+        const txt = cfgTa.value.trim();
+        let ok = true;
+        if (txt) { try { const v = JSON.parse(txt); ok = v && typeof v === "object" && !Array.isArray(v); } catch (e) { ok = false; } }
+        cfgTa.classList.toggle("border-red-500", !ok);
+      });
+      row.append(top, cfgTa);
+      return row;
+    }
+    function buildExtensions() {
+      const host = $("cfg-extensions");
+      host.innerHTML = "";
+      (cfg.extensions || []).forEach((m) => host.appendChild(extRow(m)));
+    }
+    function buildHooks() {
+      const host = $("cfg-hooks");
+      host.innerHTML = "";
+      const h = cfg.hooks;
+      const list = h == null ? [] : (Array.isArray(h) ? h : [h]);
+      list.forEach((entry) => host.appendChild(hookRow(entry)));
+    }
+    function buildRegistered() {
+      // Read-only mirror of GET /registries: what's wired in code right now, so the
+      // editors above can be checked against reality.
+      const lines = [];
+      const fmt = (label, arr) => `${label}: ${(arr && arr.length) ? arr.join(", ") : "—"}`;
+      lines.push(fmt("extensions", reg.extensions));
+      lines.push(fmt("hooks", reg.hooks));
+      lines.push(fmt("paradigms", reg.paradigms));
+      lines.push(fmt("strategies", reg.strategies));
+      lines.push(fmt("conditions", reg.conditions));
+{% if spec.memory.enabled %}      lines.push(fmt("memory", reg.memory));
+{% endif %}      const el = $("cfg-registered");
+      el.textContent = (reg.extensions || reg.hooks || reg.paradigms) ? lines.join("\n") : t("sys_reg_none");
+    }
+    function renderConfig() {
       const pc = $("cfg-profiles");
       pc.innerHTML = "";
       (cfg.llms || []).forEach((p) => pc.appendChild(profileCard(p)));
@@ -2318,6 +2454,10 @@
       $("cfg-obs-tracedir").value = obs.trace_dir || "traces";
       $("cfg-obs-debug").checked = !!obs.debug;
       $("cfg-obs-debugdir").value = obs.debug_dir || "logs";
+      // System tab: extensions / hooks editors + read-only registry mirror
+      buildExtensions();
+      buildHooks();
+      buildRegistered();
     }
 
     function collectConfig() {
@@ -2418,7 +2558,22 @@
         auto_consolidate: $("cfg-mem-auto").checked,
         policy: $("cfg-mem-policy").value.trim() || null,
       });
-{% endif %}      return patch;
+{% endif %}      // Extensions: dotted module paths (drop blanks).
+      patch.extensions = Array.from(document.querySelectorAll("#cfg-extensions .ext-mod"))
+        .map((el) => el.value.trim()).filter(Boolean);
+      // Hooks: always a list ({class, enabled, config}); a blank class row is
+      // skipped, invalid config JSON falls back to {} (flagged red in the UI).
+      const hooksOut = [];
+      document.querySelectorAll("#cfg-hooks .hook-row").forEach((row) => {
+        const cls = row.querySelector(".hk-class").value.trim();
+        if (!cls) return;
+        let config = {};
+        const raw = row.querySelector(".hk-config").value.trim();
+        if (raw) { try { const v = JSON.parse(raw); if (v && typeof v === "object" && !Array.isArray(v)) config = v; } catch (e) {} }
+        hooksOut.push({ class: cls, enabled: row.querySelector(".hk-enabled").checked, config });
+      });
+      patch.hooks = hooksOut;
+      return patch;
     }
 
     // Everything the config view persists, serialized: the config patch plus the
@@ -2598,6 +2753,8 @@
       if (!dirty || confirm(t("cfg_reload_confirm"))) loadConfig();
     });
     $("cfg-rule-add").addEventListener("click", () => { $("cfg-rules").appendChild(ruleRow("", "", false)); refreshDirty(); });
+    $("cfg-ext-add").addEventListener("click", () => { $("cfg-extensions").appendChild(extRow("")); refreshDirty(); });
+    $("cfg-hook-add").addEventListener("click", () => { $("cfg-hooks").appendChild(hookRow({})); refreshDirty(); });
     $("cfg-rules").addEventListener("click", (e) => {
       const rm = e.target.closest(".r-remove");
       if (rm) { rm.closest(".rule").remove(); refreshDirty(); }  // drops it from the list, not from disk
@@ -2686,6 +2843,9 @@
       });
       const data = await resp.json();
       if (resp.ok) {
+        // Re-pull /registries so the "Registered in code" mirror reflects any
+        // extension module that was just imported by the save.
+        try { reg = await (await fetch("/registries")).json(); } catch (e) { /* keep last */ }
         cfg = data; await loadRules(); await loadEnvStatus();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); populateGenerator(); markSaved();
         $("cfg-status").textContent = ruleErr ? (t("cfg_saved") + ": " + ruleErr) : t("cfg_saved");
       } else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
