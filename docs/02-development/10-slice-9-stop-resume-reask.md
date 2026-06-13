@@ -27,7 +27,7 @@
 ## 2. 交付物
 
 ### 取消令牌脊柱
-- 产物 `harness/paradigms/{agent,plan,ask}.py`(三处同构)— `run()` 加 `cancel: Callable[[], bool] | None = None`;每步开头 `if cancel and cancel(): stop_reason="interrupted"; break`;透传进 `client.stream(..., cancel=cancel)`;`stop_reason="interrupted"` 时不 append 合成答案。
+- 产物 `harness/paradigms/{agent,plan,ask}.py`(三处同构)— `run()` 加 `cancel: Callable[[], bool] | None = None`;每步开头 `if cancel and cancel(): stop_reason="interrupted"; break`;透传进 `client.stream(..., cancel=cancel)`;`stop_reason="interrupted"` 时不 append 合成答案。同处步边界还有与成本无关的步数硬上限 `if config.max_steps and step >= config.max_steps: stop_reason="max_steps"; break`(运行期 `Config.max_steps`,默认 50,0=不限;issue #5 L4,见 [`15-llm-robustness-and-context.md`](./15-llm-robustness-and-context.md) §2.6)——续聊可继续,合成提示同 `llm_budget` 不入历史。
 - 产物 `harness/loop.py` — `run()` 加 `cancel` 并透传。
 - 产物 `harness/llm.py` — `LLMClient` Protocol + `OpenAIClient` 的 `stream`/`complete` 加 `cancel` 形参;`stream` 逐 chunk `if cancel and cancel(): stream_obj.close(); break`,返回已组装的半截 `LLMResponse`(由范式 break 前丢弃)。`MockLLM` 同步加 `cancel`。
 

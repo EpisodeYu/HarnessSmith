@@ -127,6 +127,10 @@ confirm: {{ confirm_default }}
 {% set sctx = spec.context or {} %}{% set triggers = sctx.get("triggers", {"window_pct": 0.85}) %}context:
   strategy: {{ sctx.get("strategy", "summarize") }}
   keep_last_turns: {{ sctx.get("keep_last_turns", 6) }}
+  # Also cap recent TOOL-ROUNDS kept when compacting (one assistant tool-call + its
+  # results = one round), so a single long agentic turn can't grow unbounded inside
+  # one user turn — the more aggressive of keep_last_turns / keep_last_steps wins.
+  keep_last_steps: {{ sctx.get("keep_last_steps", 8) }}
   combine: {{ sctx.get("combine", "or") }}   # or = any trigger fires; and = all must fire
   # Cap one tool result before it enters history (first gate vs one huge observation
   # blowing the window); the overflow becomes a [truncated N chars] marker. 0 = off.
@@ -136,6 +140,13 @@ confirm: {{ confirm_default }}
 {% endfor %}{% if not triggers %}    {}
 {% endif %}    # max_tokens: 192000   # also compact at an absolute token count (real usage when known)
     # max_turns: 40        # also compact after N user turns (combine decides and/or)
+
+# Agent-loop safety valve: hard ceiling on tool-call steps (completed tool-rounds)
+# within a SINGLE turn, independent of cost. The default product prices LLMs at 0,
+# so cost_limit alone is no guard against a looping/runaway model — at this many
+# steps the turn stops with a clear `max_steps` stop reason. Continue the session to
+# resume past it. 0 = unlimited (rely on cost_limit / Stop instead).
+max_steps: 50
 
 # Loop paradigms (runtime roster). `enabled` lists the selectable paradigms; pick
 # one per turn via `run --mode <name>` (CLI) or the web dropdown. `default` is

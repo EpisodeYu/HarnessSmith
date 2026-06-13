@@ -779,6 +779,145 @@ def test_compaction_keeps_reasoning_on_surviving_tool_call():
     assert kept and kept[0]["reasoning_content"] == "why"  # survived summarize
 
 
+# --- Compaction granularity + the max_steps safety valve (issue L1-L4) -------
+
+
+def _round(idx, reasoning=None):
+    """One tool-round: an assistant tool-call message + its tool result."""
+    asst = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {"id": f"c{idx}", "type": "function", "function": {"name": "calc", "arguments": "{}"}}
+        ],
+    }
+    if reasoning is not None:
+        asst["reasoning_content"] = reasoning
+    return [asst, {"role": "tool", "tool_call_id": f"c{idx}", "content": "x" * 200}]
+
+
+def _summary_notes(messages):
+    return [
+        m
+        for m in messages
+        if m.get("role") == "system"
+        and str(m.get("content") or "").startswith("Summary of earlier conversation:")
+    ]
+
+
+def test_compaction_folds_within_a_single_long_turn():
+    """L1: one user turn with many tool rounds is folded at ROUND granularity, so a
+    long agentic turn can't grow unbounded inside a single user turn — the old
+    user-turn split kept ALL of it and the forced rescue was a guaranteed no-op."""
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "build it"}]
+    for i in range(10):
+        messages += _round(i, reasoning=f"why{i}")
+
+    out = fit(
+        messages,
+        ContextConfig(strategy="truncate", keep_last_turns=6, keep_last_steps=3),
+        force=True,
+    )
+    assert len(out) < len(messages)  # dropped older rounds despite only ONE user turn
+    body = [m for m in out if m.get("role") != "system"]
+    assert body and body[0].get("role") != "tool"  # never open on an orphan tool result
+    rounds_kept = [m for m in out if m.get("role") == "assistant" and m.get("tool_calls")]
+    assert len(rounds_kept) == 3  # kept exactly keep_last_steps recent rounds
+    assert rounds_kept[-1]["reasoning_content"] == "why9"  # survivor keeps its reasoning
+
+
+def test_normal_compaction_also_folds_within_a_turn():
+    """The round floor applies to NORMAL triggered compaction too (not just the
+    forced overflow rescue), so a long single turn is folded proactively."""
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "go"}]
+    for i in range(8):
+        messages += _round(i)
+    ctx = ContextConfig(
+        strategy="truncate", keep_last_turns=6, keep_last_steps=2, triggers={"max_tokens": 50}
+    )
+    out = fit(messages, ctx)  # not forced; the low max_tokens trigger fires
+    assert len(out) < len(messages)
+    assert len([m for m in out if m.get("role") == "assistant" and m.get("tool_calls")]) == 2
+
+
+def test_summarize_merges_into_a_single_note():
+    """L2: each summarize folds the PRIOR note plus the newly dropped messages into
+    ONE merged note — the summary stack stays O(1) instead of growing per compaction."""
+    summarizer = MockLLM(script=["sum1", "sum2"])
+    ctx = ContextConfig(strategy="summarize", keep_last_turns=1, keep_last_steps=8)
+
+    first = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "t1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "t2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+    out1 = fit(first, ctx, summarizer=summarizer, force=True)
+    assert len(_summary_notes(out1)) == 1
+
+    grown = out1 + [{"role": "user", "content": "t3"}, {"role": "assistant", "content": "a3"}]
+    out2 = fit(grown, ctx, summarizer=summarizer, force=True)
+    assert len(_summary_notes(out2)) == 1  # still ONE note, the old one was folded in
+
+
+def test_saturated_compaction_is_a_quiet_noop():
+    """L3: when the keep floor already holds everything (nothing older to drop), a
+    sub-floor token threshold can't shrink anything — fit returns the history
+    untouched and never spends a summarizer call, instead of churning every step."""
+    messages = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "u" * 400},
+        {"role": "assistant", "content": "a"},
+    ]
+    summarizer = MockLLM(script=["should-not-be-used"])
+    ctx = ContextConfig(
+        strategy="summarize", keep_last_turns=6, keep_last_steps=8, triggers={"max_tokens": 10}
+    )
+    out = fit(messages, ctx, summarizer=summarizer)
+    assert out == messages  # untouched
+    assert summarizer._step == 0  # the summarizer was never called
+
+
+class _AlwaysToolClient:
+    """Never returns a final answer — always requests another tool (a runaway loop)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def complete(self, messages, tools=None, *, cancel=None):
+        self.calls += 1
+        return LLMResponse(
+            tool_calls=[ToolCall(id=f"c{self.calls}", name="get_current_time", arguments="{}")],
+            usage=Usage(10, 5, 15),
+        )
+
+    def stream(self, messages, tools=None, *, on_delta=None, on_thinking=None, cancel=None):
+        return self.complete(messages, tools, cancel=cancel)
+
+
+def test_max_steps_stops_a_runaway_loop(tmp_path):
+    """L4: a model that never stops calling tools is cut off at config.max_steps with
+    a clear stop reason — the only guard when the product prices LLMs at 0."""
+    result = run("go", client=_AlwaysToolClient(), config=_config(tmp_path, max_steps=3))
+    assert result.stop_reason == "max_steps"
+    assert result.steps == 3
+    assert "max_steps" in result.answer
+
+
+def test_max_steps_zero_means_unlimited(tmp_path):
+    """max_steps=0 disables the ceiling — a normal finite run finishes as usual."""
+    result = run(
+        "go",
+        client=MockLLM(
+            script=[ScriptedCall("get_current_time", {}), ScriptedCall("get_current_time", {}), "done"]
+        ),
+        config=_config(tmp_path, max_steps=0),
+    )
+    assert result.stop_reason == "final"
+    assert result.steps == 2
+
+
 def test_session_round_trips_reasoning_content(tmp_path):
     """Persistence stores message dicts verbatim, so reasoning survives save/resume."""
     from {{ project_slug }}.harness import session as session_store

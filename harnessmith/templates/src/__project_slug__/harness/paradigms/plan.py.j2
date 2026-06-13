@@ -117,6 +117,18 @@ def run(
             stop_reason = "interrupted"
             break
 
+        # Hard step ceiling (safety valve): stop a looping / runaway model even when
+        # no cost_limit is set (the default product prices LLMs at 0, so cost_limit
+        # alone is no guard). Counts completed tool-rounds; 0 = unlimited. The stop is
+        # clean here at the step boundary — continue the session to run past it.
+        if config.max_steps and step >= config.max_steps:
+            stop_reason = "max_steps"
+            answer = (
+                f"Stopped after reaching max_steps ({config.max_steps}). Raise "
+                "max_steps in config.yaml or continue the session to keep going."
+            )
+            break
+
         # Per-LLM cost limit (block_stop): refuse to call an over-budget LLM and
         # stop cleanly with a notice naming it. The generation profile is checked
         # here; the compaction profile is checked inside the summarizer, which

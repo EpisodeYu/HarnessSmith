@@ -34,7 +34,8 @@ from ..trace import Trace
 class RunResult:
     answer: str
     steps: int
-    # "final" (the model answered), "interrupted" (Stop / Ctrl-C / disconnect), or
+    # "final" (the model answered), "interrupted" (Stop / Ctrl-C / disconnect),
+    # "max_steps" (hit the config.max_steps step ceiling — a runaway guard), or
     # "llm_budget" (an LLM hit its per-LLM cost_limit, so the loop stopped using it
     # — see harness/usage.py).
     stop_reason: str

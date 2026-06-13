@@ -147,7 +147,10 @@ class ContextConfig(BaseModel):
     - ``strategy`` is a registered strategy name: ``truncate`` (keep system +
       recent turns), ``summarize`` (fold older turns via the ``compaction``
       role), or ``none`` (off). ``keep_last_turns`` = how many recent turns the
-      strategy keeps.
+      strategy keeps; ``keep_last_steps`` additionally caps how many recent
+      tool-rounds (one assistant tool-call + its results) survive, so a single long
+      agentic turn can't grow the history without bound inside one user turn (the
+      more aggressive of the two floors wins).
     - ``max_tool_result_chars`` caps a single tool result before it enters the
       history (the first gate against one huge observation blowing the window);
       the overflow is replaced with a ``[truncated N chars]`` marker so the model
@@ -161,6 +164,13 @@ class ContextConfig(BaseModel):
 
     strategy: str = "summarize"  # registered strategy name, or "none"
     keep_last_turns: int = Field(default=6, ge=1)
+    # Sub-turn floor: when compacting, also keep at most this many recent tool-rounds
+    # (one assistant tool-call message + its tool results = one round). It decouples
+    # compaction from the user-turn boundary so a single long agentic turn (one user
+    # message, many tool rounds) can be folded mid-turn — without it the overflow
+    # rescue is a guaranteed no-op inside one turn and the keep floor can sit above a
+    # low token threshold forever. The more aggressive of the two floors wins.
+    keep_last_steps: int = Field(default=8, ge=1)
     combine: Literal["or", "and"] = "or"
     # Thresholds are floats so window_pct (a 0–1 fraction) and absolute token counts
     # share one map. The default is usage-driven: compact at 85% of the model's
@@ -393,6 +403,13 @@ class Config(BaseModel):
     # in. Non-interactive runs (pipe / CI / ``--mock``) and a stopped/disconnected
     # web run reject by default (fail-closed). See ``harness/interaction.py``.
     confirm: str | list[str] = "none"
+    # Agent-loop safety valve: a hard ceiling on tool-call steps (completed
+    # tool-rounds) within a SINGLE turn, independent of cost. The default product
+    # prices LLMs at 0, so ``cost_limit`` alone is no guard against a looping /
+    # runaway model — once a turn reaches this many steps the loop stops cleanly at
+    # the step boundary with a ``max_steps`` stop reason (continue the session to run
+    # past it). 0 = unlimited (rely on ``cost_limit`` / Stop instead).
+    max_steps: int = Field(default=50, ge=0)
 {% if spec.mcp.enabled %}    mcp: McpConfig = Field(default_factory=McpConfig)
 {% endif %}{% if spec.skills.enabled %}    skills: SkillsConfig = Field(default_factory=SkillsConfig)
 {% endif %}{% if spec.memory.enabled %}    memory: MemoryConfig = Field(default_factory=MemoryConfig)

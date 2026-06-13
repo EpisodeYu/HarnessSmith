@@ -35,8 +35,22 @@ if TYPE_CHECKING:
 
 _SUMMARY_PROMPT = (
     "Summarize the earlier conversation below concisely, preserving facts, "
-    "decisions, and any open tasks. Output only the summary."
+    "decisions, and any open tasks. If an existing summary is included, merge it "
+    "with the newer messages into a SINGLE cohesive summary. Output only the summary."
 )
+
+# A compaction summary note is a system message starting with this marker. Tagging
+# it lets a later compaction find the prior note and fold it into ONE merged note
+# instead of stacking a fresh note every time (which would grow without bound).
+_SUMMARY_NOTE_PREFIX = "Summary of earlier conversation:"
+
+
+def _is_summary_note(message: dict) -> bool:
+    """Whether ``message`` is a compaction summary note (so it can be merged, not
+    stacked, on the next compaction)."""
+    return message.get("role") == "system" and str(
+        message.get("content") or ""
+    ).startswith(_SUMMARY_NOTE_PREFIX)
 
 
 @dataclass
@@ -129,29 +143,56 @@ def _cond_max_turns(messages: list[dict], threshold: float) -> bool:
     return count_turns(messages) > threshold
 
 
-def _split_keep_last_turns(messages: list[dict], keep_last_turns: int):
-    """Split into (system, dropped, kept) where kept starts at a user turn.
+def _round_start_indices(rest: list[dict]) -> list[int]:
+    """Indices in ``rest`` of each assistant message that OPENS a tool-round (it has
+    ``tool_calls``); its tool results follow until the next such message. These are
+    the legal sub-turn cut points — cutting here never separates a tool result from
+    the assistant tool_calls it answers."""
+    return [
+        i
+        for i, m in enumerate(rest)
+        if m.get("role") == "assistant" and m.get("tool_calls")
+    ]
 
-    Kept messages are returned as the same dict objects (never rebuilt), so a
-    tool-calling assistant keeps its ``reasoning_content`` carrier — reasoning
-    endpoints 400 if that is stripped from a surviving tool-call message. Any new
-    strategy must preserve that key when it keeps a tool-calling assistant.
+
+def _split_for_compaction(messages: list[dict], keep_last_turns: int, keep_last_steps: int):
+    """Split into (system, dropped, kept), keeping the most recent tail bounded by
+    BOTH floors — at most ``keep_last_turns`` user turns AND at most
+    ``keep_last_steps`` tool-rounds — whichever cuts MORE.
+
+    The round floor decouples compaction from the user-turn boundary: a single long
+    agentic turn (one user message, many tool rounds) can be folded mid-turn, so the
+    overflow rescue's ``force`` pass is never a guaranteed no-op and the keep floor
+    can't sit above a low token threshold forever.
+
+    Kept messages are the same dict objects (never rebuilt), so a tool-calling
+    assistant keeps its ``reasoning_content`` carrier — reasoning endpoints 400 if
+    that is stripped from a surviving tool-call message. The cut always lands on a
+    legal boundary (a user message or an assistant that opens a round); any orphan
+    leading tool result is dropped so a tool result never precedes its tool_calls.
     """
     system = [m for m in messages if m.get("role") == "system"]
     rest = [m for m in messages if m.get("role") != "system"]
 
+    # Turn floor: start of the last `keep_last_turns` user turns (lower index keeps
+    # more); 0 when there aren't that many turns.
     seen = 0
-    cut = 0
+    turn_cut = 0
     for i in range(len(rest) - 1, -1, -1):
         if rest[i].get("role") == "user":
             seen += 1
             if seen >= keep_last_turns:
-                cut = i
+                turn_cut = i
                 break
+
+    # Round floor: start of the last `keep_last_steps` tool-rounds; 0 when fewer.
+    rounds = _round_start_indices(rest)
+    step_cut = rounds[-keep_last_steps] if len(rounds) > keep_last_steps else 0
+
+    cut = max(turn_cut, step_cut)  # the more recent boundary => the smaller tail
     kept = rest[cut:]
-    # A clean turn starts at a user message — drop any orphan lead-in so we
-    # never send a tool result without its preceding assistant tool_calls.
-    while kept and kept[0].get("role") != "user":
+    # Never open the kept block on an orphan tool result (its tool_calls were dropped).
+    while kept and kept[0].get("role") == "tool":
         kept = kept[1:]
     dropped = rest[: len(rest) - len(kept)]
     return system, dropped, kept
@@ -168,7 +209,9 @@ def _strategy_none(
 def _strategy_truncate(
     messages: list[dict], ctx: ContextConfig, *, summarizer: LLMClient | None = None
 ) -> list[dict]:
-    system, dropped, kept = _split_keep_last_turns(messages, ctx.keep_last_turns)
+    system, dropped, kept = _split_for_compaction(
+        messages, ctx.keep_last_turns, ctx.keep_last_steps
+    )
     if not dropped:
         return messages
     return system + kept
@@ -178,15 +221,24 @@ def _strategy_truncate(
 def _strategy_summarize(
     messages: list[dict], ctx: ContextConfig, *, summarizer: LLMClient | None = None
 ) -> list[dict]:
-    system, dropped, kept = _split_keep_last_turns(messages, ctx.keep_last_turns)
+    system, dropped, kept = _split_for_compaction(
+        messages, ctx.keep_last_turns, ctx.keep_last_steps
+    )
     if not dropped:
         return messages
     if summarizer is None:  # no compaction client wired -> fall back to truncate
         return system + kept
-    convo = [{"role": "system", "content": _SUMMARY_PROMPT}, *dropped]
+    # Fold any EXISTING summary note(s) together with the newly dropped messages into
+    # ONE merged note, so the summary stack stays O(1) instead of growing one note
+    # per compaction (an old note otherwise survives in `system` and accrues forever).
+    real_system = [m for m in system if not _is_summary_note(m)]
+    prior_notes = [m for m in system if _is_summary_note(m)]
+    convo = [{"role": "system", "content": _SUMMARY_PROMPT}]
+    convo += [{"role": "user", "content": m["content"]} for m in prior_notes]
+    convo += dropped
     summary = summarizer.complete(convo, None).content or ""
-    note = {"role": "system", "content": f"Summary of earlier conversation:\n{summary}"}
-    return system + [note] + kept
+    note = {"role": "system", "content": f"{_SUMMARY_NOTE_PREFIX}\n{summary}"}
+    return real_system + [note] + kept
 
 
 class _AccountingSummarizer:
@@ -318,13 +370,22 @@ def fit(
 {% if spec.memory.enabled %}    # Let long-term memory rescue insight from the turns about to be dropped,
     # before the strategy discards/summarizes them (no-op unless a backend hooks it).
     if config is not None:
-        _, dropped, _ = _split_keep_last_turns(messages, ctx.keep_last_turns)
+        _, dropped, _ = _split_for_compaction(messages, ctx.keep_last_turns, ctx.keep_last_steps)
         if dropped:
             from .memory import compact_rescue
 
             compact_rescue(config, dropped)
 {% endif %}    fitted = strategy(messages, ctx, summarizer=summarizer)
-    log.debug(
-        "context: %s compacted %d -> %d messages", ctx.strategy, len(messages), len(fitted)
-    )
+    # A pass that didn't shrink the estimated size is a true no-op: the history is
+    # already at the keep floor (nothing older than keep_last_turns / keep_last_steps
+    # to drop). Outside the forced overflow rescue, return the original untouched and
+    # stay quiet, so a trigger threshold sitting below the keep floor can't spin the
+    # loop on pointless "N -> N" compactions every step. The forced path always adopts
+    # what it produced — it is the last resort before re-raising an overflow.
+    if not force and estimate_tokens(fitted) >= estimate_tokens(messages):
+        return messages
+    if fitted is not messages:
+        log.debug(
+            "context: %s compacted %d -> %d messages", ctx.strategy, len(messages), len(fitted)
+        )
     return fitted
