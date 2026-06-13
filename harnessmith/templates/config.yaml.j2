@@ -159,6 +159,11 @@ paradigms:
 observability:
   trace: {{ observability.trace | tojson }}
   trace_dir: {{ observability.trace_dir }}
+  # Opt-in trace redaction (default off = full fidelity). true masks tool-call
+  # `arguments` + tool `result` in the JSONL with a `[redacted N chars]` marker, so
+  # a secret passed as a tool argument never lands in traces/*.jsonl (names/counts
+  # /timings kept). Turn on for shared/retained traces; off for local debugging.
+  redact_trace: false
   # Local debug log (<debug_dir>/debug.log): step/tool/LLM lifecycle, for
   # troubleshooting. Local-only — never uploaded, never committed (gitignored);
   # records names/counts/durations/error types, NEVER message content or tool

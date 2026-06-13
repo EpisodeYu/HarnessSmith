@@ -34,6 +34,7 @@
 ### 停止入口
 - 产物 `interfaces/web.py` — `create_app` 加 `app.state.runs: dict[str, threading.Event]`(+ 锁);`_chat_events` 生成 `run_id`、建 `cancel`、首发 `event: run {run_id}`,worker 把 `cancel.is_set` 传进 `run_loop`;中断时 worker 仍 `save(部分 messages, status="interrupted")` 并发 `event: stopped`;`finally` 注销 `run_id`。`POST /chat/{run_id}/stop` 置位对应 `Event`(未知 id 幂等 200)。断连兜底(`Request.is_disconnected()` / `GeneratorExit`)置位同一 `Event`。
 - 产物 `interfaces/cli.py` — `run`/`chat` 装 SIGINT 处理器置位 `cancel`(不抛异常);返回 `interrupted` 时正常 `save`(标 `interrupted`)+ 打印「已停止,下次发送即可继续」;二次 Ctrl+C 硬退出。
+  - **issue #5 B2 加固(2026-06)**:`uv run` 下单次 Ctrl-C 流式中途,uv 可在 cli 收尾 `save` 之前杀子进程(退出 130),旧版最后落盘只剩每步 `running` checkpoint(可续跑但状态标签误导)。修复:① SIGINT 处理器首次触发即 `on_stop` **同步原子写 `interrupted`**(抢在 uv 杀进程之前);② 写前闸 checkpoint cancel-aware(取消在途时落 `interrupted` 非 `running`);③ `except KeyboardInterrupt` 兜底再写一次。`status_of` 文档点明:磁盘上读到的 `running` = 上一轮未净结(崩溃/被杀),按 interrupted 等价处理、非「仍在跑」。
 
 ### 继续(Tier B:崩溃安全)
 - 产物 `harness/session.py` — ① 记录加 `status: "running" | "complete"`;`save` 接 `status`,**原子写**(写 `.tmp` + `os.replace`)。② 新增 `checkpoint(session_id, messages, dir)` = per-step write-ahead(每步完成以 `status="running"` 原子重写)。③ 新增 `repair_orphan_tool_results(messages)`:扫描 assistant `tool_calls` 缺失的 `tool_call_id`,补合成 `{"role":"tool","tool_call_id":...,"content":"ERROR: interrupted"}`;`load`/`resolve` 载入时若 `status!="complete"` 或检出悬挂 tool_use 即修复。

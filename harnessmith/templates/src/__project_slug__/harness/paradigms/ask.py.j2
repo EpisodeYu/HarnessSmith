@@ -74,7 +74,11 @@ def run(
     profile = config.profile_for(role)
     if trace is None:
         obs = config.observability
-        trace = Trace(trace_dir=obs.trace_dir if obs.trace else None, enabled=obs.trace)
+        trace = Trace(
+            trace_dir=obs.trace_dir if obs.trace else None,
+            enabled=obs.trace,
+            redact=obs.redact_trace,
+        )
     # Attach the persistent per-LLM cost ledger (cross-run spend + cost limits)
     # unless a caller already wired one (e.g. a test injecting an isolated ledger).
     if trace.ledger is None:

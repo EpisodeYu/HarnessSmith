@@ -1839,8 +1839,9 @@ def test_context_custom_condition_and_strategy_are_pluggable():
 
 
 def test_cli_info_lists_registered_and_flags_unregistered(tmp_path):
-    """`<pkg> info` reports registered paradigms/strategies/conditions vs what
-    config selects, and flags a selected name that isn't registered."""
+    """`<pkg> info` reports registered tools (name + risk + enabled state) and
+    paradigms/strategies/conditions vs what config selects, and flags a selected
+    name that isn't registered."""
     import yaml
     from typer.testing import CliRunner
 
@@ -1853,10 +1854,62 @@ def test_cli_info_lists_registered_and_flags_unregistered(tmp_path):
 
     result = CliRunner().invoke(app, ["info", "--config", str(cfg_file)])
     assert result.exit_code == 0, result.output
+    # B1: tools section with risk + allowlist state (the one CLI view of what's armed).
+    assert "tools (registered):" in result.output
+    assert "get_current_time" in result.output and "risk=safe" in result.output
+    assert "(enabled)" in result.output
     assert "agent" in result.output
     assert "truncate" in result.output and "summarize" in result.output
     assert "max_tokens" in result.output
     assert "ghost" in result.output  # enabled but not registered -> flagged
+
+
+@pytest.mark.skipif(
+    __import__("sys").platform == "win32",
+    reason="self-delivered SIGINT behaves differently on Windows",
+)
+def test_interruptible_fires_on_stop_on_first_sigint():
+    """B2: the FIRST Ctrl-C sets the cancel token AND fires on_stop synchronously in
+    the handler — so the CLI can persist an `interrupted` status to disk before a
+    `uv run` SIGINT can kill the process (exit 130) ahead of the normal save."""
+    import os
+    import signal
+    import time
+
+    from {{ project_slug }}.interfaces.cli import _interruptible
+
+    saved: list[str] = []
+    with _interruptible(on_stop=lambda: saved.append("interrupted")) as cancel:
+        assert cancel() is False
+        os.kill(os.getpid(), signal.SIGINT)
+        deadline = time.time() + 2.0
+        while not cancel() and time.time() < deadline:
+            time.sleep(0.005)
+    assert cancel() is True  # first SIGINT cooperatively cancelled (did not raise)
+    assert saved == ["interrupted"]  # on_stop ran exactly once, in the handler
+
+
+def test_trace_redaction_masks_tool_args_and_results(tmp_path):
+    """B3: with redaction on, tool-call arguments + tool results are masked in the
+    JSONL — a secret passed as an argument never lands on disk — while tool names
+    and counts are kept. Default (off) keeps full fidelity."""
+    secret = "sk-supersecret-value"
+    args = json.dumps({"cmd": secret})
+    redacted = Trace(trace_dir=str(tmp_path / "tr"), enabled=True, redact=True)
+    redacted.event("tool_call", name="run_shell", arguments=args)
+    redacted.event("tool_result", name="run_shell", result="token=" + secret)
+    redacted.event("llm_response", step=0, prompt_tokens=10)
+    redacted.close()
+    text = redacted.path.read_text()
+    assert secret not in text  # neither arg nor result leaked
+    assert "[redacted" in text
+    assert "run_shell" in text  # tool name kept
+    assert "prompt_tokens" in text  # non tool events untouched
+
+    plain = Trace(trace_dir=str(tmp_path / "tr2"), enabled=True)  # redact defaults off
+    plain.event("tool_call", name="run_shell", arguments=args)
+    plain.close()
+    assert secret in plain.path.read_text()  # full fidelity by default
 
 
 def _write_config(tmp_path, cfg_dict):

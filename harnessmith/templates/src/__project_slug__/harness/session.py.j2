@@ -115,7 +115,10 @@ def status_of(session_id: str, sessions_dir: str) -> str:
     """The session's stored ``status`` (``"complete"`` if none / unknown).
 
     ``"running"`` means a turn was checkpointed but never cleanly finished (a hard
-    crash); ``"interrupted"`` means it was stopped on purpose (Stop / Ctrl-C).
+    crash, or a Ctrl-C under ``uv run`` that killed the process before the
+    interrupt-time save landed); ``"interrupted"`` means it was stopped on purpose
+    (Stop / Ctrl-C). Both are resumable — :func:`load` repairs any non-``complete``
+    session — so treat a persisted ``"running"`` as interrupted-equivalent, not live.
     """
     return _read(session_id, sessions_dir).get("status", "complete")
 

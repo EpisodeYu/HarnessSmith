@@ -266,7 +266,9 @@ extensions:
 ```
 
 The CLI, `serve`, and `{{ project_slug }} info` import these first, so your
-registrations show up in `info`{% if interfaces.web %} / `GET /registries`{% endif %} and are selectable by name. A
+registrations show up in `info`{% if interfaces.web %} / `GET /registries`{% endif %} and are selectable by name. `info`
+also lists every registered tool with its risk level and whether the allowlist has
+it enabled — the one CLI view of what's armed before a non-interactive run. A
 config name that still doesn't resolve is reported: hard errors for a role's
 profile / a paradigm / the context strategy (fail-fast), and a warning for a
 context condition{% if spec.memory.enabled %} / memory backend{% endif %} that isn't registered (skipped at runtime —
@@ -431,7 +433,11 @@ and a Clear button) or from the CLI:
 ```
 
 Every run also writes a JSONL trace under the configured `trace_dir` with per-step
-token counts and cost. Inspect a run with `cat traces/run-*.jsonl`.
+token counts and cost. Inspect a run with `cat traces/run-*.jsonl`. The trace
+records tool arguments and results in full; if a secret can reach a tool as an
+argument (or be echoed in a result) and you share/retain traces, set
+`observability.redact_trace: true` to mask those fields with a `[redacted N chars]`
+marker (tool names, counts, and timings are kept).
 
 For troubleshooting there is also an opt-in **local debug log**
 (`observability.debug: true`, written to `<debug_dir>/debug.log`, toggleable

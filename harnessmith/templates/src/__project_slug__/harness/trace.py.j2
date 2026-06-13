@@ -44,6 +44,10 @@ class Trace:
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     trace_dir: str | None = None
     enabled: bool = True
+    # Mask tool-call arguments + tool results in the JSONL (opt-in; from
+    # ``observability.redact_trace``) so a secret passed as a tool argument never
+    # lands on disk. Names/counts/timings are untouched.
+    redact: bool = False
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cached_prompt_tokens: int = 0
@@ -72,6 +76,12 @@ class Trace:
         return self.prompt_tokens + self.completion_tokens
 
     def event(self, kind: str, **data: Any) -> None:
+        if self.redact and kind in ("tool_call", "tool_result"):
+            # Replace the content-bearing fields with a length marker; a secret
+            # passed as a tool argument (or echoed in a result) never reaches disk.
+            for key in ("arguments", "result"):
+                if data.get(key) is not None:
+                    data[key] = f"[redacted {len(str(data[key]))} chars]"
         record = {"ts": time.time(), "run_id": self.run_id, "event": kind, **data}
         if self._fh is not None:
             self._fh.write(json.dumps(record, ensure_ascii=False) + "\n")

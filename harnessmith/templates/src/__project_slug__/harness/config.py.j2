@@ -185,6 +185,12 @@ class ObservabilityConfig(BaseModel):
 
     trace: bool = True
     trace_dir: str = "traces"
+    # Opt-in trace redaction (default off — full fidelity). When true, the JSONL
+    # trace masks a tool call's ``arguments`` and a tool result's ``result`` with a
+    # ``[redacted N chars]`` marker, so a secret passed as a tool argument (or echoed
+    # in a result) never lands in ``traces/*.jsonl``. Tool names, counts, and timings
+    # are kept. Turn it on for shared/retained traces; leave off for local debugging.
+    redact_trace: bool = False
     # Opt-in local debug log (see ``harness/debuglog.py``): step/tool/LLM/config
     # lifecycle for troubleshooting. Local-only — never uploaded, and it records
     # names/counts/durations/error types, never message content or tool

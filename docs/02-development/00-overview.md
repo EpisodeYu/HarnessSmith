@@ -125,6 +125,7 @@ spec 决定**结构**（哪些能力被编译进产物）；产物 `config.yaml`
 - `src/<pkg>/harness/` — `config` / `loop` / `llm` / `llm_anthropic` / `tools` / `trace` / `usage` / `debuglog` / `prompts` / `hooks` / `session` / `interaction`（+ `context`、`paradigms/`、`mcp.py` opt-in、`skills.py` opt-in、`memory.py` opt-in、`rag.py` v1+）。
   - `usage.py` = 按 LLM 持久 cost 账本（`UsageLedger` → `.harness/usage.json`，cost 由单价派生，`cost_limit` 到达 block_stop）。
   - `debuglog.py` = 可选本地 debug 日志（`observability.debug` 运行期开关，只记名称/计数/耗时，绝不记内容/参数/密钥，绝不上传）。
+  - `trace.py` = 每 run 一份 JSONL（含 tool 参数 + 完整结果，比 debug 全）；可选 `observability.redact_trace`（默认关）把 tool 参数/结果替换为 `[redacted N chars]`，避免以参数传入的密钥落 `traces/*.jsonl`（issue #5 B3）。
 - `src/<pkg>/interfaces/` — `cli.py`（`run` / `chat` / …，+`--mode`）（+ `web.py` SSE chat + `/config` + 范式下拉，opt-in）（+ `tui.py` 全屏终端 agent，opt-in）。
 - `tests/` + `README.md` + `AGENTS.md`（扩展指南）。
 

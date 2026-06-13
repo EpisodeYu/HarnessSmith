@@ -58,7 +58,7 @@ def _main() -> None:
 
 
 @contextlib.contextmanager
-def _interruptible():
+def _interruptible(on_stop=None):
     """Make a turn stoppable with Ctrl-C, yielding a cooperative cancel predicate.
 
     The first SIGINT sets the cancel token: the loop stops at the next boundary
@@ -66,6 +66,11 @@ def _interruptible():
     can resume. A second SIGINT restores the default handler and exits hard. Off
     the main thread (where signals can't be trapped) it yields a never-cancel
     predicate, so the call still works — it just won't be interruptible.
+
+    ``on_stop`` (best-effort, called once on the first SIGINT) lets the caller
+    persist an ``interrupted`` status to disk *synchronously in the handler* —
+    before ``uv run`` can kill the child (exit 130) ahead of the normal post-run
+    save, which would otherwise leave a misleading ``running`` checkpoint.
     """
     event = threading.Event()
 
@@ -74,6 +79,11 @@ def _interruptible():
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             raise KeyboardInterrupt
         event.set()
+        if on_stop is not None:
+            try:
+                on_stop()
+            except Exception:
+                log.debug("interrupt on_stop save failed", exc_info=True)
         typer.secho(
             "\nstopping after this step… (Ctrl-C again to force quit)",
             fg=typer.colors.YELLOW,
@@ -399,22 +409,44 @@ def run(
             thinking_shown = True
             typer.secho("· thinking …", fg=typer.colors.BRIGHT_BLACK, err=True)
 
+    # Latest checkpointed body + live cancel predicate, so an interrupt can persist
+    # the right status from the SIGINT handler (B2: beat the uv-run kill race).
+    _last_body: list[dict] = list(history or [])
+    _cancel = {"fn": (lambda: False)}
+
+    def _save_interrupted() -> None:
+        if sessions_cfg.enabled and session_id is not None:
+            session_store.save(
+                session_id,
+                _last_body,
+                sessions_cfg.dir,
+                mode=(mode or config.paradigms.default),
+                status="interrupted",
+                cwd=working_dir,
+            )
+
     def _checkpoint(body: list[dict]) -> None:
         # Write-ahead each completed step so a crash mid-turn still leaves a
-        # resumable session on disk (status "running").
+        # resumable session on disk. Once a Stop is in flight, label it
+        # "interrupted" (not "running") so a uv-run SIGINT that kills the process
+        # before the post-run save still leaves the correct status on disk.
+        nonlocal _last_body
+        _last_body = body
         if sessions_cfg.enabled and session_id is not None:
-            session_store.checkpoint(
+            session_store.save(
                 session_id,
                 body,
                 sessions_cfg.dir,
                 mode=(mode or config.paradigms.default),
+                status="interrupted" if _cancel["fn"]() else "running",
                 cwd=working_dir,
             )
 
     try:
-        with _interruptible() as cancel, using_asker(_cli_asker(mock)), using_confirmer(
-            _build_confirmer(config, config_path)
-        ):
+        with _interruptible(on_stop=_save_interrupted) as cancel, using_asker(
+            _cli_asker(mock)
+        ), using_confirmer(_build_confirmer(config, config_path)):
+            _cancel["fn"] = cancel
             result = run_loop(
                 prompt,
                 mode=mode,
@@ -429,6 +461,10 @@ def run(
                 checkpoint=_checkpoint,
                 working_dir=working_dir,
             )
+    except KeyboardInterrupt:
+        # Hard second Ctrl-C: persist the interrupted status before exiting 130.
+        _save_interrupted()
+        raise typer.Exit(code=130)
     except ValueError as exc:  # bad --mode / invalid config value
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
@@ -552,15 +588,35 @@ def chat(
             state["thinking_shown"] = True
             typer.secho("· thinking …", fg=typer.colors.BRIGHT_BLACK, err=True)
 
+    # Latest checkpointed body + live cancel predicate (reset each turn below), so an
+    # interrupt can persist the right status from the SIGINT handler (B2).
+    chat_turn = {"last_body": list(history), "cancel": (lambda: False)}
+
+    def _save_interrupted() -> None:
+        if sessions_cfg.enabled:
+            session_store.save(
+                session_id,
+                chat_turn["last_body"],
+                sessions_cfg.dir,
+                mode=(mode or config.paradigms.default),
+                status="interrupted",
+                cwd=_chat_working_dir(),
+            )
+
     def _checkpoint(body: list[dict]) -> None:
         # Write-ahead each completed step (crash safety): the chat session is
         # always saved on disk, so a kill mid-turn leaves a resumable conversation.
+        # Once a Stop is in flight, label it "interrupted" (not "running") so a
+        # uv-run SIGINT killing the process before the post-turn save still lands the
+        # correct status on disk.
+        chat_turn["last_body"] = body
         if sessions_cfg.enabled:
-            session_store.checkpoint(
+            session_store.save(
                 session_id,
                 body,
                 sessions_cfg.dir,
                 mode=(mode or config.paradigms.default),
+                status="interrupted" if chat_turn["cancel"]() else "running",
                 cwd=_chat_working_dir(),
             )
 
@@ -608,8 +664,12 @@ def chat(
 {% endif %}            state["printed"] = False
             state["thinking_shown"] = False
             working_dir = _chat_working_dir()
+            chat_turn["last_body"] = list(history)
             try:
-                with _interruptible() as cancel, using_asker(asker), using_confirmer(confirmer):
+                with _interruptible(on_stop=_save_interrupted) as cancel, using_asker(
+                    asker
+                ), using_confirmer(confirmer):
+                    chat_turn["cancel"] = cancel
                     result = run_loop(
                         prompt,
                         mode=mode,
@@ -624,6 +684,11 @@ def chat(
                         checkpoint=_checkpoint,
                         working_dir=working_dir,
                     )
+            except KeyboardInterrupt:
+                # Hard second Ctrl-C: persist interrupted, then leave the REPL.
+                _save_interrupted()
+                typer.echo("")
+                break
             except Exception as exc:  # one bad turn shouldn't end the whole session
                 if state["printed"]:
                     typer.echo("")
@@ -790,6 +855,27 @@ def info(
                 f"  ! {name} — selected but NOT registered (import its module?)",
                 fg=typer.colors.YELLOW,
             )
+
+    from ..harness.tools import in_allowlist
+    from ..harness.tools import registry as tool_registry
+
+    enabled = config.enabled_tool_names()
+    typer.secho("tools (registered):", fg=typer.colors.CYAN)
+    for name in sorted(tool_registry.names()):
+        state = "enabled" if in_allowlist(name, enabled) else "off"
+        typer.echo(f"  - {name}  risk={tool_registry.risk_of(name)}  ({state})")
+    # Allowlisted names with no registered tool right now: MCP `<server>__*` tools
+    # register only when their server connects at runtime, so this is expected here
+    # (info starts no MCP manager) — or, for a plain name, a typo worth checking.
+    registered = set(tool_registry.names())
+    unloaded = sorted(n for n in enabled if n and n not in registered)
+    if unloaded:
+        typer.secho(
+            "  allowlisted, not loaded now (MCP registers at runtime; else check a typo):",
+            fg=typer.colors.YELLOW,
+        )
+        for name in unloaded:
+            typer.echo(f"    · {name}")
 
     _section("paradigms (registered):", list(PARADIGMS), set(config.paradigms.enabled))
     typer.echo(f"  default: {config.paradigms.default}")
