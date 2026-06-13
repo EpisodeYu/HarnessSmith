@@ -537,19 +537,20 @@ the loop is untouched. `config.yaml` is prefilled with a baseline:
 - **`git`** (`uvx mcp-server-git`) — read tools (`git_status`/`git_diff`/`git_log`/
   …) **on**; mutating tools (`git_commit`/`git_add`/…) **off**.
 - **`desktop-commander`** (`npx @wonderwhy-er/desktop-commander`) — terminal +
-  filesystem; predefined but **all off** (high-risk). Needs Node. Flip a tool to
-  `true` to enable.
+  filesystem; **read tools** (`read_file`/`list_directory`/`start_search`/…) are
+  `safe` (so `plan`/`ask` can read files too), **write/shell/config tools** are
+  `high`-risk (agent-only). Enabled via the `desktop-commander__*` wildcard; needs Node.
 
 The system prompt tells the model which capabilities are installed-but-disabled
-(and how to enable them), so a turned-off server like Desktop Commander is never
-*silently* missing — the agent will ask you to enable it when a task needs it.
+(and how to enable them), so a turned-off server is never *silently* missing —
+the agent will ask you to enable it when a task needs it.
 
 A discovered tool is offered to the model **only** when allowlisted in `tools:`
 as `<server>__<tool>`. Per-tool risk: a name listed in the server's `safe_tools`
 registers as `risk="safe"` (read-only — also offered to the `plan`/`ask`
 paradigms); everything else is `risk="high"` (mutating; agent-only). A server is
-launched **only when at least one of its tools is enabled**, so the off-by-default
-Desktop Commander stays dormant until you opt in. Secrets (`env` / `auth_env`)
+launched **only when at least one of its tools is enabled**, so a server with no
+enabled tools stays dormant until you opt one in. Secrets (`env` / `auth_env`)
 are referenced by env-var **name** and resolved from `.env` at runtime.
 {% if interfaces.web %}
 You don't have to write the `<server>__<tool>` lines by hand: in the web **Config

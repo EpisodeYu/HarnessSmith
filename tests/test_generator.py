@@ -596,6 +596,12 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     # Every prefilled server is enabled via its wildcard — all tools on by default.
     assert {"fetch__*", "ddg-search__*", "git__*", "desktop-commander__*"} <= enabled
 
+    # Desktop Commander's read tools land in safe_tools so the read-only plan/ask
+    # paradigms can read files/list dirs/search code; write/shell stay high-risk.
+    dc = next(s for s in config["mcp"]["servers"] if s["name"] == "desktop-commander")
+    assert "read_file" in dc["safe_tools"] and "list_directory" in dc["safe_tools"]
+    assert "write_file" not in dc["safe_tools"] and "start_process" not in dc["safe_tools"]
+
 
 def test_mcp_prefill_servers_do_not_leak_into_spec_snapshot(tmp_path, preset_spec):
     """Servers are a runtime knob: they go to config.yaml, never the spec/snapshot."""

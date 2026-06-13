@@ -62,7 +62,7 @@
 - **② 官方 `git` 预置**:`uvx mcp-server-git` 进基线;catalog 不钉死 `--repository`(理由见 §0)。
 - **③ 标准 SKILL 支持放本片**(与工具基线一起)。
 - **④ `spec.skills` 字段**:只加结构性开关 `skills.enabled: bool = False`(对齐 `mcp.enabled`);技能目录是运行期行为旋钮(`config.yaml skills.dirs`,默认 `["skills"]`),不进 spec。
-- **⑤ MCP 工具风险分级**:不再「一律 HIGH」,改按工具风险标注(catalog 标 fetch/ddg-search/git 读类为 `safe`、写类为 `high`;`McpServerConfig.safe_tools` 字段,`register_mcp_tools` 据此设 `risk`)。只读范式 plan/ask 也能用读类;未列入 `safe_tools` 的发现工具一律 `high`(fail-safe)。
+- **⑤ MCP 工具风险分级**:不再「一律 HIGH」,改按工具风险标注(catalog 标 fetch/ddg-search/git/desktop-commander 读类为 `safe`、写/shell/config-mutating 类为 `high`;`McpServerConfig.safe_tools` 字段,`register_mcp_tools` 据此设 `risk`)。只读范式 plan/ask 也能用读类;未列入 `safe_tools` 的发现工具一律 `high`(fail-safe)。**DC 读类必须标 safe**——否则装了 Desktop Commander 作基线能力的产物在 plan/ask 下完全没有文件读取能力(读文件/列目录/搜代码全被挡)。
 - **⑥ 推进方式 = split**:先做 Part A(工具基线 + catalog + 离线/Docker + 风险分级),再做 Part B(标准 SKILL)。
 - **⑦ 联网搜索进基线**:`ddg-search`(免 key)进 catalog 并默认开,给 agent 真正的「搜→读」。
 - **⑧ shell/写默认关如何不「静默失能」**:shell/写仍默认关(DC 一键开、需 Node),但系统提示注入「环境感知」暴露预置但禁用的能力 + 如何开。

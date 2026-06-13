@@ -76,21 +76,37 @@ servers:
       - {name: git_init, risk: high, default_enabled: false}
 
   desktop-commander:
-    description: Terminal command execution + full filesystem read/write/edit (powerful; all tools high-risk, default off).
+    description: Terminal command execution + full filesystem read/write/edit (powerful; read tools safe, write/shell high-risk).
     transport: stdio
     command: npx
     args: ["-y", "@wonderwhy-er/desktop-commander@latest"]
     requires: node
     source: https://github.com/wonderwhy-er/DesktopCommanderMCP
-    updated: "2026-01-23"
-    # A representative subset (Desktop Commander exposes ~30 tools). All high-risk;
-    # the prefilled `desktop-commander__*` wildcard enables the whole set (needs Node).
+    updated: "2026-06-13"
+    # A representative subset (Desktop Commander exposes ~26 tools). The prefilled
+    # `desktop-commander__*` wildcard enables the WHOLE discovered set (needs Node);
+    # the per-tool `risk` below grades it. Read-only tools are `safe` so the
+    # read-only plan/ask paradigms can use them too (without them, plan/ask get NO
+    # filesystem access at all — see Slice 5); write/shell/config-mutating tools are
+    # `high` (agent-only, HITL-gated). Risk grading matches the discovered tools BY
+    # NAME, so naming the real read-only tools here is what lets plan/ask read files.
     tools:
-      - {name: read_file, risk: high, default_enabled: false}
+      # Read-only (safe): also offered to the read-only plan/ask paradigms.
+      - {name: read_file, risk: safe, default_enabled: false}
+      - {name: read_multiple_files, risk: safe, default_enabled: false}
+      - {name: list_directory, risk: safe, default_enabled: false}
+      - {name: get_file_info, risk: safe, default_enabled: false}
+      - {name: start_search, risk: safe, default_enabled: false}
+      - {name: get_more_search_results, risk: safe, default_enabled: false}
+      - {name: list_searches, risk: safe, default_enabled: false}
+      # Mutating / shell / config writes (high): agent-only, off by default.
       - {name: write_file, risk: high, default_enabled: false}
       - {name: edit_block, risk: high, default_enabled: false}
-      - {name: list_directory, risk: high, default_enabled: false}
+      - {name: create_directory, risk: high, default_enabled: false}
+      - {name: move_file, risk: high, default_enabled: false}
+      - {name: set_config_value, risk: high, default_enabled: false}
       - {name: start_process, risk: high, default_enabled: false}
+      - {name: kill_process, risk: high, default_enabled: false}
 
   # --- Extra candidates (not in the coding-assistant baseline). Add with
   #     `--mcp-server <name>` or paste the server block into config.yaml. ---

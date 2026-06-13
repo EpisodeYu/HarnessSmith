@@ -56,8 +56,16 @@ def test_desktop_commander_is_node_and_wildcard_enabled():
     assert dc.command == "npx"
     assert dc.requires == "node"
     assert dc.uvx_package is None  # not baked into the image
-    assert dc.safe_tools == []  # every tool high-risk
-    # A single wildcard enables the server's whole toolset (every tool, all high-risk).
+    # Read-only tools are safe (so plan/ask can read files/list dirs/search code);
+    # write/shell/config-mutating tools stay high-risk (agent-only).
+    assert "read_file" in dc.safe_tools
+    assert "list_directory" in dc.safe_tools
+    assert "start_search" in dc.safe_tools
+    assert "write_file" not in dc.safe_tools  # mutating -> high
+    assert "start_process" not in dc.safe_tools  # shell -> high
+    assert "set_config_value" not in dc.safe_tools  # config write -> high
+    # A single wildcard enables the server's whole toolset (reads + writes/shell);
+    # `safe_tools` keeps the reads at risk=safe so plan/ask can use them.
     assert dc.allowlist_entries() == [{"name": "desktop-commander__*", "enabled": True}]
 
 
