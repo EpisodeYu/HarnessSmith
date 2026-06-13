@@ -174,6 +174,12 @@ _TITLE_PROMPT = (
 # stops a wedged title call from holding up the final save indefinitely.
 _TITLE_JOIN_TIMEOUT = 120.0
 
+# Hard cap on the /config "test" probe. The loop's profile may set a generous
+# timeout (or none — the SDK then defaults to 600s) and retries, both wrong for a
+# reachability check that should fail FAST. The probe overrides them with this and
+# zero retries so a dead endpoint reports in seconds, not minutes.
+_PROBE_TIMEOUT_SECONDS = 20.0
+
 
 def _generate_title(client, question: str) -> str:
     """Summarize the first user message into a short session title (best-effort).
@@ -915,18 +921,25 @@ def create_app(
 
     @app.post("/test-llm")
     async def test_llm(request: Request) -> dict:
-        """Probe one LLM profile with a real one-shot call. Returns ``{ok, error}``.
+        """Probe one LLM profile and return ``{ok, error}`` FAST.
 
-        Uses the SAME client path as the loop (so the result reflects real usage),
-        but probes with the LIGHTEST reasoning effort first: a thinking model would
-        otherwise deliberate ~20s over "ping" before the page can show PASSED, and
-        all we need to prove is reachable + authenticated + the model exists, not a
-        thoughtful reply. If the endpoint rejects the lighter setting (a plain model
-        that doesn't take ``reasoning_effort``), it retries with the profile as
-        configured so the result stays correct. Secrets stay server-side — the
-        request carries the env-var NAME, the key is resolved from .env here.
-        Obvious config gaps (no model, unresolved key with no custom base_url) are
-        reported up front without a network call.
+        All this needs to prove is reachable + authenticated + the model exists —
+        NOT a thoughtful reply. So it STREAMS and bails the instant the first chunk
+        lands (which only happens after the endpoint has accepted the request), then
+        closes the connection. A reasoning model (MiMo / DeepSeek-thinking / …) would
+        otherwise spend 5-10s deliberating over "ping" before a non-streaming call
+        returns — and lowering ``reasoning_effort`` doesn't help, the model thinks
+        regardless. First-chunk latency is ~1s instead, on reasoning and plain models
+        alike, so there is no reasoning-effort dance and no second probe.
+
+        Reliability is overridden for the probe (``_PROBE_TIMEOUT_SECONDS``, no
+        retries): the loop's profile may set a long/absent timeout + retries, which
+        would let a dead endpoint hang for minutes. The probe must fail in seconds.
+        Uses the same client class as the loop, so a genuine failure surfaces the
+        real provider error (401/404/timeout). Secrets stay server-side — the request
+        carries the env-var NAME, the key is resolved from .env here. Obvious config
+        gaps (no model, unresolved key with no custom base_url) are reported up front
+        without a network call.
         """
         body = await request.json()
         try:
@@ -943,20 +956,22 @@ def create_app(
                 "environment — set its value first (or configure a custom base_url)"
             )}
 
-        def _probe(p: LLMProfileConfig) -> None:
-            _client_for_profile(p).complete([{"role": "user", "content": "ping"}], None)
+        # Clamp reliability to a fast-fail check, then stream and stop at chunk #1
+        # (`cancel` returns True on the loop's first check — the chunk has already
+        # arrived from the network, proving the round-trip worked — so the stream is
+        # closed without waiting for the full answer).
+        probe = profile.model_copy(update={
+            "timeout_seconds": min(profile.timeout_seconds or _PROBE_TIMEOUT_SECONDS, _PROBE_TIMEOUT_SECONDS),
+            "max_retries": 0,
+        })
 
-        # Reasoning-light first so thinking models answer "ping" fast; fall back to
-        # the profile as-is if the endpoint rejects `reasoning_effort` (the retry
-        # also yields the authoritative error on a genuine failure).
-        light = profile.model_copy(update={"reasoning_effort": "low"})
+        def _probe() -> None:
+            _client_for_profile(probe).stream(
+                [{"role": "user", "content": "ping"}], None, cancel=lambda: True,
+            )
+
         try:
-            await run_in_threadpool(lambda: _probe(light))
-            return {"ok": True}
-        except Exception:
-            pass
-        try:
-            await run_in_threadpool(lambda: _probe(profile))
+            await run_in_threadpool(_probe)
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

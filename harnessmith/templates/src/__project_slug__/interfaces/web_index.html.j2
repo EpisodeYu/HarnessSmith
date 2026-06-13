@@ -347,7 +347,7 @@
         sys_import_done: "imported",
         sys_import_failed: "nothing to import",
         profiles_label: "LLM profiles", profile_add: "+ Add profile", profile_remove: "remove",
-        test_btn: "Test", test_running: "testing…",
+        test_btn: "Test", test_running: "testing…", test_timeout: "timed out — endpoint not responding",
         roles_label: "Roles", roles_hint: "Bind each role to a profile above.",
         role_generation: "generation (main loop)", role_compaction: "compaction (summarize)",
         role_title: "title (session naming)",
@@ -469,7 +469,7 @@
         sys_import_done: "已导入",
         sys_import_failed: "没有可导入的内容",
         profiles_label: "LLM 配置", profile_add: "+ 添加配置", profile_remove: "删除",
-        test_btn: "测试", test_running: "测试中…",
+        test_btn: "测试", test_running: "测试中…", test_timeout: "超时——端点无响应",
         roles_label: "角色", roles_hint: "把每个角色绑定到上面的某个配置。",
         role_generation: "generation(主循环)", role_compaction: "compaction(压缩)",
         role_title: "title(会话命名)",
@@ -2318,17 +2318,22 @@
         status.className = "p-teststatus text-xs text-slate-500";
         status.textContent = t("test_running");
         testBtn.disabled = true;
+        // Client-side deadline so the button never hangs forever if the server is
+        // wedged — a touch above the server's own probe cap to let its result win.
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 30000);
         try {
           const resp = await fetch("/test-llm", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(cardToProfile(row)),
+            body: JSON.stringify(cardToProfile(row)), signal: ctrl.signal,
           });
           const data = await resp.json();
           if (data.ok) { status.className = "p-teststatus text-xs font-semibold text-emerald-700"; status.textContent = "PASSED"; }
           else { status.className = "p-teststatus text-xs text-red-600"; status.textContent = data.error || t("cfg_invalid"); }
         } catch (err) {
-          status.className = "p-teststatus text-xs text-red-600"; status.textContent = String(err);
-        } finally { testBtn.disabled = false; }
+          status.className = "p-teststatus text-xs text-red-600";
+          status.textContent = err && err.name === "AbortError" ? t("test_timeout") : String(err);
+        } finally { clearTimeout(timer); testBtn.disabled = false; }
         return;
       }
       const isKey = e.target.closest(".p-setkey");

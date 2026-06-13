@@ -929,20 +929,27 @@ def test_test_llm_requires_a_model(monkeypatch):
     assert "model" in data["error"].lower()
 
 
-def test_test_llm_probes_with_lowered_reasoning_effort(monkeypatch):
-    """The probe sends the LIGHTEST reasoning effort first so a thinking model
-    answers "ping" fast instead of deliberating for seconds before PASSED."""
+def test_test_llm_streams_and_bails_on_first_chunk(monkeypatch):
+    """The probe STREAMS (not complete()) and stops at the first chunk: it passes
+    `cancel` to stream(), never waits for a full answer, and never lowers
+    reasoning_effort or probes twice — a reasoning model would otherwise deliberate
+    for seconds over "ping"."""
     import {{ project_slug }}.interfaces.web as webmod
     from {{ project_slug }}.harness.llm import LLMResponse
 
-    seen = []
+    calls = {"stream": 0, "complete": 0}
 
     class _FakeClient:
         def __init__(self, profile):
             self._profile = profile
 
+        def stream(self, messages, tools, *, cancel=None, **kw):
+            calls["stream"] += 1
+            assert cancel is not None and cancel() is True  # bails on first chunk
+            return LLMResponse(content="pong")
+
         def complete(self, messages, tools, **kw):
-            seen.append(self._profile.reasoning_effort)
+            calls["complete"] += 1
             return LLMResponse(content="pong")
 
     monkeypatch.setattr(webmod, "_client_for_profile", lambda p: _FakeClient(p))
@@ -951,32 +958,55 @@ def test_test_llm_probes_with_lowered_reasoning_effort(monkeypatch):
         "/test-llm", json={"name": "p", "model": "gpt-5", "reasoning_effort": "high"}
     )
     assert resp.status_code == 200 and resp.json()["ok"] is True
-    assert seen == ["low"]  # probed with the lighter effort, not the configured one
+    assert calls == {"stream": 1, "complete": 0}  # one streamed probe, no full call
 
 
-def test_test_llm_falls_back_when_effort_rejected(monkeypatch):
-    """If the lighter probe is rejected (a plain model that doesn't take
-    reasoning_effort), it retries with the profile as configured and still tests."""
+def test_test_llm_overrides_reliability_for_fast_fail(monkeypatch):
+    """The probe clamps the profile's timeout/retries so a dead endpoint fails in
+    seconds: ``max_retries`` is forced to 0 and ``timeout_seconds`` capped at the
+    probe limit, regardless of the (loop-tuned) profile values posted."""
     import {{ project_slug }}.interfaces.web as webmod
     from {{ project_slug }}.harness.llm import LLMResponse
 
-    seen = []
+    seen = {}
 
     class _FakeClient:
         def __init__(self, profile):
-            self._profile = profile
+            seen["timeout_seconds"] = profile.timeout_seconds
+            seen["max_retries"] = profile.max_retries
 
-        def complete(self, messages, tools, **kw):
-            seen.append(self._profile.reasoning_effort)
-            if self._profile.reasoning_effort == "low":
-                raise RuntimeError("unknown parameter: reasoning_effort")
+        def stream(self, messages, tools, *, cancel=None, **kw):
             return LLMResponse(content="pong")
 
     monkeypatch.setattr(webmod, "_client_for_profile", lambda p: _FakeClient(p))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    resp = _client().post("/test-llm", json={"name": "p", "model": "plain-chat"})
+    resp = _client().post(
+        "/test-llm",
+        json={"name": "p", "model": "m", "timeout_seconds": 600, "max_retries": 5},
+    )
     assert resp.status_code == 200 and resp.json()["ok"] is True
-    assert seen == ["low", None]  # tried lowered, then the profile as-is
+    assert seen["max_retries"] == 0
+    assert seen["timeout_seconds"] == webmod._PROBE_TIMEOUT_SECONDS  # capped, not 600
+
+
+def test_test_llm_reports_provider_error(monkeypatch):
+    """A genuine failure (auth/model/connection) surfaces the real provider error
+    string so the user can act on it."""
+    import {{ project_slug }}.interfaces.web as webmod
+
+    class _FakeClient:
+        def __init__(self, profile):
+            pass
+
+        def stream(self, messages, tools, *, cancel=None, **kw):
+            raise RuntimeError("Error code: 401 - Invalid API Key")
+
+    monkeypatch.setattr(webmod, "_client_for_profile", lambda p: _FakeClient(p))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    resp = _client().post("/test-llm", json={"name": "p", "model": "m"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False and "401" in data["error"]
 
 
 # --- Slice 9: stop / continue / re-ask over the web ------------------------
