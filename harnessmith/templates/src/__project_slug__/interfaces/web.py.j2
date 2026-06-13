@@ -893,7 +893,7 @@ def create_app(
         command — a local, trusted-user control (threat model A), so don't expose
         /config or /mcp publicly. See README "MCP management".
         """
-        from ..harness.config import McpServerConfig
+        from ..harness.config import McpServerConfig, ToolConfig
 
         body = await request.json()
         try:
@@ -901,8 +901,21 @@ def create_app(
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         config = app.state.config
+        existed = any(s.name == server.name for s in config.mcp.servers)
         config.mcp.servers = [s for s in config.mcp.servers if s.name != server.name] + [server]
-        _persist_config_keys(app, ["mcp"])
+        persist = ["mcp"]
+        # A newly added server defaults to its WHOLE toolset enabled — a
+        # `<server>__*` wildcard, exactly like preset-prefilled servers — so its
+        # tools are usable the moment it connects instead of every tool starting
+        # off. Only for a genuinely new server with no allowlist entry yet, so
+        # editing one never clobbers an intentionally narrowed list.
+        if not existed and not any(
+            t.name == f"{server.name}__*" or t.name.startswith(f"{server.name}__")
+            for t in config.tools
+        ):
+            config.tools.append(ToolConfig(name=f"{server.name}__*", enabled=True))
+            persist.append("tools")
+        _persist_config_keys(app, persist)
         await run_in_threadpool(lambda: _rebuild_mcp_manager(app))
         return await mcp_status()
 

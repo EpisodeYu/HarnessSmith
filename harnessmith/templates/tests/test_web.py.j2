@@ -87,6 +87,15 @@ def test_index_groups_tools_by_source():
     assert "tools_group_custom" in body  # user-registered tools sort to the top
     assert "<details" in body and 'indexOf("__")' in body  # MCP folded by server
     assert "tools_extend_hint" in body  # footnote: register + allowlist in config.yaml
+
+
+def test_index_new_profile_card_leaves_key_url_unmasked():
+    """A just-added LLM profile must not pre-fill its key/url with the masked dots
+    (the "already set in .env" sentinel) — those mislead on a fresh profile that
+    defaults to a shared env-var name. New cards render empty until saved+reloaded."""
+    body = _client().get("/").text
+    assert "profileCard({}, true)" in body  # the Add-profile button marks the card new
+    assert "!isNew && envSet(" in body  # a new card never masks the key/url box
 {% if spec.mcp.enabled %}
 import sys
 from pathlib import Path
@@ -231,6 +240,58 @@ def test_mcp_add_and_delete_server_persists_and_reconnects(tmp_path):
     resp = client.delete("/mcp/servers/dummy")
     assert resp.status_code == 200
     assert resp.json()["servers"] == []
+
+
+def test_mcp_add_server_enables_its_tools_by_default(tmp_path):
+    """A newly added server defaults to its WHOLE toolset enabled — a `<server>__*`
+    wildcard, like preset-prefilled servers — so its tools are usable the moment it
+    connects instead of starting disabled until each is ticked by hand."""
+    from {{ project_slug }}.harness.tools import registry
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "llms:\n  - name: default\n    model: mock-model\n"
+        "roles:\n  generation: default\n"
+        "observability:\n  trace: false\n"
+        "sessions:\n  enabled: false\n"
+        "mcp:\n  servers: []\n",
+        encoding="utf-8",
+    )
+    app = create_app(mock=True, config_path=cfg_path)
+    client = TestClient(app)
+    resp = client.post(
+        "/mcp/servers", json={"name": "dummy", "command": sys.executable, "args": [_DUMMY]}
+    )
+    assert resp.status_code == 200, resp.text
+    # The wildcard is persisted to the allowlist and offered to the model...
+    assert "dummy__*" in cfg_path.read_text(encoding="utf-8")
+    assert "dummy__*" in app.state.config.enabled_tool_names()
+    assert registry.get("dummy__add").name == "dummy__add"  # connected -> registered
+    # ...and discovery reflects every tool as enabled on the panel.
+    data = client.get("/mcp/discover").json()
+    tools = {t["short"]: t for t in data["servers"][0]["tools"]}
+    assert tools["add"]["enabled"] is True and tools["echo"]["enabled"] is True
+
+
+def test_mcp_edit_server_keeps_narrowed_allowlist():
+    """Editing an EXISTING server must not re-add a `<server>__*` wildcard — a
+    user who narrowed the allowlist to a few tools keeps that narrowing."""
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "dummy__echo", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "mcp": {"servers": [{"name": "dummy", "command": sys.executable, "args": [_DUMMY]}]},
+    })
+    app = create_app(config, mock=True)
+    client = TestClient(app)
+    resp = client.post(
+        "/mcp/servers", json={"name": "dummy", "command": sys.executable, "args": [_DUMMY]}
+    )
+    assert resp.status_code == 200, resp.text
+    names = {t.name for t in app.state.config.tools}
+    assert "dummy__*" not in names and "dummy__echo" in names  # narrowing preserved
 
 
 def test_mcp_add_server_rejects_invalid_config():

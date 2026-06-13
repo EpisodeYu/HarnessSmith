@@ -1695,8 +1695,11 @@
     const envSet = (name) => !!(name && envStatus[name]);
 
     // One LLM profile card: name/model + API key + base_url always visible;
-    // sampling knobs under "Advanced", per-1M prices under "Pricing".
-    function profileCard(p) {
+    // sampling knobs under "Advanced", per-1M prices under "Pricing". `isNew` (a
+    // just-added, never-saved card) never masks its key/url: the masked dots imply
+    // "already set in .env", which is misleading on a fresh profile that defaults
+    // to a shared env-var name — show the boxes empty until it's saved + reloaded.
+    function profileCard(p, isNew) {
       p = p || {};
       const reasoning = p.reasoning_effort || "";
       const reOpt = (v, label) =>
@@ -1716,8 +1719,8 @@
           "</div>" +
           "<button type='button' class='p-remove text-xs text-red-600'>" + t("profile_remove") + "</button>" +
         "</div>" +
-        keyRow("profile_key_section", "p-key", esc(p.api_key_env || "OPENAI_API_KEY"), "p-keyval", "p-setkey", "p-keystatus", t("set_key_ph"), t("set_key_btn"), "password", envSet(p.api_key_env || "OPENAI_API_KEY")) +
-        keyRow("profile_url_section", "p-baseurl", esc(p.base_url_env || "OPENAI_BASE_URL"), "p-urlval", "p-seturl", "p-urlstatus", t("set_url_ph"), t("set_url_btn"), "text", envSet(p.base_url_env || "OPENAI_BASE_URL")) +
+        keyRow("profile_key_section", "p-key", esc(p.api_key_env || "OPENAI_API_KEY"), "p-keyval", "p-setkey", "p-keystatus", t("set_key_ph"), t("set_key_btn"), "password", !isNew && envSet(p.api_key_env || "OPENAI_API_KEY")) +
+        keyRow("profile_url_section", "p-baseurl", esc(p.base_url_env || "OPENAI_BASE_URL"), "p-urlval", "p-seturl", "p-urlstatus", t("set_url_ph"), t("set_url_btn"), "text", !isNew && envSet(p.base_url_env || "OPENAI_BASE_URL")) +
         "<div class='flex items-center gap-2'>" +
           "<button type='button' class='p-test rounded border px-3 py-1 text-xs'>" + t("test_btn") + "</button>" +
           "<span class='p-teststatus text-xs'></span>" +
@@ -2467,7 +2470,7 @@
       $("cfg-status").textContent = "";
     }
     $("cfg-add-profile").addEventListener("click", () => {
-      $("cfg-profiles").appendChild(profileCard({}));
+      $("cfg-profiles").appendChild(profileCard({}, true));  // new card: key/url empty, not masked
       buildRoles();  // a new (empty) profile may already provide a name to bind
     });
     // Keep the role dropdowns in sync as profile names are typed; flag invalid

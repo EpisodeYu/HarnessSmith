@@ -565,9 +565,12 @@ unreachable (with the error) — plus its transport + tool counts and editable
 fields. Each server has its own **Reconnect** button (retry just that one without
 disturbing the others); **Reconnect all** rebuilds them together. Add / edit /
 delete a server there and it **reconnects immediately** (writing `config.yaml`
-back, env-var names only). This lets the product spawn local commands / reach URLs
-you configure — a **local, trusted control**, so don't expose `/config` or `/mcp`
-on a public network.
+back, env-var names only). A **newly added** server defaults to its whole toolset
+enabled (a `<server>__*` wildcard, like the prefilled servers), so its tools are
+usable the moment it connects — narrow it afterwards on the Tools tab; editing an
+existing server keeps the allowlist you already set. This lets the product spawn
+local commands / reach URLs you configure — a **local, trusted control**, so don't
+expose `/config` or `/mcp` on a public network.
 {% endif %}
 On the CLI, `{{ project_slug }} mcp status` health-checks every configured server
 (connectivity + tool counts; an unreachable server is shown with its error).

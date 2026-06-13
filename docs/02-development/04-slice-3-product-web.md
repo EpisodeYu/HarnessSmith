@@ -27,7 +27,7 @@
   - `GET /` — 单页前端(无构建,Tailwind CDN),含 chat 视图 + config 面板视图。
   - `/chat`(SSE)— `Hooks` 子类 + 后台线程驱动 `loop.run()`,推 `token`(默认开)/ `tool_call` / `tool_result` / `step` / `final` 事件。`?stream=false` 退化为纯进度事件 + 单次 `final`(供测试/程序化调用)。
   - `GET /config` / `POST /config` — 读 / 改运行期**行为性配置**(`_EDITABLE_FIELDS = llms/roles/prompts/tools/context/observability/budget`),改后进程内即时生效**且回写 `config.yaml`**(见 §2.4);绝不读写密钥真值(只可见 env 引用名)。结构性配置(`version`/`project_slug`)与 `secrets` 不可改。
-  - `POST /env` — write-only 写 `.env`(不回显);`GET /env-status` — 仅返回 `{NAME: bool}`(各 `api_key_env`/`base_url_env` 是否已设值),**布尔ONLY、key 与 url 一视同仁、绝不回读任何值**,供前端把已设的 key/url 渲染成统一长度的假星号占位(`data-masked`;聚焦清空可改、仍为占位则跳过写入,占位永不入 `.env`);`GET /rules` / `POST /rules` — 读写 rule 文件正文(限仓库内相对路径);`GET /registries` — 内省注册表;系统页相关端点(见 §2.5)。
+  - `POST /env` — write-only 写 `.env`(不回显);`GET /env-status` — 仅返回 `{NAME: bool}`(各 `api_key_env`/`base_url_env` 是否已设值),**布尔ONLY、key 与 url 一视同仁、绝不回读任何值**,供前端把已设的 key/url 渲染成统一长度的假星号占位(`data-masked`;聚焦清空可改、仍为占位则跳过写入,占位永不入 `.env`;**新添加、尚未保存的 profile 卡片不掩码**——默认 env 名即便已被其它 profile 设过值,也以空框呈现以免误导,保存并重渲染后才按已设状态显示占位);`GET /rules` / `POST /rules` — 读写 rule 文件正文(限仓库内相对路径);`GET /registries` — 内省注册表;系统页相关端点(见 §2.5)。
 - `interfaces/web_index.html` — 单页前端(`{{ display_name }}` 标题)。
 - `interfaces/cli.py` — 条件新增 `serve` 子命令(默认 `127.0.0.1`,带 `--mock`)。
 - `tests/test_web.py`(web 门控)。

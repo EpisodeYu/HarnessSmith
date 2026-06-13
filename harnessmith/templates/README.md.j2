@@ -187,7 +187,9 @@ referenced by env-var name only.
 **First run / connectivity.** A `uvx`/`npx` server cold-downloads its package the
 first time, so the web **MCP** tab shows each server as **connecting** (amber)
 until it settles — green = connected, red = failed (with the reason). Each server
-has its own **Reconnect** button (retry just that one). Behind the GFW, when PyPI
+has its own **Reconnect** button (retry just that one). Adding a server from the
+**MCP** tab enables its whole toolset by default (narrow it on the Tools tab).
+Behind the GFW, when PyPI
 or the npm registry is unreachable, `uvx`/`npx` are pointed at a domestic mirror
 automatically (only if you haven't set your own index). Desktop Commander needs
 **Node.js** (`npx`); since Windows rarely ships it, the one-click launcher offers

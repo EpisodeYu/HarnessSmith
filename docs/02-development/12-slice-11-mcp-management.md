@@ -34,7 +34,7 @@
   - `create_app` 不在构造期暖机(置 None);`serve` 把 `_ensure_mcp_manager` 丢到 **daemon 线程**后立即 `uvicorn.run`,**端口秒开**;页面轮询 `/mcp/status` 看连接进度,chat 在 manager 就绪后自动拿到 MCP 工具(`/mcp`+chat 处理器 lazy `_ensure_mcp_manager`,与后台暖机经锁 + 幂等收敛到同一次连接)。进程退出 `close()`。
   - `GET /mcp/status` — 读常驻 manager `status()`(每 server `{name, transport, connected/connecting, error, tool_count, enabled_count, connecting_seconds, log_tail}`,不每次重连)。
   - `GET /mcp/discover` — 读常驻 manager `discovered`,**非阻塞**(返回 `pending` + per-server `connecting/connected`),Tools 页轮询、哪个 server 先就绪先显示其工具。
-  - `POST /mcp/servers`(upsert)/ `DELETE /mcp/servers/{name}` — 校验(只收 env 名)→ `save_config` 回写(`ruamel` 保留注释)→ `rebuild_manager` 热重连 + `sync_mcp_tools` 重同步 → 返回新 `status()`。
+  - `POST /mcp/servers`(upsert)/ `DELETE /mcp/servers/{name}` — 校验(只收 env 名)→ `save_config` 回写(`ruamel` 保留注释)→ `rebuild_manager` 热重连 + `sync_mcp_tools` 重同步 → 返回新 `status()`。**新增 server 默认启用其全部工具**:仅当是全新 server(名未出现过)且 allowlist 里还没有它的任何条目时,自动追加一条 `<server>__*` 通配(与 preset 预填 server 一致),使其工具一连上即可用、而非默认全关;**编辑已存在的 server 绝不重加通配**,以免覆盖用户手动收窄的 allowlist。
   - `POST /mcp/reconnect` + `POST /mcp/servers/{name}/reconnect` — 手动热重连/重扫(整体 / 单 server)。
   - `POST /config` 的 MCP 联动:`tools`(allowlist,含 Tools 页大/小复选框)被改 → 追加 `sync_mcp_tools(...)`(无需重连,只按已发现工具增删 registry 条目)——修「启用了页面上的 MCP 工具但 LLM 拿不到」的关键。`mcp` 不进 `_EDITABLE_FIELDS`(server 改走专用 `/mcp/servers` 统一触发重连)。
 - `interfaces/web_index.html` —
