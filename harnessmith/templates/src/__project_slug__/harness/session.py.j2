@@ -125,6 +125,14 @@ def title_of(session_id: str, sessions_dir: str) -> str:
     return _read(session_id, sessions_dir).get("title", "")
 
 
+def cwd_of(session_id: str, sessions_dir: str) -> str:
+    """The session's stored working-directory hint (absolute path), or ``""``.
+
+    Older session files without a ``cwd`` key are treated as unset (no error).
+    """
+    return str(_read(session_id, sessions_dir).get("cwd", "") or "").strip()
+
+
 def save(
     session_id: str,
     messages: list[dict],
@@ -133,13 +141,16 @@ def save(
     mode: str = "agent",
     title: str | None = None,
     status: str = "complete",
+    cwd: str | None = None,
 ) -> None:
     """Persist the conversation body for ``session_id`` (creating the dir).
 
     Stores only the message body (no system prompt) and never a secret — keys
     stay in ``.env`` and never reach ``messages``. ``created`` and any existing
     ``title`` are preserved across updates (pass ``title`` to set/replace it);
-    ``updated`` is refreshed each save. ``status`` records how the turn ended:
+    ``cwd`` is the optional per-session working-directory hint for prompts (pass
+    ``cwd`` to set/replace it; ``None`` keeps the prior value on update). ``updated``
+    is refreshed each save. ``status`` records how the turn ended:
     ``"complete"`` (clean), ``"interrupted"`` (stopped on purpose), or
     ``"running"`` (a mid-turn write-ahead checkpoint — see :func:`checkpoint`).
     The write is atomic, so a crash can't corrupt the file.
@@ -147,12 +158,17 @@ def save(
     directory = Path(sessions_dir)
     directory.mkdir(parents=True, exist_ok=True)
     existing = _read(session_id, sessions_dir)
+    if cwd is None:
+        cwd_out = str(existing.get("cwd", "") or "").strip()
+    else:
+        cwd_out = str(cwd).strip() if cwd else ""
     record = {
         "id": session_id,
         "created": existing.get("created", time.time()),
         "updated": time.time(),
         "mode": mode,
         "title": title or existing.get("title", ""),
+        "cwd": cwd_out,
         "status": status,
         "messages": messages,
     }
@@ -166,7 +182,12 @@ def save(
 
 
 def checkpoint(
-    session_id: str, messages: list[dict], sessions_dir: str, *, mode: str = "agent"
+    session_id: str,
+    messages: list[dict],
+    sessions_dir: str,
+    *,
+    mode: str = "agent",
+    cwd: str | None = None,
 ) -> None:
     """Write-ahead the in-progress conversation after a completed step.
 
@@ -175,7 +196,7 @@ def checkpoint(
     non-``complete`` status and repairs any dangling ``tool_use``. This is just a
     ``save`` with ``status="running"`` (same atomic single-file write).
     """
-    save(session_id, messages, sessions_dir, mode=mode, status="running")
+    save(session_id, messages, sessions_dir, mode=mode, status="running", cwd=cwd)
 
 
 def set_title(session_id: str, title: str, sessions_dir: str) -> bool:
@@ -185,6 +206,8 @@ def set_title(session_id: str, title: str, sessions_dir: str) -> bool:
     if not data:
         return False
     data["title"] = title
+    if "cwd" not in data:
+        data["cwd"] = ""
     data["updated"] = time.time()
     _atomic_write(
         _path(session_id, sessions_dir),
@@ -283,6 +306,7 @@ def summaries(sessions_dir: str) -> list[dict]:
                 "updated": data.get("updated", path.stat().st_mtime),
                 "mode": data.get("mode", ""),
                 "title": data.get("title", ""),
+                "cwd": str(data.get("cwd", "") or ""),
                 "preview": preview,
             }
         )

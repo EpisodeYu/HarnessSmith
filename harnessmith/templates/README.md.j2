@@ -108,6 +108,26 @@ pick it back up later:
 Only message text is stored — **never secrets** (keys stay in `.env`). Turn it
 off with `sessions.enabled: false` in `config.yaml`{% if interfaces.web %}; the web chat resumes via its session picker{% endif %}.
 
+### Working directory (a hint, not a fence)
+
+You can give a turn a **working directory** so the model has an anchor for
+file-oriented tools (e.g. an MCP file/search server): "prefer reading/searching
+files relative to here". It is injected into the system prompt as a **reference
+only** — explicitly *not* a sandbox or access restriction. The model may still
+reach paths outside it when a task calls for it; real isolation is Docker, not
+this hint. Nothing is `chdir`-ed, so it is safe with many concurrent sessions.
+
+```bash
+{{ project_slug }} run --cwd /path/to/project "where is the config loaded?"
+{{ project_slug }} chat --cwd /path/to/project   # or type /cwd <path> in the REPL
+```
+
+In the REPL, `/cwd` prints the current hint and `/cwd <path>` switches it.
+The chosen directory is saved with the session and reused when you resume{% if interfaces.web %}; the
+web chat has a folder field (with a server-side **Browse** picker) on the
+composer's second row{% endif %}. Leave it unset and the prompt is exactly as before — the
+feature is a no-op until you pick a directory.
+
 ### Stop & continue
 
 Press **Ctrl-C** to stop a turn mid-flight{% if interfaces.web %} (or the **Stop** button in the web chat){% endif %};
@@ -137,6 +157,14 @@ Panel edits only take effect when you hit **Save** — the panel marks unsaved
 changes and warns before you switch tabs or reload, so a configured LLM profile
 isn't lost by forgetting to save. **Save** both applies the edit live and writes
 it back to `config.yaml` (your comments are preserved), so it survives a restart.
+
+The composer has a **second row** under the message box: the loop **paradigm**
+picker, a **Generator** dropdown (the `generation` role — picking one here is the
+same as setting it on Config → LLM, and the two stay in sync), and an optional
+**folder** field for the per-session [working directory](#working-directory-a-hint-not-a-fence)
+hint, with a server-side **Browse** picker (`GET /fs/list`, directory names only).
+`/fs/list` (like `/config` and the MCP manager) is a **local, trusted-user**
+control — don't expose this server on a public network.
 
 ```bash
 uv run {{ project_slug }} serve                 # http://127.0.0.1:8000

@@ -89,7 +89,19 @@ def _environment_note(config: Config) -> str:
     return "\n".join(lines)
 
 
-{% endif %}def build_system_prompt(config: Config) -> str:
+{% endif %}def _working_dir_note(working_dir: str | None) -> str:
+    """Optional anchor for file-oriented tools: absolute path, hint-only (not a fence)."""
+    if not working_dir or not str(working_dir).strip():
+        return ""
+    path = str(working_dir).strip()
+    return (
+        f"Working directory (for reference): {path}. Prefer reading/searching files "
+        "relative to it. This is a hint, NOT a restriction — you may access paths "
+        "outside it when the task calls for it."
+    )
+
+
+def build_system_prompt(config: Config, working_dir: str | None = None) -> str:
     prompts = config.prompts
     parts = [prompts.system or _DEFAULT_SYSTEM]
     rules = _load_rules(config)
@@ -108,7 +120,10 @@ def _environment_note(config: Config) -> str:
     skills_section = build_skills_prompt(config)
     if skills_section:
         parts.append(skills_section)
-{% endif %}{% if spec.mcp.enabled %}    environment = _environment_note(config)
+{% endif %}    wd = _working_dir_note(working_dir)
+    if wd:
+        parts.append(wd)
+{% if spec.mcp.enabled %}    environment = _environment_note(config)
     if environment:
         parts.append(environment)
 {% endif %}    return "\n\n".join(parts)

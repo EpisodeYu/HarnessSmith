@@ -43,6 +43,7 @@ def run(
     history: list[dict] | None = None,
     cancel: Callable[[], bool] | None = None,
     checkpoint: Callable[[list[dict]], None] | None = None,
+    working_dir: str | None = None,
 ) -> RunResult:
     """Run one turn using paradigm ``mode`` (defaults to ``config.paradigms.default``).
 
@@ -56,6 +57,8 @@ def run(
     forwarded to the LLM stream so Stop / Ctrl-C cut generation mid-token);
     ``checkpoint`` is called with the conversation body after each completed step
     (write-ahead, so a crash mid-turn still leaves resumable work on disk).
+    ``working_dir`` is an optional absolute path injected into the system prompt as
+    a hint (not a sandbox); unset leaves the prompt unchanged from a no-path run.
     """
     paradigms = config.paradigms
     name = mode or paradigms.default
@@ -78,4 +81,5 @@ def run(
         history=history,
         cancel=cancel,
         checkpoint=checkpoint,
+        working_dir=working_dir,
     )

@@ -229,6 +229,51 @@ def _safe_repo_path(path: str) -> Path | None:
         return None
     return candidate
 
+
+def _resolve_working_dir(cwd: str | None, session_id: str | None, config: Config) -> str | None:
+    """The working-directory hint for a chat run (absolute path), or ``None``.
+
+    Resolution order: an explicit ``cwd`` from the request (resolved to absolute);
+    else the session's stored ``cwd`` (so a later turn / resume reuses it); else
+    ``None`` (no injection — the system prompt is unchanged). This is a prompt
+    HINT only — never a ``chdir`` or a path fence (Web is single-process /
+    multi-session, so a process cwd would let two sessions cross)."""
+    if cwd is not None and cwd.strip():
+        return str(Path(cwd).expanduser().resolve())
+    if session_id is not None and config.sessions.enabled:
+        stored = session_store.cwd_of(session_id, config.sessions.dir)
+        if stored.strip():
+            return str(Path(stored).expanduser().resolve())
+    return None
+
+
+def _list_subdirectories(path: str | None) -> dict:
+    """List immediate child DIRECTORIES of ``path`` (defaults to the process cwd).
+
+    Returns ``{path, parent, dirs}``: the resolved absolute path, its parent (same
+    path at the filesystem root), and the sorted names of its subdirectories. Used
+    by the web directory picker so a user can browse to a working-directory hint
+    without typing a full path. Names only — file contents are never read, and only
+    directory entries are returned. A LOCAL, trusted-user control (like MCP server
+    management): don't expose ``/fs`` / ``/config`` on a public network."""
+    base = Path(path).expanduser() if path and path.strip() else Path.cwd()
+    try:
+        base = base.resolve()
+    except OSError:
+        base = Path.cwd().resolve()
+    dirs: list[str] = []
+    if base.is_dir():
+        try:
+            for entry in sorted(base.iterdir(), key=lambda p: p.name.lower()):
+                try:
+                    if entry.is_dir():
+                        dirs.append(entry.name)
+                except OSError:
+                    continue
+        except OSError:
+            pass
+    return {"path": str(base), "parent": str(base.parent), "dirs": dirs}
+
 {% if spec.mcp.enabled %}
 def _persist_config_keys(app, keys: list[str]) -> None:
     """Best-effort write of the named top-level config keys back to config.yaml
@@ -314,6 +359,7 @@ def _chat_events(
     lock=None,
     confirm_sessions: dict | None = None,
     config_path=None,
+    working_dir: str | None = None,
 ):
     """Drive one ``run()`` in a worker thread and yield its events as SSE.
 
@@ -338,6 +384,11 @@ def _chat_events(
     ``POST /chat/{run_id}/respond``) so a reply can reach the blocked worker, and a
     stop/disconnect can unblock any pending ask (fail-closed) instead of stranding
     the worker thread.
+
+    ``working_dir`` is this session's optional working-directory hint, injected
+    into the system prompt for THIS run only (per-run, never a process ``chdir`` —
+    so two concurrent sessions with different dirs can't cross). Persisted with the
+    session so a later turn / resume reuses it.
     """
     q: queue.Queue = queue.Queue()
     hooks = _StreamHooks(q, load_hooks(config))
@@ -414,7 +465,9 @@ def _chat_events(
 
     def _checkpoint(body: list[dict]) -> None:
         if session_id is not None and config.sessions.enabled:
-            session_store.checkpoint(session_id, body, config.sessions.dir, mode=save_mode)
+            session_store.checkpoint(
+                session_id, body, config.sessions.dir, mode=save_mode, cwd=working_dir
+            )
 
     def worker() -> None:
         try:
@@ -433,6 +486,7 @@ def _chat_events(
                     history=history,
                     cancel=cancel_event.is_set,
                     checkpoint=_checkpoint,
+                    working_dir=working_dir,
                 )
             interrupted = result.stop_reason == "interrupted"
             # Fold in the parallel title: wait briefly for the LLM title (almost
@@ -448,6 +502,7 @@ def _chat_events(
                     session_id, result.messages, config.sessions.dir,
                     mode=result.mode, title=final_title or None,
                     status="interrupted" if interrupted else "complete",
+                    cwd=working_dir,
                 )
 {% if spec.memory.enabled %}            from ..harness.memory import record_turn
 
@@ -578,6 +633,7 @@ def create_app(
         mode: str | None = None,
         session: str | None = None,
         edit_turn: int | None = None,
+        cwd: str | None = None,
     ) -> StreamingResponse:
         cfg = app.state.config
         # Resume the given session, or mint a new id; disabled sessions => one-shot.
@@ -599,6 +655,11 @@ def create_app(
             and session_id is not None
             and not session_store.title_of(session_id, cfg.sessions.dir)
         )
+        # Working-directory hint for THIS run (a system-prompt anchor, never a
+        # chdir/fence): the request's ``cwd`` wins; else the session's stored cwd;
+        # else unset (no injection — byte-identical to the original prompt). A
+        # provided path is resolved to absolute so the model sees a stable anchor.
+        working_dir = _resolve_working_dir(cwd, session_id, cfg)
         return StreamingResponse(
             _chat_events(
                 message, cfg, mock=app.state.mock, stream=stream, mode=mode,
@@ -606,6 +667,7 @@ def create_app(
                 runs=app.state.runs, pending=app.state.pending, lock=app.state.runs_lock,
                 confirm_sessions=app.state.confirm_sessions,
                 config_path=app.state.config_path,
+                working_dir=working_dir,
             ),
             media_type="text/event-stream",
         )
@@ -683,6 +745,17 @@ def create_app(
     def paradigms() -> dict:
         """The runtime paradigm roster, for the chat-mode dropdown."""
         return app.state.config.paradigms.model_dump(mode="json")
+
+    @app.get("/fs/list")
+    def fs_list(path: str | None = None) -> dict:
+        """List child directories of ``path`` (default: the process cwd) for the
+        chat working-directory picker. Directory NAMES only — never file contents.
+
+        A LOCAL, trusted-user control (same trust level as the MCP server manager,
+        which can spawn local commands): it lets the page browse the server's
+        directory tree to choose a working-directory hint. Don't expose ``/fs`` /
+        ``/config`` on a public network. Read-only — it changes nothing."""
+        return _list_subdirectories(path)
 
     @app.get("/registries")
     def registries() -> dict:

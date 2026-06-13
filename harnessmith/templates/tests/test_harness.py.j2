@@ -1473,6 +1473,53 @@ def test_root_agents_md_is_not_auto_injected(tmp_path, monkeypatch):
     assert "do not inject" not in prompt
 
 
+def test_working_dir_is_injected_as_a_hint(tmp_path, monkeypatch):
+    """A working_dir is injected with explicit "hint, NOT a restriction" wording so
+    the model treats it as an anchor, not a fence."""
+    monkeypatch.chdir(tmp_path)
+    config = _config(tmp_path, prompts={"system": "Base."})
+    prompt = build_system_prompt(config, working_dir="/work/project")
+    assert "/work/project" in prompt
+    assert "Working directory (for reference)" in prompt
+    assert "NOT a restriction" in prompt
+
+
+def test_working_dir_unset_is_byte_identical_noop(tmp_path, monkeypatch):
+    """Not passing working_dir (or passing blank) leaves the prompt byte-identical
+    to the original — the feature is a no-op until a directory is chosen."""
+    monkeypatch.chdir(tmp_path)
+    config = _config(tmp_path, prompts={"system": "Base."})
+    baseline = build_system_prompt(config)
+    assert build_system_prompt(config, working_dir=None) == baseline
+    assert build_system_prompt(config, working_dir="") == baseline
+    assert build_system_prompt(config, working_dir="   ") == baseline
+    assert "Working directory" not in baseline
+
+
+def test_working_dir_reaches_the_system_message_through_the_loop(tmp_path, monkeypatch):
+    """run(working_dir=...) threads the hint all the way into the system message the
+    paradigm builds (a capturing client records the messages it was sent)."""
+    monkeypatch.chdir(tmp_path)
+    config = _config(tmp_path, prompts={"system": "Base."})
+
+    captured = {}
+
+    class _CapturingMock(MockLLM):
+        def complete(self, messages, tools, cancel=None):
+            captured["messages"] = messages
+            return super().complete(messages, tools, cancel=cancel)
+
+    run(
+        "hello",
+        client=_CapturingMock(script=["hi"]),
+        config=config,
+        working_dir="/anchor/here",
+    )
+    system = captured["messages"][0]
+    assert system["role"] == "system"
+    assert "/anchor/here" in system["content"]
+
+
 def test_context_truncate_is_noop_without_triggers():
     messages = _conversation(8)
     fitted = fit(messages, ContextConfig(strategy="truncate", triggers={}))

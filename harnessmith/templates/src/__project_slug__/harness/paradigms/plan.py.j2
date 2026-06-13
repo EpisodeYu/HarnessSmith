@@ -62,6 +62,7 @@ def run(
     history: list[dict] | None = None,
     cancel: Callable[[], bool] | None = None,
     checkpoint: Callable[[list[dict]], None] | None = None,
+    working_dir: str | None = None,
 ) -> RunResult:
     """Run one read-only planning turn (low-risk tools only).
 
@@ -96,7 +97,7 @@ def run(
     active = registry.active_names(config.enabled_tool_names(), allow_high_risk=False)
     tool_schemas = registry.schemas(active)
 
-    system = build_system_prompt(config) + "\n\n" + _PLAN_INSTRUCTION
+    system = build_system_prompt(config, working_dir=working_dir) + "\n\n" + _PLAN_INSTRUCTION
     messages: list[dict] = [
         {"role": "system", "content": system},
         *(history or []),

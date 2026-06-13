@@ -107,22 +107,57 @@
           <button id="no-llm-link" type="button" class="ml-1 underline" data-i18n="no_llm_link">Go to Config → LLM</button>
         </div>
         <div id="log" class="flex-1 space-y-2 overflow-y-auto px-6 py-4 text-sm"></div>
-        <form id="chat-form" class="flex items-center gap-2 border-t border-slate-200 bg-white px-6 py-3">
-          <input id="msg" class="flex-1 rounded-lg border px-3 py-2" data-i18n-ph="chat_placeholder" placeholder="Ask something…" autocomplete="off" />
-          <select id="mode" class="rounded-lg border px-2 py-2 text-sm" data-i18n-title="chat_mode_title" title="Loop paradigm"></select>
-          <div class="relative shrink-0">
-            <button id="ctx-meter" type="button" class="inline-flex h-9 w-9 items-center justify-center" data-i18n-title="ctx_meter_title" title="Context usage">
-              <svg viewBox="0 0 36 36" class="h-8 w-8 -rotate-90">
-                <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e2e8f0" stroke-width="3.5"></circle>
-                <circle id="ctx-meter-arc" cx="18" cy="18" r="15.5" fill="none" stroke="#94a3b8" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="97.39" stroke-dashoffset="97.39"></circle>
-              </svg>
-              <span id="ctx-meter-label" class="absolute inset-0 flex items-center justify-center text-[9px] font-medium text-slate-600"></span>
-            </button>
-            <div id="ctx-meter-pop" class="absolute bottom-full right-0 mb-2 hidden whitespace-nowrap rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs text-white shadow-lg"></div>
+        <form id="chat-form" class="flex flex-col gap-2 border-t border-slate-200 bg-white px-6 py-3">
+          <div class="flex items-center gap-2">
+            <input id="msg" class="flex-1 rounded-lg border px-3 py-2" data-i18n-ph="chat_placeholder" placeholder="Ask something…" autocomplete="off" />
+            <div class="relative shrink-0">
+              <button id="ctx-meter" type="button" class="inline-flex h-9 w-9 items-center justify-center" data-i18n-title="ctx_meter_title" title="Context usage">
+                <svg viewBox="0 0 36 36" class="h-8 w-8 -rotate-90">
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e2e8f0" stroke-width="3.5"></circle>
+                  <circle id="ctx-meter-arc" cx="18" cy="18" r="15.5" fill="none" stroke="#94a3b8" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="97.39" stroke-dashoffset="97.39"></circle>
+                </svg>
+                <span id="ctx-meter-label" class="absolute inset-0 flex items-center justify-center text-[9px] font-medium text-slate-600"></span>
+              </button>
+              <div id="ctx-meter-pop" class="absolute bottom-full right-0 mb-2 hidden whitespace-nowrap rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs text-white shadow-lg"></div>
+            </div>
+            <button id="chat-send" class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="chat_send">Send</button>
           </div>
-          <button id="chat-send" class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="chat_send">Send</button>
+          <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <label class="flex items-center gap-1">
+              <span data-i18n="chat_mode_label">Mode</span>
+              <select id="mode" class="rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_mode_title" title="Loop paradigm"></select>
+            </label>
+            <label class="flex items-center gap-1">
+              <span data-i18n="chat_gen_label">Generator</span>
+              <select id="gen-llm" class="rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_gen_title" title="Generator LLM (generation role)"></select>
+            </label>
+            <label class="flex min-w-0 flex-1 items-center gap-1">
+              <span class="shrink-0" data-i18n="chat_cwd_label">Folder</span>
+              <input id="cwd" class="min-w-0 flex-1 rounded-lg border px-2 py-1 text-sm" data-i18n-ph="chat_cwd_ph" placeholder="Working directory (optional)" autocomplete="off" />
+              <button id="cwd-browse" type="button" class="shrink-0 rounded-lg border px-2 py-1 text-xs" data-i18n="chat_cwd_browse" title="Browse folders">Browse</button>
+              <button id="cwd-clear" type="button" class="shrink-0 rounded-lg border px-2 py-1 text-xs text-slate-500" data-i18n="chat_cwd_clear" title="Clear folder">Clear</button>
+            </label>
+          </div>
         </form>
       </section>
+
+      <div id="fs-modal" class="fixed inset-0 z-20 hidden items-center justify-center bg-black/40 p-4">
+        <div class="flex max-h-[80vh] w-full max-w-lg flex-col rounded-xl bg-white shadow-xl dark:bg-slate-800">
+          <div class="border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+            <h3 class="text-sm font-medium" data-i18n="fs_title">Choose a working directory</h3>
+            <p id="fs-path" class="mt-1 truncate font-mono text-xs text-slate-500"></p>
+          </div>
+          <div class="flex items-center gap-2 border-b border-slate-200 px-4 py-2 dark:border-slate-700">
+            <button id="fs-up" type="button" class="rounded-lg border px-2 py-1 text-xs" data-i18n="fs_up">↑ Up</button>
+            <span id="fs-status" class="text-xs text-slate-400"></span>
+          </div>
+          <div id="fs-list" class="min-h-0 flex-1 overflow-y-auto px-2 py-2 text-sm"></div>
+          <div class="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-700">
+            <button id="fs-cancel" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="fs_cancel">Cancel</button>
+            <button id="fs-use" type="button" class="rounded-lg bg-slate-800 px-3 py-1 text-sm text-white" data-i18n="fs_use">Use this folder</button>
+          </div>
+        </div>
+      </div>
 
       <section id="view-config" class="hidden flex-1 space-y-4 overflow-y-auto px-6 py-4">
       <p class="text-sm text-slate-500" data-i18n="cfg_intro">Runtime configuration. Save applies changes live and writes them back to config.yaml.</p>
@@ -305,6 +340,13 @@
       en: {
         nav_chat: "Chat", nav_config: "Config", chat_placeholder: "Type a message…",
         chat_send: "Send", chat_stop: "Stop", chat_mode_title: "Loop paradigm",
+        chat_mode_label: "Mode", chat_gen_label: "Generator",
+        chat_gen_title: "Generator LLM (the generation role; synced with Config → LLM)",
+        chat_cwd_label: "Folder", chat_cwd_ph: "Working directory (optional)",
+        chat_cwd_browse: "Browse", chat_cwd_clear: "Clear",
+        fs_title: "Choose a working directory", fs_up: "↑ Up",
+        fs_cancel: "Cancel", fs_use: "Use this folder",
+        fs_empty: "No subfolders here", fs_loading: "Loading…", fs_error: "Could not list this folder",
         ctx_meter_title: "Context usage, click for details",
         ctx_meter_empty: "Context usage (no data yet)",
         ctx_meter_nowin: "set context_window to show %",
@@ -427,6 +469,13 @@
       zh: {
         nav_chat: "对话", nav_config: "配置", chat_placeholder: "输入消息…",
         chat_send: "发送", chat_stop: "停止", chat_mode_title: "循环范式",
+        chat_mode_label: "范式", chat_gen_label: "生成模型",
+        chat_gen_title: "生成器 LLM(generation 角色;与 配置 → LLM 同步)",
+        chat_cwd_label: "目录", chat_cwd_ph: "工作目录(可选)",
+        chat_cwd_browse: "浏览", chat_cwd_clear: "清除",
+        fs_title: "选择工作目录", fs_up: "↑ 上级",
+        fs_cancel: "取消", fs_use: "使用此目录",
+        fs_empty: "此目录下没有子目录", fs_loading: "加载中…", fs_error: "无法列出该目录",
         ctx_meter_title: "上下文占用,点击查看详情",
         ctx_meter_empty: "上下文占用(暂无数据)",
         ctx_meter_nowin: "设置 context_window 后显示占比",
@@ -869,6 +918,51 @@
     }
     loadParadigms();
 
+    // The generator dropdown mirrors the GLOBAL generation role (config.roles.
+    // generation), so picking one here is the same as setting it on Config → LLM.
+    // Options are the configured profiles; the blank option = "(first profile)",
+    // matching the runtime fallback when the role is unset. Filled from `cfg`, so
+    // it's only meaningful after loadConfig() has run.
+    function populateGenerator() {
+      const sel = $("gen-llm");
+      if (!sel) return;
+      const llms = (cfg && cfg.llms) || [];
+      const current = (cfg && cfg.roles && cfg.roles.generation) || "";
+      sel.innerHTML = "";
+      const first = document.createElement("option");
+      first.value = ""; first.textContent = t("role_use_first");
+      sel.appendChild(first);
+      llms.forEach((p) => {
+        if (!p || !p.name) return;
+        const o = document.createElement("option");
+        o.value = p.name; o.textContent = p.name;
+        sel.appendChild(o);
+      });
+      sel.value = current;
+    }
+    // Changing the generator writes the generation role back globally (POST
+    // /config replaces only the roles key + persists to config.yaml), updates the
+    // local cfg, and refreshes the Config page Roles dropdowns when they're shown
+    // and have no unsaved edits (so the two stay in sync both directions).
+    $("gen-llm").addEventListener("change", async () => {
+      const value = $("gen-llm").value;
+      const roles = Object.assign({}, (cfg && cfg.roles) || {});
+      if (value) roles.generation = value; else delete roles.generation;
+      try {
+        const resp = await fetch("/config", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roles }),
+        });
+        if (resp.ok) {
+          cfg = await resp.json();
+          populateGenerator();
+          if (!$("view-config").classList.contains("hidden") && !dirty) {
+            buildRoles(); markSaved();
+          }
+        }
+      } catch (e) { /* keep the previous selection on failure */ }
+    });
+
     // ---- chat sessions (AI-Studio-style left sidebar) ------------------
     // Each conversation owns a VIEW: its own DOM container plus its run state
     // (EventSource, run id, streaming flag, context-meter figures). #log is just
@@ -899,6 +993,7 @@
         pendingAsk: false, // an ask card awaits the user (sidebar dot turns amber)
         ctxWindow: null,   // context-meter figures, per conversation
         ctxUsed: 0,
+        cwd: "",           // working-directory hint, per conversation (prefilled on open)
       };
       views.set(view.key, view);
       return view;
@@ -924,6 +1019,7 @@
       log.scrollTop = log.scrollHeight;
       refreshSendButton();
       updateCtxMeter(view.ctxUsed);
+      $("cwd").value = view.cwd || "";  // prefill this conversation's working-dir hint
       show("chat");
       renderSessionList();
       updateMainTitle();
@@ -1258,6 +1354,7 @@
         const view = makeView(id);
         const meta = sessionsCache.find((s) => s.id === id);
         view.title = meta ? (meta.title || "") : "";
+        view.cwd = meta ? (meta.cwd || "") : "";  // prefill the stored working-dir hint
         renderHistory(view, data.messages);
         showView(view);  // context size is unknown until its next turn (meter resets)
       } catch (err) {
@@ -1327,10 +1424,13 @@
       let answer = null;        // the live answer text element (null until first token)
       let thinkBox = null;      // the live reasoning box for the current thinking phase
       const toolQueue = [];     // tool blocks awaiting their result (FIFO; calls run sequentially)
+      const cwd = $("cwd").value.trim();  // working-directory hint (blank = none)
+      if (cwd) view.cwd = cwd;            // remember it on the view for resume/relabel
       let url = "/chat?message=" + encodeURIComponent(message) + "&stream=" + stream;
       if (mode) url += "&mode=" + encodeURIComponent(mode);
       if (view.sessionId) url += "&session=" + encodeURIComponent(view.sessionId);
       if (opts.editTurn != null) url += "&edit_turn=" + encodeURIComponent(opts.editTurn);
+      if (cwd) url += "&cwd=" + encodeURIComponent(cwd);
       const es = new EventSource(url);
       view.es = es;
       view.streaming = true;
@@ -1450,6 +1550,81 @@
       $("msg").value = "";
       startChat(message, {});
     });
+
+    // Typing/clearing the working-dir input keeps the active view's hint in step,
+    // so switching conversations and back doesn't lose an un-sent path.
+    $("cwd").addEventListener("input", () => { if (activeView) activeView.cwd = $("cwd").value.trim(); });
+    $("cwd-clear").addEventListener("click", () => {
+      $("cwd").value = "";
+      if (activeView) activeView.cwd = "";
+    });
+
+    // ---- working-directory browser (server-side, dir-names only) --------
+    // A local, trusted-user control: GET /fs/list returns a folder's child
+    // directory names (never file contents). Click a folder to drill in, ↑ Up to
+    // go to the parent, "Use this folder" to set the chat working-dir hint.
+    let fsCurrent = "";  // the path currently shown in the modal
+    function openFsModal() {
+      $("fs-modal").classList.remove("hidden");
+      $("fs-modal").classList.add("flex");
+      loadFsDir($("cwd").value.trim() || "");
+    }
+    function closeFsModal() {
+      $("fs-modal").classList.add("hidden");
+      $("fs-modal").classList.remove("flex");
+    }
+    async function loadFsDir(path) {
+      const list = $("fs-list"), status = $("fs-status");
+      list.innerHTML = "";
+      status.textContent = t("fs_loading");
+      try {
+        const url = "/fs/list" + (path ? "?path=" + encodeURIComponent(path) : "");
+        const data = await (await fetch(url)).json();
+        fsCurrent = data.path || "";
+        $("fs-path").textContent = fsCurrent;
+        $("fs-up").dataset.parent = data.parent || "";
+        status.textContent = "";
+        const dirs = data.dirs || [];
+        if (!dirs.length) {
+          const empty = document.createElement("p");
+          empty.className = "px-2 py-2 text-xs text-slate-400";
+          empty.textContent = t("fs_empty");
+          list.appendChild(empty);
+          return;
+        }
+        dirs.forEach((name) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "block w-full truncate rounded px-2 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700";
+          btn.textContent = "📁 " + name;
+          btn.addEventListener("click", () => loadFsDir(joinFsPath(fsCurrent, name)));
+          list.appendChild(btn);
+        });
+      } catch (err) {
+        status.textContent = t("fs_error");
+      }
+    }
+    // Join a child onto the shown path, picking the separator the server used so
+    // Windows ("\") and POSIX ("/") both work without a path library client-side.
+    function joinFsPath(base, name) {
+      if (!base) return name;
+      const sep = base.indexOf("\\") >= 0 && base.indexOf("/") < 0 ? "\\" : "/";
+      return base.replace(/[\\/]$/, "") + sep + name;
+    }
+    $("cwd-browse").addEventListener("click", openFsModal);
+    $("fs-cancel").addEventListener("click", closeFsModal);
+    $("fs-up").addEventListener("click", () => {
+      const parent = $("fs-up").dataset.parent || "";
+      if (parent && parent !== fsCurrent) loadFsDir(parent);
+    });
+    $("fs-use").addEventListener("click", () => {
+      if (fsCurrent) {
+        $("cwd").value = fsCurrent;
+        if (activeView) activeView.cwd = fsCurrent;
+      }
+      closeFsModal();
+    });
+    $("fs-modal").addEventListener("click", (e) => { if (e.target === $("fs-modal")) closeFsModal(); });
 
     // ---- config: functional sub-tabs ------------------------------------
     const CFG_TABS = ["llm", "context", "tools",{% if spec.mcp.enabled %} "mcp",{% endif %} "paradigms", "prompts", "budget",{% if spec.memory.enabled %} "memory",{% endif %} "observability", "system"];
@@ -1652,7 +1827,7 @@
     function gateChat() {
       const none = !hasLLM();
       $("no-llm").classList.toggle("hidden", !none);
-      ["msg", "mode", "chat-send"].forEach((id) => { $(id).disabled = none; });
+      ["msg", "mode", "chat-send", "gen-llm", "cwd", "cwd-browse", "cwd-clear"].forEach((id) => { $(id).disabled = none; });
     }
 
     // Build the Context tab from the registries: the strategy dropdown lists every
@@ -2287,6 +2462,7 @@
 {% if spec.memory.enabled %}      await loadMemory();  // the long-term memory note for the Memory tab
 {% endif %}      renderConfig();
       gateChat();
+      populateGenerator();  // the chat generator dropdown mirrors roles.generation
       markSaved();  // the freshly rendered view is, by definition, the saved state
       $("cfg-status").textContent = "";
     }
@@ -2507,7 +2683,7 @@
       });
       const data = await resp.json();
       if (resp.ok) {
-        cfg = data; await loadRules(); await loadEnvStatus();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); markSaved();
+        cfg = data; await loadRules(); await loadEnvStatus();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); populateGenerator(); markSaved();
         $("cfg-status").textContent = ruleErr ? (t("cfg_saved") + ": " + ruleErr) : t("cfg_saved");
       } else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });

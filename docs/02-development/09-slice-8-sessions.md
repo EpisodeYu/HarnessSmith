@@ -27,7 +27,7 @@
 - 产物 `harness/loop.py` — `run()` 加 `history` 参数并透传。
 
 ### 存储核心
-- 产物 `harness/session.py`(**新增,always-render**)— 极薄:`new_id()` / `load(id, dir)` / `save(id, messages, dir, mode)` / `latest(dir)` / `resolve(continue_, resume_id, dir)`。文件结构 `{"id","created","updated","mode","title","messages":[...]}`。`_path` 用 `Path(id).name` 收窄防穿越。
+- 产物 `harness/session.py`(**新增,always-render**)— 极薄:`new_id()` / `load(id, dir)` / `save(id, messages, dir, mode)` / `latest(dir)` / `resolve(continue_, resume_id, dir)`。文件结构 `{"id","created","updated","mode","title","cwd","messages":[...]}`。`_path` 用 `Path(id).name` 收窄防穿越。`cwd`(issue #3)= 对话级工作目录上下文提示(仅注入系统提示供参考、非围栏);`save(..., cwd=)`/`checkpoint(..., cwd=)` 持久化、`cwd_of(id, dir)` 回读(老 session 无字段回落 `""`)、`summaries()` 透传。
 - 产物 `harness/config.py` — `SessionsConfig(enabled: bool = True, dir: str = ".harness/sessions", auto_title: bool = True)` + `Config.sessions`。运行期旋钮,无 spec 字段。
 
 ### CLI / Web

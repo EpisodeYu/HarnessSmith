@@ -46,6 +46,41 @@ def test_save_load_latest_roundtrip(tmp_path):
     assert session_store.load("missing", sdir) == []  # unknown id -> empty
 
 
+def test_cwd_persists_and_round_trips(tmp_path):
+    """A session's working-directory hint is saved and read back; an update that
+    passes cwd=None keeps the prior value, and it shows up in summaries()."""
+    sdir = str(tmp_path / "s")
+    sid = session_store.new_id()
+    msgs = [{"role": "user", "content": "q1"}]
+    session_store.save(sid, msgs, sdir, mode="agent", cwd="/work/proj")
+
+    assert session_store.cwd_of(sid, sdir) == "/work/proj"
+    # An update without cwd preserves it (like title).
+    session_store.save(sid, msgs, sdir, mode="agent")
+    assert session_store.cwd_of(sid, sdir) == "/work/proj"
+    # It is carried in the picker summaries.
+    summary = next(s for s in session_store.summaries(sdir) if s["id"] == sid)
+    assert summary["cwd"] == "/work/proj"
+    # An explicit empty string clears it.
+    session_store.save(sid, msgs, sdir, mode="agent", cwd="")
+    assert session_store.cwd_of(sid, sdir) == ""
+
+
+def test_legacy_session_without_cwd_field_is_safe(tmp_path):
+    """A session file written before the cwd field existed reads back as "" (no
+    error), so old conversations resume fine."""
+    sdir = tmp_path / "s"
+    sdir.mkdir(parents=True)
+    sid = "legacyid"
+    (sdir / f"{sid}.json").write_text(
+        json.dumps({"id": sid, "messages": [{"role": "user", "content": "hi"}]}),
+        encoding="utf-8",
+    )
+    assert session_store.cwd_of(sid, str(sdir)) == ""
+    summary = next(s for s in session_store.summaries(str(sdir)) if s["id"] == sid)
+    assert summary["cwd"] == ""
+
+
 def test_resume_seeds_history_into_next_turn(tmp_path):
     """A resumed turn sees the prior conversation, and the body grows cumulatively."""
     config = _config(tmp_path)

@@ -59,6 +59,7 @@ def run(
     history: list[dict] | None = None,
     cancel: Callable[[], bool] | None = None,
     checkpoint: Callable[[list[dict]], None] | None = None,
+    working_dir: str | None = None,
 ) -> RunResult:
     """Run one agent turn and return the final answer + telemetry.
 
@@ -94,7 +95,7 @@ def run(
     tool_schemas = registry.schemas(active)
 
     messages: list[dict] = [
-        {"role": "system", "content": build_system_prompt(config)},
+        {"role": "system", "content": build_system_prompt(config, working_dir=working_dir)},
         *(history or []),
         {"role": "user", "content": user_input},
     ]

@@ -319,6 +319,14 @@ with `[system, *history, user]`, then return the conversation body as
 still works, it just won't resume. Saving/loading lives in `harness/session.py`
 (plain JSON under `.harness/sessions/`, message text only — never secrets).
 
+`run()` (and each paradigm) also takes an optional `working_dir`, forwarded to
+`build_system_prompt(config, working_dir=...)`. It injects one line — "Working
+directory (for reference): …; a hint, NOT a restriction" — so a file/search tool
+has an anchor. It is a **prompt hint only**: never a `chdir` and never a path
+fence (the CLI passes `--cwd` / `/cwd`, the web passes per-session `?cwd=`; both
+persist it on the session via `session.cwd_of`). Unset ⇒ the prompt is unchanged.
+Real isolation is Docker, not this hint.
+
 ## Stop / continue / re-ask
 
 A turn can be **stopped** mid-flight — Ctrl-C in the CLI, the Stop button in the
