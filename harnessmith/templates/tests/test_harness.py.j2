@@ -1862,6 +1862,19 @@ def test_cli_info_lists_registered_and_flags_unregistered(tmp_path):
     assert "truncate" in result.output and "summarize" in result.output
     assert "max_tokens" in result.output
     assert "ghost" in result.output  # enabled but not registered -> flagged
+{% if spec.memory.enabled %}
+    # Memory tools register at runtime (not via MCP), so `info` registers them too:
+    # an allowlisted memory tool shows as a registered/enabled tool, NOT misfiled
+    # under the "allowlisted, not loaded now (MCP registers at runtime; ...)" notice.
+    mem_dict = _config(tmp_path).model_dump(mode="json")
+    mem_dict["tools"].append({"name": "memory_read", "enabled": True})
+    mem_file = tmp_path / "config-mem.yaml"
+    mem_file.write_text(yaml.safe_dump(mem_dict), encoding="utf-8")
+    mem_result = CliRunner().invoke(app, ["info", "--config", str(mem_file)])
+    assert mem_result.exit_code == 0, mem_result.output
+    assert "- memory_read" in mem_result.output and "(enabled)" in mem_result.output
+    assert "· memory_read" not in mem_result.output  # not in the not-loaded list
+{% endif %}
 
 
 @pytest.mark.skipif(

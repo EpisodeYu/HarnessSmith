@@ -858,7 +858,13 @@ def info(
 
     from ..harness.tools import in_allowlist
     from ..harness.tools import registry as tool_registry
+{% if spec.memory.enabled %}    # Memory tools register at runtime (run/chat/serve/web call register_memory_tools),
+    # NOT via MCP. Register them here too so `info` reports them as enabled instead
+    # of misfiling them under the "MCP registers at runtime; else a typo" notice.
+    from ..harness.memory import register_memory_tools
 
+    register_memory_tools(config)
+{% endif %}
     enabled = config.enabled_tool_names()
     typer.secho("tools (registered):", fg=typer.colors.CYAN)
     for name in sorted(tool_registry.names()):
