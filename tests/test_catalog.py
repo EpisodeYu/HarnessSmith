@@ -56,6 +56,10 @@ def test_desktop_commander_is_node_and_wildcard_enabled():
     assert dc.command == "npx"
     assert dc.requires == "node"
     assert dc.uvx_package is None  # not baked into the image
+    # `--silent` keeps npm's first-launch install summary off the child's stdout
+    # (which must be pure JSON-RPC); it precedes the package so it's npm's flag.
+    assert dc.args == ["--silent", "-y", "@wonderwhy-er/desktop-commander@latest"]
+    assert dc.server_entry()["args"] == ["--silent", "-y", "@wonderwhy-er/desktop-commander@latest"]
     # Read-only tools are safe (so plan/ask can read files/list dirs/search code);
     # write/shell/config-mutating tools stay high-risk (agent-only).
     assert "read_file" in dc.safe_tools

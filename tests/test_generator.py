@@ -601,6 +601,8 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     dc = next(s for s in config["mcp"]["servers"] if s["name"] == "desktop-commander")
     assert "read_file" in dc["safe_tools"] and "list_directory" in dc["safe_tools"]
     assert "write_file" not in dc["safe_tools"] and "start_process" not in dc["safe_tools"]
+    # `--silent` keeps npm's first-launch install summary off the stdio JSON-RPC stream.
+    assert dc["args"] == ["--silent", "-y", "@wonderwhy-er/desktop-commander@latest"]
 
 
 def test_mcp_prefill_servers_do_not_leak_into_spec_snapshot(tmp_path, preset_spec):

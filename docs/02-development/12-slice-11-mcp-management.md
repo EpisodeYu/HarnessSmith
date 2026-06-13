@@ -51,6 +51,7 @@ stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健
 - **取数(源 + 代理)自动解析**:npx/npm 不读系统代理,故产物启动 npx/uvx 子进程时 `_stdio_net_env` 用 HTTP 探测在「override / 官方 / 镜像」× 「直连 / 走代理」候选里取首个可达源,注入 `npm_config_registry`/`UV_DEFAULT_INDEX`(+ 命中代理则 `HTTP(S)_PROXY`);`setdefault` 不覆盖用户已设值。运行期旋钮 `mcp.proxy/npm_registry/pip_index` 可覆盖。只动 index,不碰 managed-Python 下载(供应链信任红线)。
 - **可读报错 + 预热**:连接失败经 `_connect_error` 翻译为可读建议;`mcp warm`(fetch-only,opt-in 手动预拉,不进向导 job 以免阻塞产物页打开)。
 - **首连实时进度 + 工具增量**:`status()` 经 `stdio_client(errlog=临时文件)` 捕获 npx/uvx 拉包 stderr,管理页/Tools 页 amber 时显示进度;`/mcp/discover` 非阻塞 + Tools 页轮询,先就绪先显示,不被慢/失败者卡住。
+- **stdout 纯净(JSON-RPC 契约)**:stdio 子进程的 stdout 必须只承载 JSON-RPC。npm 的 `added N packages …` 安装摘要在旧版 npm 下会随 `npx` 首跑漏到 stdout,被 reader 当协议解析、刷出多段 parse traceback。catalog 的 desktop-commander 故用 `npx --silent -y …`:`--silent` 只压 npm 自身输出(日志/警告本就走 stderr→errlog),不碰被启动 server 自己的 stdout,协议流不受影响。
 - **便携 Node 自举**:仅当预填了 Node 系 server 时,产物启动脚本与向导一键 job 在缺 Node 时引导下便携 Node(pin LTS,本会话 prepend PATH);跳过/失败均不致命。
 - 详见 [`08-slice-7-wizard.md`](./08-slice-7-wizard.md) §2 的跨平台启动健壮性条目(同源机制)。
 

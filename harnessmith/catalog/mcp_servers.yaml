@@ -79,7 +79,13 @@ servers:
     description: Terminal command execution + full filesystem read/write/edit (powerful; read tools safe, write/shell high-risk).
     transport: stdio
     command: npx
-    args: ["-y", "@wonderwhy-er/desktop-commander@latest"]
+    # `--silent` keeps npm OUT of the child's stdout. A stdio MCP child's stdout
+    # must be PURE JSON-RPC, but on first launch `npx` installs the package and
+    # (on older npm) leaks its `added N packages ...` summary to stdout — which the
+    # MCP reader then tries to parse as protocol, spamming parse tracebacks. npm
+    # logs/warnings go to stderr (captured separately), and `--silent` does NOT
+    # touch the launched server's own stdout, so the protocol stream is unaffected.
+    args: ["--silent", "-y", "@wonderwhy-er/desktop-commander@latest"]
     requires: node
     source: https://github.com/wonderwhy-er/DesktopCommanderMCP
     updated: "2026-06-13"
