@@ -17,6 +17,13 @@ dependencies = [
     "questionary>=2.0",
 ]
 
+# Shown in the PyPI "Project links" sidebar — the standard way a published package
+# points back at its source/issues. Repo per docs/00-overview §6.
+[project.urls]
+Homepage = "https://github.com/EpisodeYu/HarnessSmith"
+Repository = "https://github.com/EpisodeYu/HarnessSmith"
+Issues = "https://github.com/EpisodeYu/HarnessSmith/issues"
+
 [project.optional-dependencies]
 # The wizard (Slice 7) is a generator-side tool only; FastAPI/uvicorn live here,
 # NOT in the core `dependencies`, so `uvx harnessmith new` and the generated
