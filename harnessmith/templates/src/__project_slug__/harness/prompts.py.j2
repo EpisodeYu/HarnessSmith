@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from .config import Config
@@ -101,9 +102,31 @@ def _environment_note(config: Config) -> str:
     )
 
 
+def _now() -> datetime:
+    """Indirection over the wall clock so tests can freeze "now"."""
+    return datetime.now().astimezone()
+
+
+def _datetime_note() -> str:
+    """Anchor the model to today's real date/time.
+
+    Models have a training cutoff and a strong date prior, so without this they
+    hallucinate "today" — and may even ignore a clock tool's result. Injected every
+    turn in the host's local timezone; get_current_time still returns UTC for a
+    precise re-check during a long task."""
+    now = _now()
+    return (
+        f"Today's date is {now:%Y-%m-%d} ({now:%A}). The current local time is "
+        f"{now:%H:%M} (UTC{now:%z}). Treat this as the current date/time; call the "
+        "get_current_time tool (returns UTC) if you need to re-check it."
+    )
+
+
 def build_system_prompt(config: Config, working_dir: str | None = None) -> str:
     prompts = config.prompts
     parts = [prompts.system or _DEFAULT_SYSTEM]
+    # Right after the base prompt so the date is a prominent anchor (always on).
+    parts.append(_datetime_note())
     rules = _load_rules(config)
     if rules:
         parts.append(rules)

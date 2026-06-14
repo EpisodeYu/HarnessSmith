@@ -1627,12 +1627,37 @@ def test_working_dir_unset_is_byte_identical_noop(tmp_path, monkeypatch):
     """Not passing working_dir (or passing blank) leaves the prompt byte-identical
     to the original — the feature is a no-op until a directory is chosen."""
     monkeypatch.chdir(tmp_path)
+    # Freeze the always-on date note so the four calls below differ ONLY by
+    # working_dir (otherwise a clock tick between calls would break the equality).
+    import {{ project_slug }}.harness.prompts as prompts_mod
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(
+        prompts_mod, "_now", lambda: datetime(2026, 6, 14, 16, 7, tzinfo=timezone.utc)
+    )
     config = _config(tmp_path, prompts={"system": "Base."})
     baseline = build_system_prompt(config)
     assert build_system_prompt(config, working_dir=None) == baseline
     assert build_system_prompt(config, working_dir="") == baseline
     assert build_system_prompt(config, working_dir="   ") == baseline
     assert "Working directory" not in baseline
+
+
+def test_current_date_is_injected_into_system_prompt(tmp_path, monkeypatch):
+    """Today's real date is always injected as an anchor: models hallucinate "today"
+    from their training cutoff (and may ignore even a clock tool), so the prompt
+    states the date every turn and points at get_current_time for a UTC re-check."""
+    monkeypatch.chdir(tmp_path)
+    import {{ project_slug }}.harness.prompts as prompts_mod
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(
+        prompts_mod, "_now", lambda: datetime(2026, 6, 14, 8, 7, tzinfo=timezone.utc)
+    )
+    config = _config(tmp_path, prompts={"system": "Base."})
+    prompt = build_system_prompt(config)
+    assert "Today's date is 2026-06-14 (Sunday)." in prompt
+    assert "get_current_time" in prompt
 
 
 def test_working_dir_reaches_the_system_message_through_the_loop(tmp_path, monkeypatch):
