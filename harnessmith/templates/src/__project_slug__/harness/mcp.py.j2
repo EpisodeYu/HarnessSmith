@@ -664,6 +664,52 @@ def _warm_argv(server: McpServerConfig) -> tuple[str, list[str]] | None:
     return None
 
 
+def _stream_subprocess(argv, env, timeout, on_line, heartbeat_every: float = 5.0):
+    """Run ``argv``, handing each output line to ``on_line`` AS IT ARRIVES, and
+    emit a heartbeat line if the child is quiet for ``heartbeat_every`` seconds so a
+    long, silent cold download never looks frozen. Returns ``(returncode, timed_out)``
+    (``returncode`` is ``None`` when killed at ``timeout``). Cross-platform: a reader
+    thread feeds a queue (no ``select`` on pipes, which Windows lacks)."""
+    import queue
+    import subprocess
+    import threading
+
+    proc = subprocess.Popen(  # noqa: S603 — config-defined launcher, fixed argv
+        list(argv),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+        text=True,
+        bufsize=1,
+    )
+    lines: queue.Queue = queue.Queue()
+
+    def _reader() -> None:
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                lines.put(line.rstrip("\n"))
+        finally:
+            lines.put(None)  # stream closed
+
+    threading.Thread(target=_reader, daemon=True).start()
+    start = time.monotonic()
+    while True:
+        try:
+            line = lines.get(timeout=heartbeat_every)
+        except queue.Empty:
+            on_line(f"… still downloading ({int(time.monotonic() - start)}s)")
+        else:
+            if line is None:
+                break
+            on_line(line)
+        if time.monotonic() - start > timeout:
+            proc.kill()
+            return None, True
+    proc.wait()
+    return proc.returncode, False
+
+
 def prewarm_stdio_packages(
     config: "McpConfig", *, log=None, timeout: float | None = None
 ) -> list[tuple[str, bool, str]]:
@@ -675,7 +721,6 @@ def prewarm_stdio_packages(
     server; best-effort (never raises).
     """
     import os
-    import subprocess
 
     def _say(msg: str) -> None:
         if log is not None:
@@ -706,25 +751,83 @@ def prewarm_stdio_packages(
             results.append((server.name, False, str(exc)))
             _say(f"[{server.name}] FAILED: {exc}")
             continue
-        _say(f"[{server.name}] warming: {server.command} {' '.join(server.args)} ...")
+        _say(f"[{server.name}] downloading: {server.command} {' '.join(server.args)} …")
+        tail: list[str] = []
+
+        def _on_line(line: str, _name: str = server.name, _tail: list[str] = tail) -> None:
+            _tail.append(line)
+            del _tail[:-5]  # keep only the last few lines for the failure detail
+            _say(f"  [{_name}] {line}")
+
         try:
-            proc = subprocess.run(  # noqa: S603 — config-defined launcher, fixed argv
-                [command, *args],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=env,
-                timeout=warm_timeout,
-                text=True,
-            )
-            ok = proc.returncode == 0
-            detail = "fetched" if ok else f"launcher exited {proc.returncode}: {(proc.stdout or '').strip()[-300:]}"
-        except subprocess.TimeoutExpired:
-            ok, detail = True, f"still fetching after {int(warm_timeout)}s (will finish on first connect)"
+            code, timed_out = _stream_subprocess([command, *args], env, warm_timeout, _on_line)
         except Exception as exc:  # spawn failure (missing launcher, etc.)
             ok, detail = False, _format_exception(exc)
+        else:
+            if timed_out:
+                ok, detail = True, f"still fetching after {int(warm_timeout)}s (will finish on first connect)"
+            elif code == 0:
+                ok, detail = True, "ready"
+            else:
+                ok, detail = False, f"launcher exited {code}: {'; '.join(tail[-3:])}".strip()
         results.append((server.name, ok, detail))
         _say(f"[{server.name}] {'ok' if ok else 'FAILED'}: {detail}")
+    return results
+
+
+def _warm_signature(config: "McpConfig") -> str:
+    """A stable fingerprint of the stdio package-fetch servers (name + launcher +
+    args, which includes the pinned version), so a one-time warm can be skipped on
+    later launches and re-runs only when a launcher / version actually changes."""
+    import hashlib
+    import json
+
+    items = sorted(
+        [server.name, server.command or "", list(server.args)]
+        for server in config.servers
+        if server.kind == "stdio" and _warm_argv(server) is not None
+    )
+    blob = json.dumps(items, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def warm_once(
+    config: "McpConfig", *, log=None, force: bool = False, state_dir: str = ".harness"
+) -> list[tuple[str, bool, str]] | None:
+    """Warm stdio packages ONCE per launcher/version set, recording a sentinel so
+    every later launch skips straight to a (now fast) connect — the first run pays
+    the cold download, with live progress, and nothing after it does.
+
+    Returns the per-server results, or ``None`` when there is nothing to warm or the
+    set was already warmed. Best-effort: a sentinel read/write error never blocks
+    warming, and warming itself never raises (see :func:`prewarm_stdio_packages`)."""
+    import os
+
+    if not any(s.kind == "stdio" and _warm_argv(s) is not None for s in config.servers):
+        return None
+    signature = _warm_signature(config)
+    sentinel = os.path.join(state_dir, ".mcp-warmed")
+    if not force:
+        try:
+            with open(sentinel, encoding="utf-8") as fh:
+                if fh.read().strip() == signature:
+                    return None  # this exact set is already in the cache
+        except OSError:
+            pass
+    if log is not None:
+        log.write(
+            "[mcp] preparing tool packages (one-time; the first run can take a "
+            "minute on a slow network) …\n"
+        )
+        log.flush()
+    results = prewarm_stdio_packages(config, log=log)
+    if results and all(ok for _, ok, _ in results):  # don't sticky-skip a failure
+        try:
+            os.makedirs(state_dir, exist_ok=True)
+            with open(sentinel, "w", encoding="utf-8") as fh:
+                fh.write(signature)
+        except OSError:
+            pass
     return results
 
 

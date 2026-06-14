@@ -85,10 +85,14 @@ servers:
     # MCP reader then tries to parse as protocol, spamming parse tracebacks. npm
     # logs/warnings go to stderr (captured separately), and `--silent` does NOT
     # touch the launched server's own stdout, so the protocol stream is unaffected.
-    args: ["--silent", "-y", "@wonderwhy-er/desktop-commander@latest"]
+    # Pinned (NOT @latest) on purpose: warm-on-first-run pre-fetches THIS exact
+    # version into the npx cache, and a pin is what makes the later connect a true
+    # offline cache hit — `@latest` would re-hit the registry to re-resolve and could
+    # miss the warmed copy. Bump the version + `updated:` together when refreshing.
+    args: ["--silent", "-y", "@wonderwhy-er/desktop-commander@0.2.42"]
     requires: node
     source: https://github.com/wonderwhy-er/DesktopCommanderMCP
-    updated: "2026-06-13"
+    updated: "2026-06-14"
     # A representative subset (Desktop Commander exposes ~26 tools). The prefilled
     # `desktop-commander__*` wildcard enables the WHOLE discovered set (needs Node);
     # the per-tool `risk` below grades it. Read-only tools are `safe` so the

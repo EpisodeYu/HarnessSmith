@@ -569,10 +569,113 @@ def test_prewarm_reports_unreachable_without_spawning(monkeypatch):
     def _boom(*a, **k):
         raise AssertionError("must not spawn the launcher when no registry is reachable")
 
-    monkeypatch.setattr("subprocess.run", _boom)
+    monkeypatch.setattr(mcp_module, "_stream_subprocess", _boom)
     config = McpConfig(servers=[McpServerConfig(name="dc", command="npx", args=["-y", "pkg"])])
     results = mcp_module.prewarm_stdio_packages(config)
     assert results == [("dc", False, mcp_module._unreachable_advice("npm"))]
+
+
+class _Log:
+    """A tiny writable that records the lines warm/prewarm streams to it."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def write(self, s: str) -> None:
+        self.lines.append(s)
+
+    def flush(self) -> None:  # noqa: D401 - file-like no-op
+        pass
+
+
+def test_stream_subprocess_streams_lines_and_returncode():
+    """Each child line reaches the callback as it arrives, and the real exit code
+    comes back (the basis for warm's live progress)."""
+    got: list[str] = []
+    code, timed_out = mcp_module._stream_subprocess(
+        [sys.executable, "-c", "print('one'); print('two')"], None, 30.0, got.append
+    )
+    assert code == 0 and timed_out is False
+    assert got == ["one", "two"]
+
+
+def test_stream_subprocess_emits_heartbeat_while_quiet():
+    """A silent child still produces heartbeat lines, so a long cold download never
+    looks frozen."""
+    got: list[str] = []
+    code, timed_out = mcp_module._stream_subprocess(
+        [sys.executable, "-c", "import time; time.sleep(0.6)"],
+        None,
+        30.0,
+        got.append,
+        heartbeat_every=0.15,
+    )
+    assert code == 0 and timed_out is False
+    assert any("still downloading" in line for line in got)
+
+
+def test_prewarm_streams_progress_and_reports_ready(monkeypatch):
+    """prewarm pipes the launcher's output to the log live and reports `ready` on a
+    clean exit."""
+    _clear_net_env(monkeypatch)
+    monkeypatch.setattr(mcp_module, "_url_ok", _fake_probe({(mcp_module._NPM_OFFICIAL, None)}))
+
+    def _fake_stream(argv, env, timeout, on_line, **kw):
+        on_line("npm: resolving …")
+        on_line("npm: added 1 package")
+        return 0, False
+
+    monkeypatch.setattr(mcp_module, "_stream_subprocess", _fake_stream)
+    log = _Log()
+    config = McpConfig(servers=[McpServerConfig(name="dc", command="npx", args=["-y", "pkg"])])
+    results = mcp_module.prewarm_stdio_packages(config, log=log)
+    assert results == [("dc", True, "ready")]
+    blob = "".join(log.lines)
+    assert "npm: added 1 package" in blob  # progress actually streamed to the log
+
+
+def test_warm_once_runs_then_skips_via_sentinel(tmp_path, monkeypatch):
+    """The first warm runs and records a sentinel; the next warm for the same set is
+    a no-op (returns None) — so only the first launch pays the cold download."""
+    calls: list[int] = []
+    monkeypatch.setattr(
+        mcp_module, "prewarm_stdio_packages",
+        lambda config, log=None: calls.append(1) or [("dc", True, "ready")],
+    )
+    config = McpConfig(servers=[McpServerConfig(name="dc", command="npx", args=["-y", "pkg"])])
+
+    first = mcp_module.warm_once(config, state_dir=str(tmp_path))
+    assert first == [("dc", True, "ready")] and calls == [1]
+    assert (tmp_path / ".mcp-warmed").is_file()
+
+    second = mcp_module.warm_once(config, state_dir=str(tmp_path))
+    assert second is None and calls == [1]  # skipped: not re-warmed
+
+    forced = mcp_module.warm_once(config, state_dir=str(tmp_path), force=True)
+    assert forced == [("dc", True, "ready")] and calls == [1, 1]  # force re-runs
+
+
+def test_warm_once_does_not_sticky_skip_on_failure(tmp_path, monkeypatch):
+    """A failed warm writes NO sentinel, so the next launch retries (e.g. once Node
+    is installed) instead of being stuck 'warmed' but broken."""
+    calls: list[int] = []
+    monkeypatch.setattr(
+        mcp_module, "prewarm_stdio_packages",
+        lambda config, log=None: calls.append(1) or [("dc", False, "needs node")],
+    )
+    config = McpConfig(servers=[McpServerConfig(name="dc", command="npx", args=["-y", "pkg"])])
+
+    mcp_module.warm_once(config, state_dir=str(tmp_path))
+    assert not (tmp_path / ".mcp-warmed").exists()
+    mcp_module.warm_once(config, state_dir=str(tmp_path))
+    assert calls == [1, 1]  # retried, not skipped
+
+
+def test_warm_once_noop_without_package_servers(tmp_path):
+    """Remote-only / non-fetch configs have nothing to warm — returns None, no file."""
+    config = McpConfig(servers=[McpServerConfig(name="r", url="https://x/mcp")])
+    assert mcp_module.warm_once(config, state_dir=str(tmp_path)) is None
+    assert not (tmp_path / ".mcp-warmed").exists()
 
 
 def test_connect_error_explains_unreachable_and_cold_start(monkeypatch):

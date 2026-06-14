@@ -543,22 +543,38 @@ def test_mcp_enabled_generates_files_and_deps(tmp_path, spec):
     py_compile.compile(str(pkg / "harness" / "mcp.py"), doraise=True)
 
 
-def test_serve_warms_mcp_in_background_not_blocking_the_port(tmp_path, spec):
-    """With web + MCP, `serve` must NOT block the web port on MCP warm-up: the
-    servers' first launch (uvx/npx cold start) can be slow, so it runs on a
-    background thread and the port binds immediately. Guard against a regression
-    back to a blocking `_ensure_mcp_manager(application)` call."""
+def test_serve_warms_mcp_before_bind_then_connects_off_thread(tmp_path, spec):
+    """With web + MCP, `serve` pre-fetches stdio packages ONCE before binding (a
+    sentinel-gated `warm_once`, so only the first run pays and shows progress), then
+    connects on a background thread so the port still binds immediately on every
+    later launch. Guard both halves: the foreground warm runs before the connect,
+    and the connect (`_ensure_mcp_manager`) stays off-thread before `uvicorn.run`."""
     spec.interfaces.web = True
     spec.mcp.enabled = True
     out = tmp_path / "serve_warm"
     generate(spec, out, git_init=False)
     cli = (out / "src" / "agent_harness" / "interfaces" / "cli.py").read_text(encoding="utf-8")
     serve_body = cli.split("def serve(", 1)[1].split("\ndef ", 1)[0]
-    assert "_ensure_mcp_manager" in serve_body  # still warmed proactively
+    assert "warm_once(" in serve_body  # one-time package pre-fetch (with progress)
+    assert "_ensure_mcp_manager" in serve_body  # connect still proactive
     assert "Thread(" in serve_body and "daemon=True" in serve_body  # but off-thread
-    # and the warm is kicked off before uvicorn binds (so it actually starts)
-    assert serve_body.index("Thread(") < serve_body.index("uvicorn.run(")
+    # warm before the connect-thread, and the connect-thread before the bind.
+    assert serve_body.index("warm_once(") < serve_body.index("Thread(") < serve_body.index("uvicorn.run(")
     py_compile.compile(str(out / "src" / "agent_harness" / "interfaces" / "cli.py"), doraise=True)
+
+
+def test_chat_warms_mcp_but_one_shot_run_stays_lean(tmp_path, spec):
+    """The interactive `chat` pre-fetches packages once (first-run UX), but the
+    one-shot `run` does NOT — it's the scripting/Docker path (a fresh container per
+    `docker run`), where re-warming every invocation would be pure overhead."""
+    spec.mcp.enabled = True
+    out = tmp_path / "chat_warm"
+    generate(spec, out, git_init=False)
+    cli = (out / "src" / "agent_harness" / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    chat_body = cli.split("def chat(", 1)[1].split("\ndef ", 1)[0]
+    run_body = cli.split("def run(", 1)[1].split("\ndef ", 1)[0]
+    assert "warm_once(" in chat_body
+    assert "warm_once(" not in run_body  # one-shot stays lean
 
 
 # --- Slice 6: MCP capability baseline (catalog prefill into config.yaml) ----
@@ -587,7 +603,10 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     assert "mcp-server-fetch" in config_yaml
     assert "duckduckgo-mcp-server" in config_yaml  # keyless web search
     assert "mcp-server-git" in config_yaml
-    assert "@wonderwhy-er/desktop-commander@latest" in config_yaml
+    # Pinned (not @latest) so warm-on-first-run reliably caches the exact version
+    # the later connect resolves.
+    assert "@wonderwhy-er/desktop-commander@0.2.42" in config_yaml
+    assert "@latest" not in config_yaml
     # safe read tools marked for read-only paradigms + a description per server
     assert "safe_tools:" in config_yaml and "description:" in config_yaml
 
@@ -601,8 +620,9 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     dc = next(s for s in config["mcp"]["servers"] if s["name"] == "desktop-commander")
     assert "read_file" in dc["safe_tools"] and "list_directory" in dc["safe_tools"]
     assert "write_file" not in dc["safe_tools"] and "start_process" not in dc["safe_tools"]
-    # `--silent` keeps npm's first-launch install summary off the stdio JSON-RPC stream.
-    assert dc["args"] == ["--silent", "-y", "@wonderwhy-er/desktop-commander@latest"]
+    # `--silent` keeps npm's first-launch install summary off the stdio JSON-RPC stream;
+    # the version is pinned so warm-on-first-run caches exactly what connect resolves.
+    assert dc["args"] == ["--silent", "-y", "@wonderwhy-er/desktop-commander@0.2.42"]
 
 
 def test_mcp_prefill_servers_do_not_leak_into_spec_snapshot(tmp_path, preset_spec):

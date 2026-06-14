@@ -184,11 +184,15 @@ a marketplace block into `config.yaml`. Allowlist tools as `<server>__<tool>`;
 read-only tools (`safe_tools`) are also offered to `plan`/`ask`. Secrets are
 referenced by env-var name only.
 
-**First run / connectivity.** A `uvx`/`npx` server cold-downloads its package the
-first time, so the web **MCP** tab shows each server as **connecting** (amber)
-until it settles — green = connected, red = failed (with the reason). Each server
-has its own **Reconnect** button (retry just that one). Adding a server from the
-**MCP** tab enables its whole toolset by default (narrow it on the Tools tab).
+**First run / connectivity.** The very first `serve`/`chat` pre-fetches each
+`uvx`/`npx` server's package once, printing live progress (with a heartbeat so a
+slow download never looks frozen) in the terminal you launched from; a marker
+(`.harness/.mcp-warmed`) records it, so every later launch skips straight to a fast
+cache hit. By the time the page opens, tools are ready. (The one-shot `run` skips
+this — it's the scripting/Docker path.) If a server is still warming or fails, the
+web **MCP** tab shows it as **connecting** (amber) / **red** (with the reason);
+each server has its own **Reconnect** button (retry just that one). Adding a server
+from the **MCP** tab enables its whole toolset by default (narrow it on the Tools tab).
 Behind the GFW, when PyPI
 or the npm registry is unreachable, `uvx`/`npx` are pointed at a domestic mirror
 automatically (only if you haven't set your own index). Desktop Commander needs

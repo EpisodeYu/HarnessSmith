@@ -672,8 +672,14 @@ registry** — the official one, else a domestic mirror — directly or through 
 proxy, and injects the winner into the server's subprocess. Nothing to configure
 for direct-internet, GFW, or corporate-proxy machines.
 
-Pre-download up front so the first connect is instant (and an unreachable registry
-is reported clearly instead of timing out): `{{ project_slug }} mcp warm`.
+**The first `serve`/`chat` warms automatically.** Before connecting, it pre-fetches
+each `npx`/`uvx` package once, streaming progress (with a heartbeat) to the terminal,
+then records `.harness/.mcp-warmed` so later launches skip to a fast cache hit — so the
+page opens with tools ready instead of mid-download, and a cold download shows progress
+instead of looking hung. The one-shot `run` skips this (scripting/Docker path). Pinned
+package versions (e.g. desktop-commander) make the warmed copy exactly what connect
+resolves. To pre-download manually (or re-warm after editing a server / version):
+`{{ project_slug }} mcp warm`.
 
 Override the auto-choice under `mcp:` when needed (values only, never secrets):
 

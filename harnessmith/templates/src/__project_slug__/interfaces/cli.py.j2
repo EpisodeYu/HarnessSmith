@@ -560,7 +560,17 @@ def chat(
     else:
         session_id, history = session_store.new_id(), []
     history = list(history)
-{% if spec.mcp.enabled %}    mcp_manager = _start_mcp(config)
+{% if spec.mcp.enabled %}    # First run only: pre-fetch stdio MCP packages (npx/uvx) with live progress
+    # before the blocking connect below, so a cold download finishes once here (and
+    # shows progress + a heartbeat) instead of timing the connect out. A sentinel
+    # skips it on later launches. (Only the interactive `chat`/`serve` paths warm —
+    # the one-shot `run` stays lean for scripting/Docker.)
+    import sys as _warm_sys
+
+    from ..harness.mcp import warm_once
+
+    warm_once(config.mcp, log=_warm_sys.stderr)
+    mcp_manager = _start_mcp(config)
 {% endif %}{% if spec.memory.enabled %}    _setup_memory(config)
 {% endif %}    router = ClientRouter(config, mock=mock)
     asker = _cli_asker(mock)
@@ -1044,14 +1054,16 @@ def mcp_warm(
     """
     import sys
 
-    from ..harness.mcp import prewarm_stdio_packages
+    from ..harness.mcp import warm_once
 
     config = load_config(config_path)
     if not any(s.kind == "stdio" for s in config.mcp.servers):
         typer.secho("no stdio MCP servers to warm.", fg=typer.colors.YELLOW)
         return
     typer.echo("Warming MCP server packages (first run can take a minute) ...")
-    results = prewarm_stdio_packages(config.mcp, log=sys.stderr)
+    # force=True: warm even if the sentinel says it's done, and refresh the sentinel
+    # so the next serve/chat skips its own warm.
+    results = warm_once(config.mcp, log=sys.stderr, force=True)
     if not results:
         typer.secho("nothing to warm (no npx/uvx servers).", fg=typer.colors.YELLOW)
         return
@@ -1202,16 +1214,22 @@ def serve(
 {% if spec.memory.enabled %}    _setup_memory(config)
 {% endif %}    # Pass config_path so a /config panel Save persists back to this file.
     application = create_app(config, mock=mock, config_path=config_path)
-{% if spec.mcp.enabled %}    # Warm MCP in the background so the web port binds immediately. The servers'
-    # first launch (uvx/npx cold start) can take a while on a slow network, and
-    # blocking the bind on it makes `serve` look hung. The page polls live status
-    # and chat picks up MCP tools once the manager is ready; the /mcp + chat
-    # handlers also ensure it lazily, and the manager is lock-guarded + idempotent,
-    # so the background warm and any early request converge on a single connect.
+{% if spec.mcp.enabled %}    # First run only: pre-fetch the stdio MCP packages (npx/uvx) HERE, with live
+    # progress to this terminal, so the page opens with tools ready instead of
+    # mid-download — and so a slow cold download shows progress + a heartbeat rather
+    # than looking hung. A sentinel records the warmed set, so every later launch
+    # skips this and binds instantly. After it, the background connect below is a
+    # fast cache hit; the page still polls live status and chat picks up MCP tools
+    # once the manager is ready (lock-guarded + idempotent: any early request and
+    # the background warmer converge on a single connect).
+    import sys as _mcp_sys
     import threading as _mcp_threading
 
+    from ..harness.mcp import warm_once
     from .web import _ensure_mcp_manager
 
+    if warm_once(config.mcp, log=_mcp_sys.stdout) is not None:
+        typer.secho("[mcp] tools ready.", fg=typer.colors.GREEN)
     _mcp_threading.Thread(
         target=_ensure_mcp_manager, args=(application,), daemon=True
     ).start()
