@@ -89,7 +89,7 @@
           <input id="gen_git" type="checkbox" /> <span data-i18n="git_label">git init</span>
         </label>
         <details class="text-sm">
-          <summary class="cursor-pointer text-slate-600" data-i18n="index_summary">高级:包索引 (可选,留空=自动)</summary>
+          <summary class="cursor-pointer text-slate-600" data-i18n="index_summary">UV_DEFAULT_INDEX(可选)</summary>
           <div class="mt-2">
             <input id="index_url" list="index_suggestions" class="w-full rounded-lg border px-3 py-2 font-mono" placeholder="auto" />
             <datalist id="index_suggestions">
@@ -97,7 +97,6 @@
               <option value="https://mirrors.aliyun.com/pypi/simple/"></option>
               <option value="https://pypi.tuna.tsinghua.edu.cn/simple"></option>
             </datalist>
-            <p class="mt-1 text-xs text-slate-500" data-i18n="index_hint">留空=自动:官方可达走官方,墙内不可达自动切清华。在公司代理后面若官方很慢,可填代理能快速访问的镜像(如阿里云)。等价于设置 UV_DEFAULT_INDEX。</p>
           </div>
         </details>
         <div class="flex flex-wrap items-center gap-3">
@@ -156,8 +155,7 @@
         generate_heading: "生成产物",
         oneclick_heading: "一键生成",
         target_label: "目标目录",
-        index_summary: "高级:包索引 (可选,留空=自动)",
-        index_hint: "留空=自动:官方可达走官方,墙内不可达自动切清华。在公司代理后面若官方很慢,可填代理能快速访问的镜像(如阿里云)。等价于设置 UV_DEFAULT_INDEX。",
+        index_summary: "UV_DEFAULT_INDEX(可选)",
         git_label: "git init", oneclick_btn: "一键生成",
         or_divider: "或",
         cli_heading: "CLI 生成", produce_btn: "校验并生成 spec", download_btn: "下载 spec.yaml",
@@ -188,8 +186,7 @@
         generate_heading: "Generate the product",
         oneclick_heading: "One-click generate",
         target_label: "Target directory",
-        index_summary: "Advanced: package index (optional, blank = auto)",
-        index_hint: "Blank = auto: official PyPI when reachable, the Tsinghua mirror when it isn't. Behind a slow corporate proxy, point uv at a mirror the proxy reaches fast (e.g. Aliyun). Same as setting UV_DEFAULT_INDEX.",
+        index_summary: "UV_DEFAULT_INDEX (optional)",
         git_label: "git init", oneclick_btn: "Generate",
         or_divider: "or",
         cli_heading: "CLI generate", produce_btn: "Validate & generate spec", download_btn: "Download spec.yaml",
