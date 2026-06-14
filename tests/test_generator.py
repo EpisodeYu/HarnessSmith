@@ -826,15 +826,16 @@ def test_memory_web_footprint_absent_when_disabled(tmp_path, spec):
 @pytest.mark.parametrize(
     "display_name, project_slug, expected",
     [
-        ("My Coding Assistant", "agent_harness", "My Coding Assistant"),  # spaces kept
+        ("My Coding Assistant", "agent_harness", "My-Coding-Assistant"),  # spaces -> -
+        ("Foo   Bar", "agent_harness", "Foo-Bar"),  # whitespace run -> single -
         ('Bad:/\\<>|?*"Name', "agent_harness", "Bad_________Name"),  # illegal -> _
         (None, "agent_harness", "agent_harness"),  # no display name -> slug
         ("   ", "fallback_slug", "fallback_slug"),  # blank -> slug
         ("...", "fallback_slug", "fallback_slug"),  # only dots -> slug
-        ("ends with dot.", "fallback_slug", "ends with dot"),  # trailing dot trimmed
+        ("ends with dot.", "fallback_slug", "ends-with-dot"),  # trailing dot trimmed
         ("CON", "fallback_slug", "fallback_slug"),  # reserved device name -> slug
         ("con.bat", "fallback_slug", "fallback_slug"),  # reserved + ext -> slug
-        ("Über Bot", "fallback_slug", "Über Bot"),  # non-ASCII preserved
+        ("Über Bot", "fallback_slug", "Über-Bot"),  # non-ASCII preserved
     ],
 )
 def test_launch_script_stem_sanitizes(display_name, project_slug, expected):
@@ -869,12 +870,13 @@ def test_launch_scripts_generated_with_exec_bit(tmp_path, spec):
 
 
 def test_launch_script_name_follows_display_name(tmp_path, spec):
-    """A display name with spaces/illegal chars yields a safe matching filename."""
+    """A display name with spaces/illegal chars yields a safe matching filename:
+    spaces collapse to '-' (no shell quoting needed), illegal chars -> '_'."""
     spec.display_name = "My: Assistant"
     out = tmp_path / "named"
     generate(spec, out, git_init=False)
-    assert (out / "My_ Assistant.sh").is_file()
-    assert (out / "My_ Assistant.bat").is_file()
+    assert (out / "My_-Assistant.sh").is_file()
+    assert (out / "My_-Assistant.bat").is_file()
 
 
 def test_launch_scripts_bootstrap_uv_when_missing(tmp_path, spec):

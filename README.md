@@ -165,7 +165,7 @@ docker build -t my-agent . && docker run --rm -it my-agent
 
 Model and endpoint are configured in `config.yaml` (or on the web `/config` LLM tab): set `model`, point `base_url_env` / `api_key_env` at the appropriate environment variables, and choose `provider: openai` or `provider: anthropic` per profile. An offline trial without any key is available via `--mock` on `run`, `chat`, and `serve`.
 
-Each generated repository also ships its own one-click launcher named after its display name (e.g. `My Coding Assistant.bat` / `.sh`).
+Each generated repository also ships its own one-click launcher named after its display name (spaces collapse to `-` so it needs no shell quoting, e.g. `My-Coding-Assistant.bat` / `.sh`).
 
 ### Product CLI reference
 
@@ -343,7 +343,7 @@ docker build -t my-agent . && docker run --rm -it my-agent
 
 模型与端点在 `config.yaml`(或 Web `/config` 的 LLM tab)配置:设置 `model`,将 `base_url_env` / `api_key_env` 指向对应环境变量,并为每个 profile 选择 `provider: openai` 或 `provider: anthropic`。`run`、`chat`、`serve` 均支持 `--mock`,可在没有任何 key 的情况下离线试用。
 
-每个生成的仓库同样附带以其显示名命名的一键启动器(如 `My Coding Assistant.bat` / `.sh`)。
+每个生成的仓库同样附带以其显示名命名的一键启动器(空白折叠为 `-`,终端无需引号,如 `My-Coding-Assistant.bat` / `.sh`)。
 
 ### 产物 CLI 参考
 

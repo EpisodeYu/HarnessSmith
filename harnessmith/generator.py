@@ -29,16 +29,16 @@ from .spec import HarnessSpec, load_spec
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 PATH_SLUG_TOKEN = "__project_slug__"
 # Path token replaced by the product's launch-script base name (derived from the
-# display name): e.g. ``__launch_name__.sh.j2`` -> ``My Coding Assistant.sh``.
+# display name): e.g. ``__launch_name__.sh.j2`` -> ``My-Coding-Assistant.sh``.
 LAUNCH_NAME_TOKEN = "__launch_name__"
 JINJA_SUFFIX = ".j2"
 SPEC_SNAPSHOT_NAME = "harness.spec.yaml"
 REQUIREMENTS_NAME = "requirements.txt"
 
 # Characters illegal in a Windows filename (the set also covers '/' on POSIX),
-# plus ASCII control chars. Spaces are intentionally KEPT — the launch scripts
-# quote them — so the script name can mirror the display name as closely as
-# possible.
+# plus ASCII control chars. Runs of whitespace are collapsed to a single '-' (see
+# launch_script_stem) so the script name needs no shell quoting on macOS/Linux
+# while still mirroring the display name.
 _ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 # Reserved DOS device names: a file named like one (with or without an
 # extension) is unusable on Windows, so we fall back to the slug.
@@ -52,15 +52,17 @@ _WINDOWS_RESERVED_NAMES = frozenset(
 def launch_script_stem(spec: HarnessSpec) -> str:
     r"""Filesystem-safe base name for the product's one-click launch script.
 
-    Derived from ``display_name`` (falling back to ``project_slug``): spaces and
-    most characters are kept so the script name matches the display name, but
-    characters illegal on Windows (``< > : " / \ | ? *`` + control chars) become
-    ``_``, trailing dots/spaces are trimmed, and reserved DOS device names are
-    rejected. Falls back to ``project_slug`` when nothing usable remains.
+    Derived from ``display_name`` (falling back to ``project_slug``): runs of
+    whitespace collapse to a single ``-`` so the name needs no shell quoting on
+    macOS/Linux, characters illegal on Windows (``< > : " / \ | ? *`` + control
+    chars) become ``_``, leading/trailing dots/spaces/hyphens are trimmed, and
+    reserved DOS device names are rejected. Falls back to ``project_slug`` when
+    nothing usable remains.
     """
     raw = (spec.display_name or spec.project_slug).strip()
     cleaned = _ILLEGAL_FILENAME_CHARS.sub("_", raw)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    cleaned = re.sub(r"\s+", "-", cleaned)
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip(" .-")
     base = cleaned.split(".", 1)[0].strip().upper()
     if not cleaned or base in _WINDOWS_RESERVED_NAMES:
         return spec.project_slug
