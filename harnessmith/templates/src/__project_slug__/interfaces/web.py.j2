@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
+from collections import deque
 from pathlib import Path
 
 import yaml
@@ -39,8 +41,12 @@ from ..harness.context import CONDITIONS, STRATEGIES
 from ..harness.usage import UsageLedger
 {% if spec.memory.enabled %}from ..harness.memory import BACKENDS as _MEMORY_BACKENDS
 {% endif %}from ..harness.debuglog import log, setup as setup_debug_log
-from ..harness.extensions import import_extensions, load_hooks, mounted_hook_names
-from ..harness.hooks import Hooks
+from ..harness.extensions import (
+    build_hook_instances,
+    import_extensions,
+    mounted_hook_names,
+)
+from ..harness.hooks import CompositeHooks, Hooks
 from ..harness.interaction import (
     AskResponse,
     NonInteractiveAsker,
@@ -118,6 +124,84 @@ class _StreamHooks(Hooks):
     def on_error(self, where: str, error: Exception) -> None:
         self._inner.on_error(where, error)
         self._q.put(("error", {"where": where, "error": str(error)}))
+
+
+class _HookLog:
+    """A small in-process ring buffer of hook invocations for the Hooks page.
+
+    Records WHEN each mounted hook fired and at WHICH lifecycle point — names,
+    methods, and a safe detail (tool name / step number / error type) ONLY, never
+    arguments, results, or message content (same privacy contract as the debug
+    log). Process-local and capped, so a long session can't grow it without bound;
+    cleared by hand from the page. No-op unless at least one hook is mounted.
+    """
+
+    def __init__(self, capacity: int = 500) -> None:
+        self._entries: deque[dict] = deque(maxlen=capacity)
+        self._lock = threading.Lock()
+
+    def record(self, label: str, method: str, detail: str = "") -> None:
+        with self._lock:
+            self._entries.append(
+                {"ts": time.time(), "hook": label, "method": method, "detail": detail}
+            )
+
+    def snapshot(self) -> list[dict]:
+        with self._lock:
+            return list(self._entries)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+
+class _RecordingHooks(Hooks):
+    """Wrap ONE user hook so each lifecycle call is timestamped into a ``_HookLog``
+    under that hook's class path, then delegated unchanged (return values for
+    ``before_tool`` / ``after_tool`` are preserved, so policy/redaction still work).
+    """
+
+    def __init__(self, inner: Hooks, label: str, hook_log: _HookLog) -> None:
+        self._inner = inner
+        self._label = label
+        self._log = hook_log
+
+    def before_step(self, step: int, messages: list[dict]) -> None:
+        self._log.record(self._label, "before_step", f"step {step}")
+        self._inner.before_step(step, messages)
+
+    def after_step(self, step: int, response: LLMResponse) -> None:
+        self._log.record(self._label, "after_step", f"step {step}")
+        self._inner.after_step(step, response)
+
+    def before_tool(self, call: ToolCall) -> str | None:
+        self._log.record(self._label, "before_tool", call.name)
+        return self._inner.before_tool(call)
+
+    def after_tool(self, call: ToolCall, result: str) -> str | None:
+        self._log.record(self._label, "after_tool", call.name)
+        return self._inner.after_tool(call, result)
+
+    def on_error(self, where: str, error: Exception) -> None:
+        self._log.record(self._label, "on_error", f"{where}: {type(error).__name__}")
+        self._inner.on_error(where, error)
+
+
+def _recording_hooks(config: Config, hook_log: _HookLog | None) -> Hooks:
+    """Build the mounted hooks, each wrapped to log its calls into ``hook_log``.
+
+    Same composition as ``extensions.load_hooks`` (no-op when none, single when
+    one, composite otherwise) but per-hook recording-aware so the Hooks page can
+    show which hook fired when. Without a ``hook_log`` it is plain ``load_hooks``.
+    """
+    pairs = build_hook_instances(config)
+    if not pairs:
+        return Hooks()
+    if hook_log is not None:
+        wrapped: list[Hooks] = [_RecordingHooks(inst, label, hook_log) for label, inst in pairs]
+    else:
+        wrapped = [inst for _, inst in pairs]
+    return wrapped[0] if len(wrapped) == 1 else CompositeHooks(wrapped)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -373,6 +457,7 @@ def _chat_events(
     confirm_sessions: dict | None = None,
     config_path=None,
     working_dir: str | None = None,
+    hook_log=None,
 ):
     """Drive one ``run()`` in a worker thread and yield its events as SSE.
 
@@ -404,7 +489,10 @@ def _chat_events(
     session so a later turn / resume reuses it.
     """
     q: queue.Queue = queue.Queue()
-    hooks = _StreamHooks(q, load_hooks(config))
+    # Compose the mounted hooks (each wrapped to log its calls for the Hooks page)
+    # UNDER the streaming hook, so a configured guardrail/redactor runs under the
+    # web UI and its invocations show up in the execution log.
+    hooks = _StreamHooks(q, _recording_hooks(config, hook_log))
     on_delta = (lambda text: q.put(("token", {"text": text}))) if stream else None
     # Thinking channel: reasoning models sit silent for seconds before the first
     # token; `event: thinking` lets the UI show "thinking …" instead of nothing.
@@ -620,6 +708,9 @@ def create_app(
     # sticks across a session's turns (held in process; reset on restart).
     app.state.confirm_sessions = {}
     app.state.runs_lock = threading.Lock()
+    # In-process record of mounted-hook invocations for the Hooks page's execution
+    # log (names/methods/timings only; cleared by hand, reset on restart).
+    app.state.hook_log = _HookLog()
 {% if spec.mcp.enabled %}    # The live MCP manager: ONE per serving process, the single source of truth
     # for the MCP page, the Tools page, and the tools offered to the model. Started
     # lazily on the first /mcp call (or eagerly by `serve`), and rebuilt on a server
@@ -681,6 +772,7 @@ def create_app(
                 confirm_sessions=app.state.confirm_sessions,
                 config_path=app.state.config_path,
                 working_dir=working_dir,
+                hook_log=app.state.hook_log,
             ),
             media_type="text/event-stream",
         )
@@ -791,6 +883,19 @@ def create_app(
             "hooks": mounted_hook_names(config),
 {% if spec.memory.enabled %}            "memory": list(_MEMORY_BACKENDS),
 {% endif %}        }
+
+    @app.get("/hooks/log")
+    def hooks_log() -> dict:
+        """The hook-execution log for the Hooks page: when each mounted hook fired
+        and at which lifecycle point. Names/methods/timings + a safe detail only
+        (never arguments/results). Empty until a run invokes a configured hook."""
+        return {"entries": app.state.hook_log.snapshot()}
+
+    @app.post("/hooks/log/clear")
+    def clear_hooks_log() -> dict:
+        """Reset the in-process hook-execution log (manual only)."""
+        app.state.hook_log.clear()
+        return {"ok": True, "entries": []}
 
     @app.get("/usage")
     def usage() -> dict:

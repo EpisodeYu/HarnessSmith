@@ -313,10 +313,12 @@ resolve is reported: hard errors for a role's profile / a paradigm / the context
 strategy (fail-fast), and a warning for a context condition{% if spec.memory.enabled %} / memory backend{% endif %} that isn't
 registered (skipped at runtime — likely a typo or a module you forgot to list here).
 {% if interfaces.web %}
-The web **System** tab edits `extensions` / `hooks` directly (with a read-only
-mirror of what's registered in code). Because adding an `extensions` module imports
-local code on Save, `/config` is a **local-trust** admin surface — never expose it
-on a public network (same posture as the MCP page).{% endif %}
+The web **Hooks** tab mounts/edits hooks and shows a live **execution log** (when
+each mounted hook fired during a run — names/methods/timings only); the **System**
+tab edits `extensions` (with a read-only mirror of what's registered in code).
+Because adding an `extensions` module imports local code on Save, `/config` is a
+**local-trust** admin surface — never expose it on a public network (same posture
+as the MCP page).{% endif %}
 
 ## Add a paradigm
 

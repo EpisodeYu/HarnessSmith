@@ -229,6 +229,27 @@
         <p class="text-xs text-gray-500" data-i18n="mcp_extend_hint">Toggle a server's tools on the Tools tab; each server has a master switch. A server stores only env-var names, never values; secrets stay in .env.</p>
       </div>
 {% endif %}
+      <div data-cfg="hooks" class="hidden space-y-4">
+        <div class="space-y-1">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-medium" data-i18n="hooks_label">Hooks</h4>
+            <button id="cfg-hook-add" type="button" class="rounded-lg border px-2 py-1 text-xs" data-i18n="sys_hooks_add">+ Add hook</button>
+          </div>
+          <p class="text-xs text-slate-500" data-i18n="sys_hooks_hint">Hooks classes (package.module:ClassName) for logging / guardrails / tool policy / redaction. Run in listed order; config is JSON passed to the constructor.</p>
+          <div id="cfg-hooks" class="space-y-2"></div>
+        </div>
+        <div class="space-y-1 border-t pt-3">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-medium" data-i18n="hooklog_label">Hooks execution log</h4>
+            <div class="flex items-center gap-2">
+              <button id="cfg-hooklog-refresh" type="button" class="rounded-lg border px-2 py-1 text-xs" data-i18n="hooklog_refresh">Refresh</button>
+              <button id="cfg-hooklog-clear" type="button" class="rounded-lg border px-2 py-1 text-xs text-red-600" data-i18n="hooklog_clear">Clear</button>
+            </div>
+          </div>
+          <p class="text-xs text-slate-500" data-i18n="hooklog_hint">When each mounted hook fired during a run (names, methods, timings — never arguments or results). Kept in this server process only.</p>
+          <div id="cfg-hooklog" class="max-h-72 overflow-auto rounded-lg border"></div>
+        </div>
+      </div>
       <div data-cfg="prompts" class="hidden space-y-3">
         <label class="block text-sm"><span data-i18n="prompts_system">system</span>
           <textarea id="cfg-p-system" rows="3" class="mt-1 block w-full rounded-lg border px-3 py-2"></textarea></label>
@@ -307,20 +328,14 @@
         </div>
         <div class="space-y-3 border-t pt-3">
           <div>
-            <h4 class="text-sm font-medium" data-i18n="sys_ext_label">Extensions &amp; hooks</h4>
+            <h4 class="text-sm font-medium" data-i18n="sys_ext_label">Extensions</h4>
             <p class="text-xs text-amber-600" data-i18n="sys_ext_warn">Adding an extension module imports local code on Save. Keep /config local-only — never expose it on a public network.</p>
           </div>
           <div class="space-y-1">
             <label class="text-xs font-medium text-slate-600" data-i18n="sys_ext_modules">Extension modules</label>
-            <p class="text-xs text-slate-500" data-i18n="sys_ext_modules_hint">Dotted module paths imported at startup so their @register_* run (custom tools / paradigms / …).</p>
+            <p class="text-xs text-slate-500" data-i18n="sys_ext_modules_hint">Dotted module paths imported at startup so their @register_* run (custom tools / paradigms / …). Mount Hooks on the Hooks tab.</p>
             <div id="cfg-extensions" class="space-y-1"></div>
             <button id="cfg-ext-add" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="sys_ext_add">+ Add module</button>
-          </div>
-          <div class="space-y-1">
-            <label class="text-xs font-medium text-slate-600" data-i18n="sys_hooks_label">Hooks</label>
-            <p class="text-xs text-slate-500" data-i18n="sys_hooks_hint">Hooks classes (package.module:ClassName) for logging / guardrails / tool policy / redaction. Run in listed order; config is JSON passed to the constructor.</p>
-            <div id="cfg-hooks" class="space-y-2"></div>
-            <button id="cfg-hook-add" type="button" class="rounded-lg border px-3 py-1 text-sm" data-i18n="sys_hooks_add">+ Add hook</button>
           </div>
           <div class="space-y-1">
             <label class="text-xs font-medium text-slate-600" data-i18n="sys_reg_label">Registered in code</label>
@@ -392,9 +407,15 @@
         cfg_leave_confirm: "You have unsaved config changes; they apply only after you Save. Switch to Chat anyway?",
         cfg_reload_confirm: "Reload discards your unsaved changes. Continue?",
         subtab_llm: "LLM", subtab_context: "Context", subtab_budget: "Budget",
-        subtab_tools: "Tools",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
+        subtab_tools: "Tools",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_hooks: "Hooks", subtab_prompts: "Prompts", subtab_paradigms: "Paradigms",
         {% if spec.memory.enabled %}subtab_memory: "Memory", {% endif %}subtab_observability: "Observability",
         subtab_system: "System",
+        hooks_label: "Hooks",
+        hooklog_label: "Hooks execution log",
+        hooklog_refresh: "Refresh",
+        hooklog_clear: "Clear",
+        hooklog_hint: "When each mounted hook fired during a run (names, methods, timings — never arguments or results). Kept in this server process only.",
+        hooklog_empty: "(no hook invocations yet — add a hook above, then run a chat)",
         theme_label: "Theme", theme_light: "Light", theme_dark: "Dark",
         sys_lang_label: "Language",
         sys_stream_label: "Streaming",
@@ -410,10 +431,10 @@
         sys_import_confirm: "Import replaces your current configuration. Continue?",
         sys_import_done: "imported",
         sys_import_failed: "nothing to import",
-        sys_ext_label: "Extensions & hooks",
+        sys_ext_label: "Extensions",
         sys_ext_warn: "Adding an extension module imports local code on Save. Keep /config local-only — never expose it on a public network.",
         sys_ext_modules: "Extension modules",
-        sys_ext_modules_hint: "Dotted module paths imported at startup so their @register_* run (custom tools / paradigms / …).",
+        sys_ext_modules_hint: "Dotted module paths imported at startup so their @register_* run (custom tools / paradigms / …). Mount Hooks on the Hooks tab.",
         sys_ext_add: "+ Add module",
         sys_ext_ph: "agent_harness.ext.my_tools",
         sys_hooks_label: "Hooks",
@@ -536,9 +557,15 @@
         cfg_leave_confirm: "有未保存的配置修改,保存后才会生效。仍要切换到对话?",
         cfg_reload_confirm: "重载会丢弃未保存的修改,确定继续?",
         subtab_llm: "LLM", subtab_context: "上下文", subtab_budget: "预算",
-        subtab_tools: "工具",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_prompts: "提示词", subtab_paradigms: "范式",
+        subtab_tools: "工具",{% if spec.mcp.enabled %} subtab_mcp: "MCP",{% endif %} subtab_hooks: "Hooks", subtab_prompts: "提示词", subtab_paradigms: "范式",
         {% if spec.memory.enabled %}subtab_memory: "记忆", {% endif %}subtab_observability: "可观测",
         subtab_system: "系统",
+        hooks_label: "Hooks",
+        hooklog_label: "Hooks 执行日志",
+        hooklog_refresh: "刷新",
+        hooklog_clear: "清空",
+        hooklog_hint: "记录每个已挂 hook 在运行中何时被调用(名称 / 方法 / 时间——绝不含参数或结果)。仅内存、仅当前进程。",
+        hooklog_empty: "(暂无 hook 调用——先在上方添加 hook,再跑一次对话)",
         theme_label: "主题", theme_light: "浅色", theme_dark: "深色",
         sys_lang_label: "语言",
         sys_stream_label: "流式输出",
@@ -554,10 +581,10 @@
         sys_import_confirm: "导入会替换当前配置,确定继续?",
         sys_import_done: "已导入",
         sys_import_failed: "没有可导入的内容",
-        sys_ext_label: "扩展与 Hooks",
+        sys_ext_label: "扩展",
         sys_ext_warn: "保存时新增扩展模块会触发本机代码 import。/config 仅供本地可信使用——切勿暴露到公网。",
         sys_ext_modules: "扩展模块",
-        sys_ext_modules_hint: "启动时 import 的点分模块路径,使其 @register_* 生效(自定义工具 / 范式 / …)。",
+        sys_ext_modules_hint: "启动时 import 的点分模块路径,使其 @register_* 生效(自定义工具 / 范式 / …)。Hooks 在 Hooks 标签页挂载。",
         sys_ext_add: "+ 添加模块",
         sys_ext_ph: "agent_harness.ext.my_tools",
         sys_hooks_label: "Hooks",
@@ -1679,7 +1706,7 @@
     $("fs-modal").addEventListener("click", (e) => { if (e.target === $("fs-modal")) closeFsModal(); });
 
     // ---- config: functional sub-tabs ------------------------------------
-    const CFG_TABS = ["llm", "context", "tools",{% if spec.mcp.enabled %} "mcp",{% endif %} "paradigms", "prompts", "budget",{% if spec.memory.enabled %} "memory",{% endif %} "observability", "system"];
+    const CFG_TABS = ["llm", "context", "tools",{% if spec.mcp.enabled %} "mcp",{% endif %} "hooks", "paradigms", "prompts", "budget",{% if spec.memory.enabled %} "memory",{% endif %} "observability", "system"];
     let cfgTab = "llm";
     let cfg = {};
     // {NAME: bool} from GET /env-status — whether each configured api_key/base_url
@@ -1735,7 +1762,9 @@
       if (name === "tools" && (mcpDiscovered === null || mcpDiscovered.pending)) discoverMcp();
       // Refresh live server status every time the MCP tab opens ("refresh promptly").
       if (name === "mcp") loadMcp();
-{% endif %}    }
+{% endif %}      // Pull the hook-execution log each time the Hooks tab opens.
+      if (name === "hooks") loadHookLog();
+    }
 
     const numOrNull = (v) => { v = (v ?? "").toString().trim(); return v === "" ? null : Number(v); };
     const esc = (v) => (v == null ? "" : String(v).replace(/'/g, "&#39;"));
@@ -2434,6 +2463,45 @@
 {% endif %}      const el = $("cfg-registered");
       el.textContent = (reg.extensions || reg.hooks || reg.paradigms) ? lines.join("\n") : t("sys_reg_none");
     }
+    // --- Hooks execution log (Hooks tab) ---------------------------------
+    let hookLog = [];
+    function renderHookLog() {
+      const host = $("cfg-hooklog");
+      if (!host) return;
+      host.innerHTML = "";
+      if (!hookLog.length) {
+        const empty = document.createElement("div");
+        empty.className = "px-3 py-2 text-xs text-slate-500";
+        empty.textContent = t("hooklog_empty");
+        host.appendChild(empty);
+        return;
+      }
+      const pad = (n, w) => String(n).padStart(w, "0");
+      hookLog.slice().reverse().forEach((ent) => {  // newest first
+        const d = new Date(ent.ts * 1000);
+        const row = document.createElement("div");
+        row.className = "flex items-baseline gap-2 border-b px-3 py-1 font-mono text-xs last:border-0";
+        const ts = document.createElement("span");
+        ts.className = "text-slate-400";
+        ts.textContent = `${pad(d.getHours(), 2)}:${pad(d.getMinutes(), 2)}:${pad(d.getSeconds(), 2)}.${pad(d.getMilliseconds(), 3)}`;
+        const hook = document.createElement("span");
+        hook.className = "font-semibold";
+        hook.textContent = ent.hook;
+        const method = document.createElement("span");
+        method.className = "text-slate-600";
+        method.textContent = ent.method;
+        const detail = document.createElement("span");
+        detail.className = "text-slate-400";
+        detail.textContent = ent.detail || "";
+        row.append(ts, hook, method, detail);
+        host.appendChild(row);
+      });
+    }
+    async function loadHookLog() {
+      try { hookLog = (await (await fetch("/hooks/log")).json()).entries || []; }
+      catch (e) { hookLog = []; }
+      renderHookLog();
+    }
     function renderConfig() {
       const pc = $("cfg-profiles");
       pc.innerHTML = "";
@@ -2755,6 +2823,11 @@
     $("cfg-rule-add").addEventListener("click", () => { $("cfg-rules").appendChild(ruleRow("", "", false)); refreshDirty(); });
     $("cfg-ext-add").addEventListener("click", () => { $("cfg-extensions").appendChild(extRow("")); refreshDirty(); });
     $("cfg-hook-add").addEventListener("click", () => { $("cfg-hooks").appendChild(hookRow({})); refreshDirty(); });
+    $("cfg-hooklog-refresh").addEventListener("click", loadHookLog);
+    $("cfg-hooklog-clear").addEventListener("click", async () => {
+      try { await fetch("/hooks/log/clear", { method: "POST" }); } catch (e) { /* ignore */ }
+      hookLog = []; renderHookLog();
+    });
     $("cfg-rules").addEventListener("click", (e) => {
       const rm = e.target.closest(".r-remove");
       if (rm) { rm.closest(".rule").remove(); refreshDirty(); }  // drops it from the list, not from disk

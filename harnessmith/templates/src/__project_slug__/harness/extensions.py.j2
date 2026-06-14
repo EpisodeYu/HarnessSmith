@@ -83,6 +83,20 @@ def _instantiate_hook(entry: HookConfig) -> Hooks:
     return instance
 
 
+def build_hook_instances(config: Config) -> list[tuple[str, Hooks]]:
+    """The ``(dotted_path, instance)`` pairs for each ENABLED hook in ``config.hooks``.
+
+    Shared by :func:`load_hooks` and any caller that needs the individual instances
+    (e.g. the web's execution-log recorder, which wraps each hook to attribute a
+    call to its class). A bad entry is a clean ``ConfigError``.
+    """
+    return [
+        (entry.class_path.strip(), _instantiate_hook(entry))
+        for entry in _normalize_hooks(config)
+        if entry.enabled
+    ]
+
+
 def load_hooks(config: Config) -> Hooks:
     """Instantiate and compose the hooks named in ``config.hooks``.
 
@@ -93,10 +107,9 @@ def load_hooks(config: Config) -> Hooks:
     fanning out to all of them in listed order. A bad entry is a clean
     ``ConfigError`` (not a traceback) so a typo in ``hooks:`` is actionable.
     """
-    entries = [entry for entry in _normalize_hooks(config) if entry.enabled]
-    if not entries:
+    instances = [inst for _, inst in build_hook_instances(config)]
+    if not instances:
         return Hooks()
-    instances = [_instantiate_hook(entry) for entry in entries]
     if len(instances) == 1:
         return instances[0]
     return CompositeHooks(instances)

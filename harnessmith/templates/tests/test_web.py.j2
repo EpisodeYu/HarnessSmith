@@ -704,6 +704,43 @@ def test_config_post_rejects_bad_extensions_module():
     assert client.get("/config").json()["extensions"] == []  # unchanged
 
 
+def test_hooks_execution_log_records_during_chat_and_clears():
+    """The Hooks page's execution log captures WHEN each mounted hook fired (by
+    class + lifecycle method, with a safe detail) during a run, and clears."""
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "get_current_time", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "hooks": ["{{ project_slug }}.harness.hooks:Hooks"],  # a real, importable no-op hook
+    })
+    client = TestClient(create_app(config, mock=True))
+    assert client.get("/hooks/log").json()["entries"] == []  # empty before any run
+
+    client.get("/chat", params={"message": "hi", "stream": False})  # one mock turn
+    entries = client.get("/hooks/log").json()["entries"]
+    assert entries, "the mounted hook should have fired during the run"
+    label = "{{ project_slug }}.harness.hooks:Hooks"
+    assert all(e["hook"] == label for e in entries)  # attributed to the hook class
+    methods = {e["method"] for e in entries}
+    assert {"before_step", "before_tool", "after_tool"} <= methods
+    assert all(set(e) == {"ts", "hook", "method", "detail"} for e in entries)  # no args/results
+
+    assert client.post("/hooks/log/clear").json()["entries"] == []
+    assert client.get("/hooks/log").json()["entries"] == []
+
+
+def test_index_has_hooks_tab_and_execution_log():
+    """Hooks is its own config sub-tab (after MCP) with the editor + execution log,
+    while Extensions stays on the System tab."""
+    body = _client().get("/").text
+    assert "subtab_hooks" in body and 'data-cfg="hooks"' in body
+    assert 'id="cfg-hooks"' in body and 'id="cfg-hook-add"' in body
+    assert 'id="cfg-hooklog"' in body and "/hooks/log" in body
+    assert 'id="cfg-extensions"' in body  # extensions still present (System tab)
+
+
 def test_config_get_exposes_names_not_secrets():
     resp = _client().get("/config")
     assert resp.status_code == 200
