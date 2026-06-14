@@ -59,7 +59,7 @@
 - **配置导入/导出**:`GET /system/config-export`(下载整份 `config.yaml`,只含 env 名、永不含密钥真值)/ `POST /system/config-import`(`Config.model_validate` 校验 → 进程内替换 + 重挂逻辑 → 写回)。本地可信控制面,勿对公网暴露。
 - **语言**:仅在系统页切换(en/zh),localStorage 记忆。
 - **未保存守卫**:面板编辑仅在 DOM,点 Save 才 `POST /config`;脏标记用比较法(`configSnapshot()` ≠ 基线才算脏,重建拆字段的杂散事件不误标脏)、切走前 `confirm`、切回 `!dirty` 才重载。
-- **Tools 分组**:前端按名分组渲染「你的工具」/ 内置工具 / 每个 MCP server 一个折叠组;`enabled` 是运行期实时开关、`config.yaml` 列出 = 声明进 allowlist 宇宙。
+- **Tools 分组**:前端按名分组渲染「你的工具」/ 内置工具 /「MCP 工具」标题下每个 MCP server 一个折叠组(与「内置工具」并列成块,不再把 MCP 折叠组与内置工具混排);`enabled` 是运行期实时开关、`config.yaml` 列出 = 声明进 allowlist 宇宙。
 - **rule 文件面板内编辑正文**:每文件 `[路径输入 + markdown 正文框 + 删除]` + 「添加规则文件」;后端 `GET/POST /rules` + `_safe_repo_path`(仅允许仓库内相对路径,绝对路径/`..` 穿越一律 400)。保存折进主 Save。自动识别的约定文件(根 `CLAUDE.md`)以 `auto:true` 只读路径 + 「自动」标记显示、正文可编辑但不计入显式 `rules_files`。
 - **MCP 工具自动发现**:`GET /mcp/discover`(对配置 server 连一次 + `list_tools`,失败按 server 隔离),Tools 标签打开即扫描,勾上即写入 allowlist 并启用。健康/增删改/热重连归 Slice 11(见 [`12-slice-11-mcp-management.md`](./12-slice-11-mcp-management.md))。
 

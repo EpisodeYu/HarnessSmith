@@ -437,8 +437,7 @@
         role_generation: "generation (main loop)", role_compaction: "compaction (summarize)",
         role_title: "title (session naming)",
 {% if spec.memory.enabled %}        role_memory: "memory (long-term memory manager)",
-{% endif %}        role_use_first: "(first profile)",
-        profile_name: "name", profile_model: "model", profile_provider: "provider",
+{% endif %}        profile_name: "name", profile_model: "model", profile_provider: "provider",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "env var name",
         adv_section: "Advanced",
@@ -470,7 +469,7 @@
         bud_used: "used", bud_in: "in", bud_out: "out", bud_cached: "cached",
         bud_cost: "cost", bud_over: "limit reached",
         bud_none: "Configure an LLM on the LLM tab first.",
-        tools_group_custom: "Custom tools", tools_group_builtin: "Built-in tools", tools_group_mcp: "MCP",
+        tools_group_custom: "Custom tools", tools_group_builtin: "Built-in tools", tools_group_mcp: "MCP tools",
         tools_scan: "Scan MCP", tools_scanning: "scanning servers…", tools_scanned: "discovered", tools_none: "no tools",
         tools_extend_hint: "Custom tools: register with @registry.tool in harness/tools.py and list the name under tools: in config.yaml. MCP tools are discovered from your servers (Scan); tick one to add it to the allowlist. Toggling applies live. See AGENTS.md.",
         tools_group_mcp_all: "all tools",
@@ -580,8 +579,7 @@
         role_generation: "generation(主循环)", role_compaction: "compaction(压缩)",
         role_title: "title(会话命名)",
 {% if spec.memory.enabled %}        role_memory: "memory(长期记忆管理)",
-{% endif %}        role_use_first: "(用第一个配置)",
-        profile_name: "名称", profile_model: "model", profile_provider: "provider",
+{% endif %}        profile_name: "名称", profile_model: "model", profile_provider: "provider",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "环境变量名",
         adv_section: "高级",
@@ -613,7 +611,7 @@
         bud_used: "已用", bud_in: "输入", bud_out: "输出", bud_cached: "缓存",
         bud_cost: "费用", bud_over: "已达限额",
         bud_none: "请先在 LLM 标签页配置一个 LLM。",
-        tools_group_custom: "自定义工具", tools_group_builtin: "内置工具", tools_group_mcp: "MCP",
+        tools_group_custom: "自定义工具", tools_group_builtin: "内置工具", tools_group_mcp: "MCP 工具",
         tools_scan: "扫描 MCP", tools_scanning: "正在连接服务器…", tools_scanned: "已发现", tools_none: "无工具",
         tools_extend_hint: "自定义工具:在 harness/tools.py 用 @registry.tool 注册,并在 config.yaml 的 tools 中列出名称。MCP 工具经扫描从服务器发现,勾选即加入 allowlist 并实时生效。详见 AGENTS.md。",
         tools_group_mcp_all: "全部工具",
@@ -972,25 +970,24 @@
 
     // The generator dropdown mirrors the GLOBAL generation role (config.roles.
     // generation), so picking one here is the same as setting it on Config → LLM.
-    // Options are the configured profiles; the blank option = "(first profile)",
-    // matching the runtime fallback when the role is unset. Filled from `cfg`, so
-    // it's only meaningful after loadConfig() has run.
+    // Options are the configured profiles only; an unset generation role resolves
+    // to the first profile at runtime, so the dropdown defaults to that instead of
+    // an extra placeholder. Empty (no options) until an LLM is configured. Filled
+    // from `cfg`, so it's only meaningful after loadConfig() has run.
     function populateGenerator() {
       const sel = $("gen-llm");
       if (!sel) return;
       const llms = (cfg && cfg.llms) || [];
       const current = (cfg && cfg.roles && cfg.roles.generation) || "";
       sel.innerHTML = "";
-      const first = document.createElement("option");
-      first.value = ""; first.textContent = t("role_use_first");
-      sel.appendChild(first);
       llms.forEach((p) => {
         if (!p || !p.name) return;
         const o = document.createElement("option");
         o.value = p.name; o.textContent = p.name;
         sel.appendChild(o);
       });
-      sel.value = current;
+      const firstName = (llms.find((p) => p && p.name) || {}).name || "";
+      sel.value = current || firstName;
     }
     // Changing the generator writes the generation role back globally (POST
     // /config replaces only the roles key + persists to config.yaml), updates the
@@ -1853,25 +1850,36 @@
       });
       return html;
     }
+    // First named profile (live). An unset role resolves to the first profile at
+    // runtime, so the dropdowns default to it instead of an extra placeholder;
+    // returns "" when nothing is named yet (no LLM configured).
+    function firstProfileName() {
+      let name = "";
+      document.querySelectorAll("#cfg-profiles .p-name").forEach((inp) => {
+        if (!name && inp.value.trim()) name = inp.value.trim();
+      });
+      return name;
+    }
     // generation + compaction are always shown; any extra configured role is kept.
-    // Both default to the empty "(first profile)" option — that mirrors the runtime
-    // fallback (an unset role resolves to the first profile, NOT to generation).
+    // An unset role defaults to the first profile (mirroring the runtime fallback);
+    // with no profile named yet the dropdown is simply empty.
     function buildRoles() {
       const rc = $("cfg-roles");
       const prev = {};  // preserve current picks across a live rebuild
       rc.querySelectorAll(".role-target").forEach((el) => { prev[el.dataset.role] = el.value; });
       rc.innerHTML = "";
       const roles = cfg.roles || {};
+      const first = firstProfileName();
       const names = ["generation", "compaction", "title"{% if spec.memory.enabled %}, "memory"{% endif %}];
       Object.keys(roles).forEach((r) => { if (!names.includes(r)) names.push(r); });
       names.forEach((role) => {
-        const selected = (role in prev) ? prev[role] : (roles[role] || "");
+        const selected = (role in prev) ? prev[role] : (roles[role] || first);
         const known = t("role_" + role);
         const label = known === ("role_" + role) ? role : known;
         rc.insertAdjacentHTML("beforeend",
           "<label class='flex items-center gap-2 text-sm'><span class='w-44 font-mono'>" + label + "</span>" +
           "<select class='role-target rounded border px-2 py-1' data-role='" + role + "'>" +
-            "<option value=''>" + t("role_use_first") + "</option>" + roleOptions(selected) +
+            roleOptions(selected) +
           "</select></label>");
       });
     }
@@ -2121,9 +2129,14 @@
         if (!groups.has(server)) groups.set(server, []);
         groups.get(server).push({ name: tl.name, short: tl.name.slice(sep + 2), enabled: tl.enabled, listed: true });
       });
-      // One collapsed <details> per MCP server (collapsed = the noisy tools stay
+      // MCP tools live under their own heading (mirroring the built-in heading),
+      // then one collapsed <details> per server (collapsed = the noisy tools stay
       // out of the way); the summary shows a master checkbox (the "big checkbox"
       // total switch for all the server's tools), enabled/total, + any connect error.
+      if (groups.size) {
+        box.insertAdjacentHTML("beforeend",
+          "<p class='mt-2 text-xs font-medium text-slate-500'>" + t("tools_group_mcp") + "</p>");
+      }
       for (const [server, items] of groups) {
         const en = items.filter((e) => e.enabled).length;
         const err = errors.get(server);
@@ -2138,7 +2151,7 @@
         box.insertAdjacentHTML("beforeend",
           "<details class='rounded border'><summary class='flex cursor-pointer items-center gap-2 px-2 py-1 text-sm'>" +
           "<input type='checkbox' class='mcp-master' data-server='" + esc(server) + "' title='" + t("tools_group_mcp_all") + "' onclick='event.stopPropagation()'/>" +
-          "<span class='font-medium'>" + t("tools_group_mcp") + " · " + esc(server) + "</span> " +
+          "<span class='font-medium'>" + esc(server) + "</span> " +
           "<span class='text-xs text-slate-500'>(" + en + "/" + items.length + ")</span>" +
           conn +
           (err ? "<span class='text-xs text-red-600'>" + esc(err) + "</span>" : "") +
