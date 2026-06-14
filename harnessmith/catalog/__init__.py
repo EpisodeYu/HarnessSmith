@@ -55,9 +55,13 @@ class CatalogServer:
 
     @property
     def uvx_package(self) -> str | None:
-        """The pip/uvx package name for a uvx-launched server (else ``None``)."""
-        if self.command == "uvx" and self.args:
-            return self.args[0]
+        """The pip/uvx package name for a uvx-launched server (else ``None``).
+
+        Handles both ``uvx <pkg>`` and ``uvx --from <pkg> <entrypoint>`` (used when
+        the package's console-script name differs from the package name) by taking
+        the first non-flag arg — matching the runtime warm path (``_warm_argv``)."""
+        if self.command == "uvx":
+            return next((a for a in self.args if not a.startswith("-")), None)
         return None
 
     def server_entry(self) -> dict:

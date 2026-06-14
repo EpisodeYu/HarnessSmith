@@ -40,8 +40,8 @@ PARADIGMS = [
 # confirmation gate (``confirm: high``, see ``GENERATE_CONFIRM``), a deliberate,
 # signed loosening of the "high-risk off by default" baseline for wizard products
 # only (Slice 11). It still needs Node (npx) at runtime.
-WIZARD_CATALOG_ORDER = ("fetch", "ddg-search", "git", "desktop-commander")
-WIZARD_CATALOG_DEFAULT = frozenset({"fetch", "ddg-search", "git", "desktop-commander"})
+WIZARD_CATALOG_ORDER = ("fetch", "bing-search", "git", "desktop-commander")
+WIZARD_CATALOG_DEFAULT = frozenset({"fetch", "bing-search", "git", "desktop-commander"})
 
 # Catalog servers whose tools the wizards ship ENABLED by default (overriding the
 # catalog's off-by-default state). Powerful but HITL-gated (``confirm: high``).

@@ -584,8 +584,11 @@ servers and registers their tools into the same registry as the built-ins, so
 the loop is untouched. `config.yaml` is prefilled with a baseline:
 
 - **`fetch`** (`uvx mcp-server-fetch`) — fetch a known URL as markdown; **on**.
-- **`ddg-search`** (`uvx duckduckgo-mcp-server`) — keyless web **search** +
-  `fetch_content`; **on** by default (gives the agent real "search → read" research).
+- **`bing-search`** (`uvx --from mcp-bing-scraper bing-search-mcp`) — keyless web
+  **search** via a Bing scraper that reaches `cn.bing.com`, so it works from mainland
+  China where DuckDuckGo is blocked; **on** by default. Pair with `fetch` to read a
+  result URL. (`ddg-search` stays in the catalog as an alternative — `--mcp-server
+  ddg-search`. Both are HTML scrapers, so a search-engine layout change can break them.)
 - **`git`** (`uvx mcp-server-git`) — read tools (`git_status`/`git_diff`/`git_log`/
   …) **on**; mutating tools (`git_commit`/`git_add`/…) **off**.
 - **`desktop-commander`** (`npx @wonderwhy-er/desktop-commander`) — terminal +
@@ -701,7 +704,7 @@ mcp:
 
 ### Offline & Docker
 
-uvx-based servers (fetch, ddg-search, git) download on first use, then run from
+uvx-based servers (fetch, bing-search, git) download on first use, then run from
 cache. The generator prewarms that cache (`harnessmith new` / `--prewarm`), and
 the `Dockerfile` warms it at build time and sets `UV_OFFLINE=1`, so `docker run`
 works with no network. Node-based servers (Desktop Commander) need Node on the

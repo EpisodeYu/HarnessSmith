@@ -28,11 +28,11 @@ def test_coding_assistant_preset_is_a_valid_spec():
 
 def test_coding_assistant_mcp_prefill_is_the_baseline():
     servers = preset_mcp_servers("coding-assistant")
-    assert [s.name for s in servers] == ["fetch", "ddg-search", "git", "desktop-commander"]
+    assert [s.name for s in servers] == ["fetch", "bing-search", "git", "desktop-commander"]
     fetch = next(s for s in servers if s.name == "fetch")
     assert fetch.safe_tools == ["fetch"]
-    ddg = next(s for s in servers if s.name == "ddg-search")
-    assert ddg.safe_tools == ["search", "fetch_content"]  # keyless web search, read-only
+    bing = next(s for s in servers if s.name == "bing-search")
+    assert bing.safe_tools == ["bing_search"]  # keyless web search (works behind GFW), read-only
     git = next(s for s in servers if s.name == "git")
     assert "git_status" in git.safe_tools and "git_commit" not in git.safe_tools
     # Not pinned to --repository: pinning makes mcp-server-git exit at startup when

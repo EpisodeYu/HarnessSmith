@@ -175,7 +175,7 @@ uv run {{ project_slug }} serve --mock          # offline, no API key
 
 This harness has no built-in productivity tools — its capabilities come from
 [MCP](https://modelcontextprotocol.io) servers, prefilled in `config.yaml`:
-web **search** (`ddg-search`, keyless), **`fetch`** (read a URL), and **`git`**
+web **search** (`bing-search`, keyless; works behind the GFW), **`fetch`** (read a URL), and **`git`**
 read tools are on; mutating `git` and **Desktop Commander** (terminal + files)
 are predefined but off (the agent will ask you to enable one when a task needs
 it). uvx servers are prewarmed and baked into the Docker image so `docker run`

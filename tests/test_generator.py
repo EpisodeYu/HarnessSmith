@@ -601,7 +601,7 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     # servers prefilled into the runtime file
     assert "command: uvx" in config_yaml
     assert "mcp-server-fetch" in config_yaml
-    assert "duckduckgo-mcp-server" in config_yaml  # keyless web search
+    assert "mcp-bing-scraper" in config_yaml  # keyless web search (works behind the GFW)
     assert "mcp-server-git" in config_yaml
     # Pinned (not @latest) so warm-on-first-run reliably caches the exact version
     # the later connect resolves.
@@ -613,7 +613,7 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     config = yaml.safe_load(config_yaml)
     enabled = {t["name"] for t in config["tools"] if t["enabled"]}
     # Every prefilled server is enabled via its wildcard — all tools on by default.
-    assert {"fetch__*", "ddg-search__*", "git__*", "desktop-commander__*"} <= enabled
+    assert {"fetch__*", "bing-search__*", "git__*", "desktop-commander__*"} <= enabled
 
     # Desktop Commander's read tools land in safe_tools so the read-only plan/ask
     # paradigms can read files/list dirs/search code; write/shell stay high-risk.
@@ -647,9 +647,12 @@ def test_mcp_prefill_bakes_uvx_servers_into_dockerfile(tmp_path, preset_spec):
     generate(preset_spec, out, git_init=False, mcp_servers=servers)
 
     dockerfile = (out / "Dockerfile").read_text(encoding="utf-8")
-    assert "uvx mcp-server-fetch --help" in dockerfile
-    assert "uvx duckduckgo-mcp-server --help" in dockerfile
-    assert "uvx mcp-server-git --help" in dockerfile
+    # Warmed via `uvx --from <pkg> python -c ""` (a no-op that just fetches the
+    # package into the cache) — robust for packages whose console script differs
+    # from the package name (e.g. mcp-bing-scraper -> bing-search-mcp).
+    assert "uvx --from mcp-server-fetch python" in dockerfile
+    assert "uvx --from mcp-bing-scraper python" in dockerfile
+    assert "uvx --from mcp-server-git python" in dockerfile
     assert "UV_OFFLINE=1" in dockerfile  # forced offline at container runtime
     assert "desktop-commander" not in dockerfile  # Node-based, not baked
 

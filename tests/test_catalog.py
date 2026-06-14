@@ -20,6 +20,19 @@ def test_catalog_loads_baseline_servers():
     assert "fetch" in available_servers()
 
 
+def test_bing_search_is_keyless_uvx_web_search():
+    bing = get_server("bing-search")
+    assert bing.command == "uvx"
+    # Launched via `uvx --from <pkg> <entrypoint>` (package name != console script);
+    # uvx_package must still resolve the PACKAGE, skipping the `--from` flag.
+    assert bing.args == ["--from", "mcp-bing-scraper", "bing-search-mcp"]
+    assert bing.uvx_package == "mcp-bing-scraper"
+    assert bing.auth_env is None and bing.env == []  # keyless
+    assert bing.safe_tools == ["bing_search"]  # read-only -> usable by plan/ask
+    # The prefill is a single `<server>__*` wildcard enabling the whole server.
+    assert bing.allowlist_entries() == [{"name": "bing-search__*", "enabled": True}]
+
+
 def test_ddg_search_is_keyless_uvx_web_search():
     ddg = get_server("ddg-search")
     assert ddg.command == "uvx"

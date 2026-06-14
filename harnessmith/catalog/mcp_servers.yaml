@@ -34,8 +34,25 @@ servers:
     tools:
       - {name: fetch, risk: safe, default_enabled: true}
 
+  bing-search:
+    # Default web-search server: a keyless Bing scraper that reaches cn.bing.com, so
+    # it works from mainland China where DuckDuckGo (ddg-search) is unreachable.
+    # Package name (mcp-bing-scraper) differs from its console script, so launch via
+    # `uvx --from <pkg> <entrypoint>`. It scrapes Bing HTML (no API key) — robust
+    # enough for general use, but a Bing layout change can break it; swap in
+    # ddg-search or a keyed search server if you need more reliability.
+    description: Web search via Bing (keyless; reaches cn.bing.com, auto CN/EN). Returns title, URL, and snippet per result.
+    transport: stdio
+    command: uvx
+    args: [--from, mcp-bing-scraper, bing-search-mcp]
+    requires: uv
+    source: https://github.com/iridite/bing-search-mcp
+    updated: "2026-06-14"
+    tools:
+      - {name: bing_search, risk: safe, default_enabled: true}
+
   ddg-search:
-    description: Web search via DuckDuckGo (keyless) plus fetching a result page as markdown.
+    description: Web search via DuckDuckGo (keyless) plus fetching a result page as markdown. Unreachable from mainland China — prefer bing-search there.
     transport: stdio
     command: uvx
     args: [duckduckgo-mcp-server]

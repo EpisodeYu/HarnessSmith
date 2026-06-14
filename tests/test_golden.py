@@ -306,7 +306,7 @@ def test_docker_mcp_baseline_bakes_and_runs_offline(tmp_path):
     lock_dependencies(out)
 
     dockerfile = (out / "Dockerfile").read_text(encoding="utf-8")
-    assert "uvx mcp-server-fetch --help" in dockerfile and "UV_OFFLINE=1" in dockerfile
+    assert "uvx --from mcp-server-fetch python" in dockerfile and "UV_OFFLINE=1" in dockerfile
 
     tag = "harnessmith_golden_mcp_baseline"
     build = subprocess.run(
