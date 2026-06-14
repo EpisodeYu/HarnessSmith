@@ -123,14 +123,8 @@
             <button id="chat-send" class="rounded-lg bg-slate-800 px-4 py-2 text-white" data-i18n="chat_send">Send</button>
           </div>
           <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <label class="flex items-center gap-1">
-              <span data-i18n="chat_mode_label">Mode</span>
-              <select id="mode" class="rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_mode_title" title="Loop paradigm"></select>
-            </label>
-            <label class="flex items-center gap-1">
-              <span data-i18n="chat_gen_label">Generator</span>
-              <select id="gen-llm" class="rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_gen_title" title="Generator LLM (generation role)"></select>
-            </label>
+            <select id="mode" class="rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_mode_title" title="Loop paradigm"></select>
+            <select id="gen-llm" class="rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_gen_title" title="Generator LLM (generation role)"></select>
             <label class="flex min-w-0 flex-1 items-center gap-1">
               <span class="shrink-0" data-i18n="chat_cwd_label">Folder</span>
               <input id="cwd" class="min-w-0 flex-1 rounded-lg border px-2 py-1 text-sm" data-i18n-ph="chat_cwd_ph" placeholder="Working directory (optional)" autocomplete="off" />
@@ -370,7 +364,6 @@
       en: {
         nav_chat: "Chat", nav_config: "Config", chat_placeholder: "Type a message…",
         chat_send: "Send", chat_stop: "Stop", chat_mode_title: "Loop paradigm",
-        chat_mode_label: "Mode", chat_gen_label: "Generator",
         chat_gen_title: "Generator LLM (the generation role; synced with Config → LLM)",
         chat_cwd_label: "Folder", chat_cwd_ph: "Working directory (optional)",
         chat_cwd_browse: "Browse", chat_cwd_clear: "Clear",
@@ -514,7 +507,6 @@
       zh: {
         nav_chat: "对话", nav_config: "配置", chat_placeholder: "输入消息…",
         chat_send: "发送", chat_stop: "停止", chat_mode_title: "循环范式",
-        chat_mode_label: "范式", chat_gen_label: "生成模型",
         chat_gen_title: "生成器 LLM(generation 角色;与 配置 → LLM 同步)",
         chat_cwd_label: "目录", chat_cwd_ph: "工作目录(可选)",
         chat_cwd_browse: "浏览", chat_cwd_clear: "清除",
