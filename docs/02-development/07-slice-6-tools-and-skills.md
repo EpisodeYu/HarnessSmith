@@ -4,6 +4,8 @@
 >
 > 前置:Slice 4(MCP opt-in)+ Slice 5(范式)。
 >
+> **后续变更(见 [`12-slice-11-mcp-management.md`](./12-slice-11-mcp-management.md) §1 后续增强)**:本片记录的默认搜索 server `bing-search`(单引擎 Bing 爬虫)后续**已删除**,改为多引擎、带 failover 的 `web-search`(open-websearch);`ddg-search` 保留为 uvx 系备选。Node 系 server(web-search / Desktop Commander)运行期改为「`npm install` 进固定目录 + `node` 直跑」,不再走 `npx` 临时缓存。下文涉及 `bing-search` 处按此理解。
+>
 > SKILL 放本片因**技能依赖工具**(读 `SKILL.md` 正文、跑脚本都靠文件/shell 工具)。
 
 ## 0. 边界与口径

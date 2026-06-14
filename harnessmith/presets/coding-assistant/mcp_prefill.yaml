@@ -8,6 +8,6 @@
 # generation to narrow the allowlist (replace a wildcard with explicit tools).
 servers:
   - fetch
-  - bing-search
+  - web-search
   - git
   - desktop-commander

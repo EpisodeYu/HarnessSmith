@@ -20,17 +20,23 @@ def test_catalog_loads_baseline_servers():
     assert "fetch" in available_servers()
 
 
-def test_bing_search_is_keyless_uvx_web_search():
-    bing = get_server("bing-search")
-    assert bing.command == "uvx"
-    # Launched via `uvx --from <pkg> <entrypoint>` (package name != console script);
-    # uvx_package must still resolve the PACKAGE, skipping the `--from` flag.
-    assert bing.args == ["--from", "mcp-bing-scraper", "bing-search-mcp"]
-    assert bing.uvx_package == "mcp-bing-scraper"
-    assert bing.auth_env is None and bing.env == []  # keyless
-    assert bing.safe_tools == ["bing_search"]  # read-only -> usable by plan/ask
+def test_web_search_is_keyless_multi_engine_node():
+    """Default web search: a keyless, multi-engine, failover scraper (open-websearch,
+    Node). `env_const` forces pure-stdio (MODE=stdio) so it doesn't also bind HTTP;
+    the version is pinned so warm installs exactly what the connect launches."""
+    web = get_server("web-search")
+    assert web.command == "npx"
+    assert web.requires == "node"
+    assert web.args == ["-y", "open-websearch@2.1.11"]
+    assert web.env_const == {"MODE": "stdio"}  # literal non-secret: pure-stdio mode
+    assert web.auth_env is None and web.env == []  # keyless (no secret names)
+    assert web.uvx_package is None  # npx, not uvx
+    assert "search" in web.safe_tools and "fetchWebContent" in web.safe_tools
+    # server_entry carries env_const into config.yaml (env names stay separate).
+    entry = web.server_entry()
+    assert entry["env_const"] == {"MODE": "stdio"} and "env" not in entry
     # The prefill is a single `<server>__*` wildcard enabling the whole server.
-    assert bing.allowlist_entries() == [{"name": "bing-search__*", "enabled": True}]
+    assert web.allowlist_entries() == [{"name": "web-search__*", "enabled": True}]
 
 
 def test_ddg_search_is_keyless_uvx_web_search():

@@ -584,17 +584,26 @@ servers and registers their tools into the same registry as the built-ins, so
 the loop is untouched. `config.yaml` is prefilled with a baseline:
 
 - **`fetch`** (`uvx mcp-server-fetch`) — fetch a known URL as markdown; **on**.
-- **`bing-search`** (`uvx --from mcp-bing-scraper bing-search-mcp`) — keyless web
-  **search** via a Bing scraper that reaches `cn.bing.com`, so it works from mainland
-  China where DuckDuckGo is blocked; **on** by default. Pair with `fetch` to read a
-  result URL. (`ddg-search` stays in the catalog as an alternative — `--mcp-server
-  ddg-search`. Both are HTML scrapers, so a search-engine layout change can break them.)
+- **`web-search`** (`open-websearch`, Node) — keyless, **multi-engine** web search
+  (Bing / Baidu / DuckDuckGo / Brave / Sogou / …) that probes each engine and FAILS
+  OVER between them, so it keeps working when any single engine is slow or
+  unreachable on a given network; **on** by default. Pair with `fetch` to read a
+  result URL. Runs as a pure stdio server via `env_const: {MODE: stdio}`. (`ddg-search`
+  — `uvx duckduckgo-mcp-server` — stays in the catalog as a uvx fallback for hosts
+  without Node: `--mcp-server ddg-search`. Both are HTML scrapers, so an engine
+  layout change can degrade an engine — the failover absorbs it.)
 - **`git`** (`uvx mcp-server-git`) — read tools (`git_status`/`git_diff`/`git_log`/
   …) **on**; mutating tools (`git_commit`/`git_add`/…) **off**.
 - **`desktop-commander`** (`npx @wonderwhy-er/desktop-commander`) — terminal +
   filesystem; **read tools** (`read_file`/`list_directory`/`start_search`/…) are
   `safe` (so `plan`/`ask` can read files too), **write/shell/config tools** are
   `high`-risk (agent-only). Enabled via the `desktop-commander__*` wildcard; needs Node.
+
+Node-based servers (`web-search`, `desktop-commander`) are NOT launched via `npx` at
+runtime. The harness `npm install`s the pinned package ONCE into a stable per-server
+dir (`.harness/mcp-node/<server>`) and launches its bin directly with `node <bin>` —
+no ephemeral `npx` cache, whose per-launch reinstall/cleanup is unreliable on Windows
+(antivirus / file-lock `EPERM`). A later (offline) connect is a fast cache hit.
 
 The system prompt tells the model which capabilities are installed-but-disabled
 (and how to enable them), so a turned-off server is never *silently* missing —
@@ -662,7 +671,7 @@ mcp:
       url: https://mcp.example.com/sse
       transport: sse          # legacy HTTP+SSE; omit (or `http`) for Streamable HTTP
       auth_env: EXAMPLE_TOKEN  # env-var NAME holding the bearer token
-  connect_timeout_seconds: 120  # generous; first uvx/npx cold starts can be slow on Windows / behind the GFW
+  connect_timeout_seconds: 120  # generous; first uvx/npx cold starts can be slow on Windows / restricted networks
   call_timeout_seconds: 120     # per tool CALL: a hung server fails this one call instead of wedging the turn
   # proxy / npm_registry / pip_index: optional overrides (see "Network" below)
 tools:
@@ -689,7 +698,7 @@ package the first time it connects. The harness makes that work on any network
 automatically: it reuses the **system proxy** and probes for a **reachable
 registry** — the official one, else a domestic mirror — directly or through the
 proxy, and injects the winner into the server's subprocess. Nothing to configure
-for direct-internet, GFW, or corporate-proxy machines.
+for direct-internet, restricted, or corporate-proxy machines.
 
 **The first `serve`/`chat` warms automatically.** Before connecting, it pre-fetches
 each `npx`/`uvx` package once, streaming progress (with a heartbeat) to the terminal,
@@ -714,11 +723,12 @@ mcp:
 
 ### Offline & Docker
 
-uvx-based servers (fetch, bing-search, git) download on first use, then run from
+uvx-based servers (fetch, git) download on first use, then run from
 cache. The generator prewarms that cache (`harnessmith new` / `--prewarm`), and
 the `Dockerfile` warms it at build time and sets `UV_OFFLINE=1`, so `docker run`
-works with no network. Node-based servers (Desktop Commander) need Node on the
-host and are not baked. Because Windows rarely ships Node, the one-click launcher
+works with no network. Node-based servers (web-search, Desktop Commander) need Node
+on the host and are not baked; their package is `npm install`ed once into
+`.harness/mcp-node/<server>` and launched directly with `node` (never `npx`). Because Windows rarely ships Node, the one-click launcher
 (`{{ launch_name }}.bat` / `.sh`) detects a missing `node`/`npx` and offers to
 fetch a **portable Node** (pinned LTS) into your user folder — `%LOCALAPPDATA%\{{ project_slug }}`
 on Windows, `~/.local/share/{{ project_slug }}` on macOS/Linux — and prepends it to
@@ -728,10 +738,10 @@ reported with an install hint instead of a raw spawn error.
 
 If a generated repo's first run *didn't* prewarm and `UV_OFFLINE` isn't set, a
 `uvx`/`npx` server still downloads its package on first use (it just shows
-**connecting** until it lands). Behind the GFW, when `pypi.org` / `registry.npmjs.org`
-is unreachable, the child process is pointed at a domestic mirror automatically
+**connecting** until it lands). When `pypi.org` / `registry.npmjs.org` is
+unreachable, the child process is pointed at a domestic mirror automatically
 (Tsinghua PyPI for `uvx`, npmmirror for `npx`) — but **only** if you haven't set
-your own `UV_DEFAULT_INDEX` / `npm_config_registry`, so this is a no-op outside China.
+your own `UV_DEFAULT_INDEX` / `npm_config_registry`, so this is a no-op elsewhere.
 
 ### Windows
 

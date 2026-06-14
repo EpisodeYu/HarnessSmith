@@ -65,16 +65,17 @@ def test_meta_lists_paradigms_and_catalog(client):
 
 
 def test_meta_catalog_curates_order_defaults_and_hides_niche(client):
-    """The wizard surfaces a curated subset, fetch/bing/git first and
+    """The wizard surfaces a curated subset, fetch/web-search/git first and
     desktop-commander last; github (needs token) and time (niche) are hidden.
-    bing-search is the default web search (works behind the GFW; ddg-search is
-    catalog-only). Desktop Commander is checked by default (Slice 11) — HITL-gated."""
+    web-search is the default web search (keyless multi-engine; ddg-search is the
+    catalog-only uvx fallback). Desktop Commander is checked by default (Slice 11)
+    — HITL-gated."""
     catalog = client.get("/meta").json()["catalog"]
     names = [s["name"] for s in catalog]
-    assert names == ["fetch", "bing-search", "git", "desktop-commander"]
+    assert names == ["fetch", "web-search", "git", "desktop-commander"]
     assert "github" not in names and "time" not in names
     checked = {s["name"] for s in catalog if s["default_checked"]}
-    assert checked == {"fetch", "bing-search", "git", "desktop-commander"}
+    assert checked == {"fetch", "web-search", "git", "desktop-commander"}
 
 
 def test_meta_exposes_generate_base_under_repo_root(client):

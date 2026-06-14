@@ -52,6 +52,15 @@
 - `generator.py` — `.env.example` 的 `env_names` 在 `spec.mcp.enabled` 时追加预填 server 的 `auth_env` + `env` 名(**仅名、永不写值**),用户知道该填哪些。
 - **密钥红线不破**:server 配置(`/mcp/servers` / `config.yaml`)仍只存 env 名;密钥**值**走 Slice 3 既有 write-only `/env` 通道入 `.env`,不进 `config.yaml`/trace/日志/响应。
 
+### 后续增强 · Node 启动健壮性 + 默认搜索改多引擎(本次)
+
+> 背景:墙内 Windows 实测两处痛点 —— ① **npx 启动 Node 系 server 不可靠**:`npx` 每次启动都往临时 `_npx` 缓存重装/暂存包,Windows 上该 stage/cleanup 步骤被杀软/索引器/文件锁触发 `EPERM: rmdir` / `EBUSY`,握手前连接就被关(`McpError: Connection closed`);② **单引擎 Bing 爬虫脆**(且实测有 stdout 污染 bug 致握手超时)。本次在不改 spec schema 的前提下兜底。
+
+- **Node server 改「装一次 + `node` 直跑」(`harness/mcp.py`)**:npx 系 server **运行期不再走 `npx`**。warm/prefetch 用 `npm install --prefix .harness/mcp-node/<server>` 把**钉版本**包装进**按 server 独立的固定目录**(`_node_install_dir`),连接时从其 `package.json` 的 `bin` 解析入口、用 `node <bin>` **直接启动**(`_node_bin_path`/`_node_server_args`)——无 `_npx`、无每次启动的 stage/cleanup,启动路径不再触发 `EPERM`;`_node_satisfied`(钉版本已装即跳过 `npm install`)让后续连接**离线秒连**。缺 `node` 仍 `FileNotFoundError`→不重试转红;包没装好是 `RuntimeError`→可重试(prefetch 补装、自愈)。Windows 上 `node` 是 `.exe` 直起(`_windows_stdio_command` 不加 cmd.exe shim),`npm`(install 期)才是 `.cmd` shim。
+- **`McpServerConfig.env_const`(字面量非密钥 env)**:dict,注入 stdio 子进程环境(`env.setdefault`,真实进程 env 优先)。用于 `MODE=stdio` 这类**固定非密钥**配置(open-websearch 默认 `both` 会另起 HTTP 端口,故强制纯 stdio);与 `env`(密钥名,走 `.env`)正交,**不碰密钥红线**、面板 Auth 区不显示它。catalog `env_const` → `server_entry()` → `config.yaml`。
+- **默认搜索 server 换 `web-search`(open-websearch,Node、多引擎、免 key)**:多引擎(Bing/Baidu/DuckDuckGo/Brave/Sogou/…)带探活 + 自动 failover,单引擎慢/不可达不致全挂,比单引擎 Bing 爬虫稳得多。**删除 `bing-search`**(单引擎 + 实测 stdout 污染);`ddg-search` 保留为 uvx 系备选(无 Node 时可用)。preset/wizard 默认勾选从 bing-search 改 web-search。工具描述只说「某些网络下个别引擎可能不可达、会自动 failover」,**不提敏感关键字**。
+- **warm/状态/超时三处兜底**:① warm 对 npm「仅 cleanup 警告致非零退出」按**已装成功**处理(`_node_satisfied` 为准,不看 exit code);② `status().log_tail` 让**实时自愈 note 优先于陈旧的 prefetch「ready」**,并在 prefetch 后写「connecting (MCP handshake)」标记,杜绝「显示 ready 但其实卡在握手」的误导;③ 握手超时的 `_connect_error` 提示补「若包已就绪仍超时,多半是该 server 往 stdout 写了非 JSON-RPC 文本(server 端 bug)」;④ 启动/warm 日志去 `…`,改 ASCII `...`(Windows 控制台不再乱码)。
+
 ## 2. 跨平台运行期健壮性(收敛在 `mcp.py` + 启动脚本)
 
 stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健壮性:
@@ -63,7 +72,7 @@ stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健
   > 翻转早先「`mcp warm` opt-in、不进 bootstrap 以免阻塞产物页打开」的取舍:现首跑前台预热(带进度)正是为消除「装完→MCP 超时→工具不可用→以为产物垃圾」的脏首跑;serve 仍**端口秒开**——只有「未预热过」的首跑会先跑预热,sentinel 命中后秒开不变。
 - **两阶段连接 + 静默自愈(运行期兜底,覆盖没走 warm 的路径:web 后台连/重连按钮/新增 server/`run`)**:`_run_server` 拆成 ①**prefetch**(npx/uvx 经 `_warm_one_server` 用**可存活子进程**off-loop 预拉、进度进 errlog→`status().log_tail`,即便被杀 orphan 续传不丢进度)② **handshake**(`connect_timeout_seconds` 内 `initialize`+`list_tools`,缓存命中即快)。连接失败**后台带退避重试**至 `mcp.connect_max_retries`(默认 4;指数退避 base 5s、cap 60s):重试期清 error 保持 **amber**,耗尽才标 **red**;`shutdown`/`reconnect` 取消不重试(`CancelledError` 直接退出)。**两类失败不重试、立刻转 red**:① **缺 launcher**(没 Node/uv → `FileNotFoundError`,经 `_exc_has` 识别裸异常或 TaskGroup 叶子)——重试也变不出二进制;② **超总自愈预算** `_HEAL_DEADLINE_SECONDS`(300s)——兜住「每次握手都挂满 `connect_timeout`」的 server 别无限 churn。每次成功连接经 `on_connected(self)` 回调让属主**重同步 registry**(`McpManager(on_connected=…)`、`rebuild_manager(…, on_connected=…)`;web/CLI 都传 `sync_mcp_tools`)——否则自愈上来的 server 连上了但工具到不了模型。`mcp.connect_max_retries=0` = 关自愈、快速失败。
 - **首连实时进度 + 工具增量**:`status()` 经 `stdio_client(errlog=临时文件)` 捕获 npx/uvx 拉包 stderr,管理页/Tools 页 amber 时显示进度;`/mcp/discover` 非阻塞 + Tools 页轮询,先就绪先显示,不被慢/失败者卡住。
-- **stdout 纯净(JSON-RPC 契约)**:stdio 子进程的 stdout 必须只承载 JSON-RPC。npm 的 `added N packages …` 安装摘要在旧版 npm 下会随 `npx` 首跑漏到 stdout,被 reader 当协议解析、刷出多段 parse traceback。catalog 的 desktop-commander 故用 `npx --silent -y …`:`--silent` 只压 npm 自身输出(日志/警告本就走 stderr→errlog),不碰被启动 server 自己的 stdout,协议流不受影响。
+- **stdout 纯净(JSON-RPC 契约)**:stdio 子进程的 stdout 必须只承载 JSON-RPC。Node 系 server 现以 `node <bin>` **直跑**(见 §1「后续增强」),启动时根本不跑 npm/npx → 不会有 `added N packages …` 安装摘要漏进 stdout;`web-search` 经 `env_const: {MODE: stdio}` 强制纯 stdio(否则默认 `both` 会另起 HTTP)。若某第三方 server 自身把非 JSON-RPC 文本写到 stdout(实测见过),握手会超时——`_connect_error` 已据此给出「疑似 server 端 stdout 污染」的提示。
 - **便携 Node 自举**:仅当预填了 Node 系 server 时,产物启动脚本与向导一键 job 在缺 Node 时引导下便携 Node(pin LTS,本会话 prepend PATH);跳过/失败均不致命。
 - 详见 [`08-slice-7-wizard.md`](./08-slice-7-wizard.md) §2 的跨平台启动健壮性条目(同源机制)。
 

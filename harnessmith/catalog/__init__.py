@@ -40,7 +40,8 @@ class CatalogServer:
     transport: str = "stdio"  # "stdio" | "remote"
     command: str | None = None
     args: list[str] = field(default_factory=list)
-    env: list[str] = field(default_factory=list)
+    env: list[str] = field(default_factory=list)  # env-var NAMES (secrets, from .env)
+    env_const: dict[str, str] = field(default_factory=dict)  # literal non-secret env (e.g. MODE=stdio)
     url: str | None = None
     auth_env: str | None = None
     requires: str | None = None  # runtime prerequisite: "uv" | "node" | None
@@ -74,6 +75,8 @@ class CatalogServer:
             entry["args"] = list(self.args)
             if self.env:
                 entry["env"] = list(self.env)
+            if self.env_const:
+                entry["env_const"] = dict(self.env_const)
         else:
             entry["url"] = self.url
             if self.auth_env:
@@ -111,6 +114,7 @@ def _coerce_server(name: str, data: dict) -> CatalogServer:
         command=data.get("command"),
         args=list(data.get("args") or []),
         env=list(data.get("env") or []),
+        env_const={str(k): str(v) for k, v in (data.get("env_const") or {}).items()},
         url=data.get("url"),
         auth_env=data.get("auth_env"),
         requires=data.get("requires"),

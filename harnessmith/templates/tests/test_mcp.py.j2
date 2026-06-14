@@ -5,6 +5,7 @@ Generated only when ``mcp.enabled``."""
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -548,16 +549,145 @@ def test_stdio_net_env_respects_user_set_registry(monkeypatch):
     assert "npm_config_registry" not in out  # user's env is left untouched
 
 
-def test_warm_argv_builds_fetch_only_commands():
-    """Warming uses a 'install then no-op' command so it exits instead of starting
-    the long-lived server; non-npx/uvx launchers have nothing to fetch."""
+def test_warm_argv_builds_npm_install_and_uvx_fetch():
+    """An npx server warms via `npm install` into its STABLE per-server prefix (the
+    launch is then a direct `node <bin>`, never the ephemeral npx cache); a uvx
+    server resolves its env via a no-op python; other launchers have nothing."""
+    import os
+
     npx = McpServerConfig(name="dc", command="npx", args=["-y", "@scope/pkg@latest"])
+    prefix = os.path.join(".harness", "mcp-node", "dc")
     assert mcp_module._warm_argv(npx) == (
-        "npx", ["-y", "--package", "@scope/pkg@latest", "--", "node", "-e", "0"]
+        "npm",
+        ["install", "--prefix", prefix, "@scope/pkg@latest",
+         "--no-save", "--no-fund", "--no-audit", "--loglevel", "error"],
     )
     uvx = McpServerConfig(name="g", command="uvx", args=["mcp-server-git", "--repository", "."])
     assert mcp_module._warm_argv(uvx) == ("uvx", ["--from", "mcp-server-git", "python", "-c", ""])
     assert mcp_module._warm_argv(McpServerConfig(name="x", command="mytool")) is None
+
+
+def _fake_node_install(tmp_path, name, pkg_dir_name, *, version="1.0.0", bin_field):
+    """Create a fake `npm install`ed package under .harness/mcp-node/<name> so the
+    node-launch helpers resolve against a real package.json (no real npm)."""
+    pkg_dir = tmp_path / ".harness" / "mcp-node" / name / "node_modules"
+    for part in pkg_dir_name.split("/"):
+        pkg_dir = pkg_dir / part
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+    (pkg_dir / "package.json").write_text(
+        json.dumps({"name": pkg_dir_name, "version": version, "bin": bin_field}),
+        encoding="utf-8",
+    )
+    return pkg_dir
+
+
+def test_node_bin_resolves_from_string_and_map(tmp_path, monkeypatch):
+    """`_node_bin_path` reads the installed package.json `bin`: a string directly,
+    or the entry whose key matches the package name in a bin MAP (e.g. Desktop
+    Commander's {desktop-commander, setup, remove})."""
+    monkeypatch.chdir(tmp_path)
+    _fake_node_install(tmp_path, "web", "open-websearch", version="2.1.11",
+                       bin_field={"open-websearch": "build/index.js"})
+    web = McpServerConfig(name="web", command="npx", args=["-y", "open-websearch@2.1.11"])
+    assert mcp_module._node_bin_path(web).endswith(
+        os.path.join("open-websearch", "build", "index.js")
+    )
+
+    _fake_node_install(tmp_path, "dc", "@scope/desktop-commander", version="0.2.42",
+                       bin_field={"desktop-commander": "dist/index.js", "setup": "dist/setup.js"})
+    dc = McpServerConfig(name="dc", command="npx", args=["-y", "@scope/desktop-commander@0.2.42"])
+    assert mcp_module._node_bin_path(dc).endswith(
+        os.path.join("desktop-commander", "dist", "index.js")
+    )
+
+
+def test_node_bin_missing_install_raises_retryable_not_filenotfound(tmp_path, monkeypatch):
+    """An un-installed node package is a RETRYABLE connect error (RuntimeError), not
+    a missing-launcher one (FileNotFoundError) — so the prefetch installs it and the
+    connect auto-heals instead of going red at once."""
+    monkeypatch.chdir(tmp_path)
+    web = McpServerConfig(name="web", command="npx", args=["-y", "open-websearch@2.1.11"])
+    with pytest.raises(RuntimeError):
+        mcp_module._node_bin_path(web)
+    assert not mcp_module._exc_has(RuntimeError("x"), FileNotFoundError)
+
+
+def test_node_server_launches_node_directly_with_env_const(tmp_path, monkeypatch):
+    """A Node (npx) server is launched as `node <installed bin>` — NEVER `npx` (whose
+    per-run cache churn trips Windows EPERM/EBUSY) — and `env_const` (MODE=stdio) is
+    injected into the child env so it runs as a pure stdio server."""
+    monkeypatch.chdir(tmp_path)
+    _fake_node_install(tmp_path, "web", "open-websearch", version="2.1.11",
+                       bin_field={"open-websearch": "build/index.js"})
+    captured = {}
+
+    def fake_stdio_client(params, errlog=None):
+        captured["params"] = params
+        return params  # _open_streams just returns the cm; we only inspect it here
+
+    monkeypatch.setattr("mcp.client.stdio.stdio_client", fake_stdio_client)
+    web = McpServerConfig(
+        name="web", command="npx", args=["-y", "open-websearch@2.1.11"],
+        env_const={"MODE": "stdio"},
+    )
+    mcp_module._open_streams(web, {})
+    params = captured["params"]
+    assert os.path.basename(params.command).startswith("node")  # node, not npx
+    assert params.args[0].endswith(os.path.join("open-websearch", "build", "index.js"))
+    assert "-y" not in params.args  # npx flags dropped for a direct node launch
+    assert params.env.get("MODE") == "stdio"  # literal non-secret env injected
+
+
+def test_node_warm_skips_reconcile_when_pinned_version_installed(tmp_path, monkeypatch):
+    """When the pinned package@version is already installed, warm skips `npm install`
+    entirely (fast + offline-safe) and never spawns a subprocess."""
+    monkeypatch.chdir(tmp_path)
+    _fake_node_install(tmp_path, "web", "open-websearch", version="2.1.11",
+                       bin_field={"open-websearch": "build/index.js"})
+
+    def _boom(*a, **k):
+        raise AssertionError("must not spawn npm when the pinned version is installed")
+
+    monkeypatch.setattr(mcp_module, "_stream_subprocess", _boom)
+    web = McpServerConfig(name="web", command="npx", args=["-y", "open-websearch@2.1.11"])
+    ok, detail = mcp_module._warm_one_server(web, {"npm_config_registry": "x"}, None, warm_timeout=5.0)
+    assert ok is True and "cached" in detail
+
+
+def test_node_warm_trusts_installed_tree_over_nonzero_cleanup_exit(tmp_path, monkeypatch):
+    """`npm install` can exit non-zero from its post-install cache CLEANUP alone
+    (Windows EPERM rmdir under antivirus) while the package installed fine — warm
+    trusts the installed tree, not the exit code, and reports ready."""
+    monkeypatch.chdir(tmp_path)
+    web = McpServerConfig(name="web", command="npx", args=["-y", "open-websearch@2.1.11"])
+
+    def fake_stream(argv, env, timeout, on_line, **kw):
+        on_line("npm warn cleanup Failed to remove some directories")
+        # The package lands on disk despite the cleanup warning + nonzero exit.
+        _fake_node_install(tmp_path, "web", "open-websearch", version="2.1.11",
+                           bin_field={"open-websearch": "build/index.js"})
+        return 1, False
+
+    monkeypatch.setattr(mcp_module, "_stream_subprocess", fake_stream)
+    ok, detail = mcp_module._warm_one_server(web, {"npm_config_registry": "x"}, None, warm_timeout=5.0)
+    assert ok is True and "ready" in detail
+
+
+def test_status_note_wins_over_stale_ready_log_tail():
+    """While retrying, status() surfaces the live auto-heal note — a stale 'ready'
+    prefetch line in the captured stderr must NOT mask that the server is amber."""
+    import time as _time
+    from types import SimpleNamespace
+
+    mgr = McpManager(McpConfig(servers=[McpServerConfig(name="web", command="npx", args=["-y", "pkg"])]))
+    # Simulate "connecting" (bg thread alive, not connected, no hard error yet) with
+    # a prefetch log that ends in "ready" but a live retry note set.
+    mgr._thread = SimpleNamespace(is_alive=lambda: True)
+    mgr._connect_started["web"] = _time.monotonic()
+    mgr._notes["web"] = "connect failed; retrying in 5s"
+    row = {r["name"]: r for r in mgr.status()}["web"]
+    assert row["connecting"] is True
+    assert row["log_tail"] == "connect failed; retrying in 5s"
 
 
 def test_prewarm_reports_unreachable_without_spawning(monkeypatch):

@@ -221,6 +221,7 @@ mcp:
 {% endif %}{% if s.get("command") %}      command: {{ s.command }}
       args: {{ s.args | tojson }}
 {% if s.get("env") %}      env: {{ s.env | tojson }}            # env-var NAMES injected into the subprocess
+{% endif %}{% if s.get("env_const") %}      env_const: {{ s.env_const | tojson }}   # literal NON-secret env set on the child (e.g. {"MODE": "stdio"})
 {% endif %}{% endif %}{% if s.get("url") %}      url: {{ s.url }}
 {% if s.get("auth_env") %}      auth_env: {{ s.auth_env }}        # env-var NAME holding a bearer token
 {% endif %}{% endif %}{% if s.get("safe_tools") %}      safe_tools: {{ s.safe_tools | tojson }}

@@ -625,7 +625,7 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     # servers prefilled into the runtime file
     assert "command: uvx" in config_yaml
     assert "mcp-server-fetch" in config_yaml
-    assert "mcp-bing-scraper" in config_yaml  # keyless web search (works behind the GFW)
+    assert "open-websearch" in config_yaml  # keyless multi-engine web search (Node)
     assert "mcp-server-git" in config_yaml
     # Pinned (not @latest) so warm-on-first-run reliably caches the exact version
     # the later connect resolves.
@@ -637,7 +637,12 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     config = yaml.safe_load(config_yaml)
     enabled = {t["name"] for t in config["tools"] if t["enabled"]}
     # Every prefilled server is enabled via its wildcard — all tools on by default.
-    assert {"fetch__*", "bing-search__*", "git__*", "desktop-commander__*"} <= enabled
+    assert {"fetch__*", "web-search__*", "git__*", "desktop-commander__*"} <= enabled
+
+    # web-search carries a literal non-secret env (MODE=stdio) so it runs as a pure
+    # stdio MCP server (no extra HTTP port), distinct from secret env NAMES.
+    web = next(s for s in config["mcp"]["servers"] if s["name"] == "web-search")
+    assert web["env_const"] == {"MODE": "stdio"} and "env" not in web
 
     # Desktop Commander's read tools land in safe_tools so the read-only plan/ask
     # paradigms can read files/list dirs/search code; write/shell stay high-risk.
@@ -673,12 +678,12 @@ def test_mcp_prefill_bakes_uvx_servers_into_dockerfile(tmp_path, preset_spec):
     dockerfile = (out / "Dockerfile").read_text(encoding="utf-8")
     # Warmed via `uvx --from <pkg> python -c ""` (a no-op that just fetches the
     # package into the cache) — robust for packages whose console script differs
-    # from the package name (e.g. mcp-bing-scraper -> bing-search-mcp).
+    # from the package name.
     assert "uvx --from mcp-server-fetch python" in dockerfile
-    assert "uvx --from mcp-bing-scraper python" in dockerfile
     assert "uvx --from mcp-server-git python" in dockerfile
     assert "UV_OFFLINE=1" in dockerfile  # forced offline at container runtime
     assert "desktop-commander" not in dockerfile  # Node-based, not baked
+    assert "open-websearch" not in dockerfile  # Node-based web search, not baked
 
 
 def test_mcp_disabled_ignores_prefill(tmp_path, spec):

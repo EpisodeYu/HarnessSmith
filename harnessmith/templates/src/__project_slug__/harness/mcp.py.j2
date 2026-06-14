@@ -53,10 +53,11 @@ _NPM_MIRROR = "https://registry.npmmirror.com"
 
 
 def _missing_launcher_message(command: str) -> str:
-    if command.lower().removesuffix(".cmd").removesuffix(".bat") in _WINDOWS_CMD_SHIMS:
+    base = command.lower().removesuffix(".cmd").removesuffix(".bat").removesuffix(".exe")
+    if base in _WINDOWS_CMD_SHIMS or base == "node":
         return (
             f"MCP stdio launcher {command!r} was not found on PATH. "
-            "Install Node.js (which provides npx/npm) or edit config.yaml to use "
+            "Install Node.js (which provides node/npm/npx) or edit config.yaml to use "
             "a launcher that exists on this machine."
         )
     if command.lower() == "uvx":
@@ -104,6 +105,144 @@ def _base_command(command: str | None) -> str:
     import os
 
     return os.path.basename(command or "").lower().removesuffix(".cmd").removesuffix(".exe")
+
+
+# --- Node (npx) servers: install once into a stable per-server dir, launch `node`
+#     directly ----------------------------------------------------------------
+#
+# An npx server is NOT launched via ``npx`` at runtime. ``npx`` re-installs/stages
+# the package into its ephemeral ``_npx`` cache on EVERY launch, and on Windows that
+# stage/cleanup step trips ``EPERM: rmdir`` / ``EBUSY`` (antivirus / indexer / file
+# locks) — which closes the stdio connection before the handshake. Instead we
+# ``npm install`` the pinned package ONCE into a stable, project-owned prefix
+# (``.harness/mcp-node/<server>``) and launch its bin DIRECTLY with ``node <bin>``:
+# no ``_npx``, no per-launch staging, no cleanup — so the launch path never trips
+# that error and a later (offline) connect is a true cache hit.
+
+
+def _npx_package(server: McpServerConfig) -> str | None:
+    """The npm package spec of an ``npx`` server (first non-flag arg), else ``None``."""
+    if _base_command(server.command) != "npx":
+        return None
+    return next((a for a in server.args if not a.startswith("-")), None)
+
+
+def _node_install_dir(name: str) -> str:
+    """Stable, project-owned npm prefix for one Node server (gitignored state dir).
+
+    Installed into ONCE (warm/prefetch) and launched from on every connect — never
+    the ephemeral ``npx`` cache. Relative to the run cwd (the project root), like
+    the ``.mcp-warmed`` sentinel."""
+    import os
+
+    return os.path.join(".harness", "mcp-node", name)
+
+
+def _node_package_name(spec: str) -> str:
+    """Package NAME from an npm spec: strip a trailing ``@version`` but keep a
+    leading scope ``@`` (``@scope/pkg@1.2.3`` -> ``@scope/pkg``; ``pkg@1`` -> ``pkg``)."""
+    at = spec.rfind("@")
+    return spec[:at] if at > 0 else spec
+
+
+def _node_requested_version(spec: str) -> str | None:
+    """The pinned version of an npm spec, or ``None`` when unpinned."""
+    at = spec.rfind("@")
+    return spec[at + 1:] if at > 0 else None
+
+
+def _node_pkg_dir(server: McpServerConfig) -> str | None:
+    """``<prefix>/node_modules/<pkg>`` for an npx server (handles scoped names)."""
+    import os
+
+    pkg = _npx_package(server)
+    if pkg is None:
+        return None
+    name = _node_package_name(pkg)
+    return os.path.join(_node_install_dir(server.name), "node_modules", *name.split("/"))
+
+
+def _node_manifest(server: McpServerConfig) -> dict | None:
+    """The installed package's ``package.json`` (dict), or ``None`` if absent."""
+    import json
+    import os
+
+    pkg_dir = _node_pkg_dir(server)
+    if pkg_dir is None:
+        return None
+    try:
+        with open(os.path.join(pkg_dir, "package.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def _node_satisfied(server: McpServerConfig) -> bool:
+    """True when the pinned package@version is already installed — so warm can skip
+    the ``npm install`` reconcile entirely (fast AND offline-safe on every later
+    connect). An unpinned spec always reconciles (it could resolve to something
+    newer)."""
+    pkg = _npx_package(server)
+    if pkg is None:
+        return False
+    want = _node_requested_version(pkg)
+    if not want:
+        return False
+    manifest = _node_manifest(server)
+    return bool(manifest and manifest.get("version") == want)
+
+
+def _node_install_argv(server: McpServerConfig) -> tuple[str, list[str]] | None:
+    """``(npm, [install --prefix <dir> <pkg> ...])`` to install an npx server's
+    package into its stable per-server prefix, or ``None`` for a non-npx server.
+    ``--no-save`` keeps it a bare install; ``--loglevel error`` keeps npm's chatter
+    off the warm log (and off the protocol stream — the launch is plain ``node``)."""
+    pkg = _npx_package(server)
+    if pkg is None:
+        return None
+    return "npm", [
+        "install", "--prefix", _node_install_dir(server.name), pkg,
+        "--no-save", "--no-fund", "--no-audit", "--loglevel", "error",
+    ]
+
+
+def _node_bin_path(server: McpServerConfig) -> str:
+    """Absolute path to the installed package's bin JS (run as ``node <path>``).
+
+    Reads the installed ``package.json`` ``bin`` — a string, or the entry whose key
+    matches the package name in a bin MAP (else the first). Raises ``RuntimeError``
+    (a RETRYABLE connect error, not a missing-launcher one) when the package isn't
+    installed yet: the prefetch installs it and the connect heals on the next try."""
+    import os
+
+    pkg = _npx_package(server)
+    pkg_dir = _node_pkg_dir(server)
+    if pkg is None or pkg_dir is None:
+        raise RuntimeError(f"mcp server {server.name!r} is not an npx package server")
+    manifest = _node_manifest(server)
+    if manifest is None:
+        raise RuntimeError(
+            f"node package for {server.name!r} is not installed yet at {pkg_dir} "
+            "(warm/prefetch installs it; the connect then retries)"
+        )
+    name = _node_package_name(pkg)
+    bin_field = manifest.get("bin")
+    if isinstance(bin_field, str):
+        rel = bin_field
+    elif isinstance(bin_field, dict) and bin_field:
+        rel = bin_field.get(name.rsplit("/", 1)[-1]) or next(iter(bin_field.values()))
+    else:
+        rel = manifest.get("main") or "index.js"
+    return os.path.normpath(os.path.join(pkg_dir, rel))
+
+
+def _node_server_args(server: McpServerConfig) -> list[str]:
+    """Server args that FOLLOW the package spec — the npx flags before it (``-y`` /
+    ``--silent``) are npx-only and dropped for a direct ``node`` launch."""
+    pkg = _npx_package(server)
+    if pkg is None or pkg not in server.args:
+        return []
+    return list(server.args[server.args.index(pkg) + 1:])
 
 
 def _url_ok(url: str, proxy: str | None = None, timeout: float = 3.0) -> bool:
@@ -250,7 +389,10 @@ def _connect_error(server: McpServerConfig, exc: BaseException, net_env: dict[st
     if family and "timeout" in msg.lower():
         return (
             f"{msg} — the package may still be cold-downloading; run `mcp warm` "
-            "first, or raise mcp.connect_timeout_seconds in config.yaml."
+            "first, or raise mcp.connect_timeout_seconds in config.yaml. If the "
+            "package is already prepared/ready, a handshake timeout usually means "
+            "the server wrote non-JSON-RPC text to its stdout (a server-side bug) — "
+            "check its logs or try a different server."
         )
     return msg
 
@@ -274,13 +416,22 @@ def _open_streams(server: McpServerConfig, net_env: dict[str, str] | None = None
         from mcp.client.stdio import stdio_client
 
         env = dict(os.environ)
+        for key, value in server.env_const.items():  # literal non-secret env (e.g. MODE=stdio); a real env value wins
+            env.setdefault(key, value)
         for name in server.env:  # inject named secrets from .env into the child
             value = resolve_env(name)
             if value is not None:
                 env[name] = value
         for key, value in (net_env or {}).items():  # resolved registry/proxy; user's setting wins
             env.setdefault(key, value)
-        command, args = _windows_stdio_command(server.command, server.args)
+        # Node (npx) servers launch DIRECTLY from their stable per-server install
+        # (`node <bin>`) — never the ephemeral npx cache (see `_node_install_dir`).
+        if _npx_package(server) is not None:
+            command, args = _windows_stdio_command(
+                "node", [_node_bin_path(server), *_node_server_args(server)]
+            )
+        else:
+            command, args = _windows_stdio_command(server.command, server.args)
         params = StdioServerParameters(command=command, args=args, env=env)
         return stdio_client(params, errlog) if errlog is not None else stdio_client(params)
 
@@ -491,6 +642,9 @@ class McpManager:
                     if errlog is not None:
                         stack.callback(self._close_log, name, errlog)
                     await self._prefetch(server, errlog)  # phase 1 (no-op for non-package)
+                    if errlog is not None:  # supersede the prefetch's "ready" so status shows the live phase
+                        errlog.write(f"[{name}] connecting (MCP handshake)...\n")
+                        errlog.flush()
                     # `asyncio.wait_for(coro)` wraps `coro` in another Task; anyio's MCP
                     # transports must be entered and exited in the SAME task, so use
                     # `asyncio.timeout()` here instead.
@@ -725,8 +879,10 @@ class McpManager:
                     # Live feedback while a (possibly slow) connect/fetch is in flight:
                     # how long it's been trying + the latest stderr line (npx/uvx output).
                     "connecting_seconds": round(time.monotonic() - started, 1) if (connecting and started) else None,
-                    # live fetch/handshake stderr, or the auto-heal note while backing off
-                    "log_tail": (self._log_tail(name) or self._notes.get(name, "")) if connecting else "",
+                    # The live auto-heal note (retrying/backoff) wins over the captured
+                    # stderr tail, so a stale "ready" prefetch line never masks a server
+                    # that's actually still handshaking / retrying.
+                    "log_tail": (self._notes.get(name) or self._log_tail(name) or "") if connecting else "",
                     "error": error,
                     "tool_count": len(tools) if tools is not None else 0,
                 }
@@ -753,18 +909,17 @@ def rebuild_manager(
 
 
 def _warm_argv(server: McpServerConfig) -> tuple[str, list[str]] | None:
-    """A 'fetch the package into the cache, then exit' command for an npx/uvx server
-    (so warming doesn't start the long-lived server), or ``None`` when the launcher
-    isn't a package fetch. ``npx`` installs the package then runs a no-op ``node``;
-    ``uvx`` resolves the tool env then runs a no-op ``python``."""
-    pkg = next((a for a in server.args if not a.startswith("-")), None)
-    if pkg is None:
-        return None
+    """The 'prepare the package, then exit' command for an npx/uvx server (so warming
+    doesn't start the long-lived server), or ``None`` when the launcher isn't a
+    package fetch. ``npx`` -> ``npm install`` into a stable per-server prefix (the
+    launch then runs ``node <bin>`` from it, never the ephemeral npx cache); ``uvx``
+    -> resolve the tool env then run a no-op ``python``."""
     cmd = _base_command(server.command)
     if cmd == "npx":
-        return server.command, ["-y", "--package", pkg, "--", "node", "-e", "0"]
+        return _node_install_argv(server)
     if cmd == "uvx":
-        return server.command, ["--from", pkg, "python", "-c", ""]
+        pkg = next((a for a in server.args if not a.startswith("-")), None)
+        return (server.command, ["--from", pkg, "python", "-c", ""]) if pkg else None
     return None
 
 
@@ -802,7 +957,7 @@ def _stream_subprocess(argv, env, timeout, on_line, heartbeat_every: float = 5.0
         try:
             line = lines.get(timeout=heartbeat_every)
         except queue.Empty:
-            on_line(f"… still downloading ({int(time.monotonic() - start)}s)")
+            on_line(f"... still downloading ({int(time.monotonic() - start)}s)")
         else:
             if line is None:
                 break
@@ -829,6 +984,10 @@ def _warm_one_server(
     warm = _warm_argv(server)
     if warm is None:  # a local script / non-npx-uvx launcher — nothing to fetch
         return None
+    # A Node server whose pinned version is already installed needs nothing: skip the
+    # `npm install` reconcile so every later connect is fast AND works fully offline.
+    if _npx_package(server) is not None and _node_satisfied(server):
+        return True, "ready (cached)"
     configured, family = _source_status(server, net_env)
     if not configured:  # no reachable registry found — don't hang, report it
         return False, _unreachable_advice(family)
@@ -845,7 +1004,7 @@ def _warm_one_server(
             log.write(msg + "\n")
             log.flush()
 
-    _say(f"[{server.name}] downloading: {server.command} {' '.join(server.args)} …")
+    _say(f"[{server.name}] preparing: {server.command} {' '.join(server.args)} ...")
     tail: list[str] = []
 
     def _on_line(line: str) -> None:
@@ -861,6 +1020,11 @@ def _warm_one_server(
         return True, f"still fetching after {int(warm_timeout)}s (will finish on first connect)"
     if code == 0:
         return True, "ready"
+    # `npm install` can exit non-zero from its post-install cache CLEANUP alone
+    # (Windows `EPERM: rmdir` under antivirus / file locks) while the package
+    # actually installed fine — trust the installed tree, not the exit code.
+    if family == "npm" and _node_satisfied(server):
+        return True, "ready (npm cleanup warning ignored)"
     return False, f"launcher exited {code}: {'; '.join(tail[-3:])}".strip()
 
 
@@ -939,7 +1103,7 @@ def warm_once(
     if log is not None:
         log.write(
             "[mcp] preparing tool packages (one-time; the first run can take a "
-            "minute on a slow network) …\n"
+            "minute on a slow network) ...\n"
         )
         log.flush()
     results = prewarm_stdio_packages(config, log=log)

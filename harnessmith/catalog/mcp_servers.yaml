@@ -34,31 +34,55 @@ servers:
     tools:
       - {name: fetch, risk: safe, default_enabled: true}
 
-  bing-search:
-    # Default web-search server: a keyless Bing scraper that reaches cn.bing.com, so
-    # it works from mainland China where DuckDuckGo (ddg-search) is unreachable.
-    # Package name (mcp-bing-scraper) differs from its console script, so launch via
-    # `uvx --from <pkg> <entrypoint>`. It scrapes Bing HTML (no API key) — robust
-    # enough for general use, but a Bing layout change can break it; swap in
-    # ddg-search or a keyed search server if you need more reliability.
-    description: Web search via Bing (keyless; reaches cn.bing.com, auto CN/EN). Returns title, URL, and snippet per result.
+  web-search:
+    # Default web-search server: a keyless, multi-engine scraper that probes each
+    # engine for reachability and FAILS OVER between them (Bing / Baidu / DuckDuckGo
+    # / Brave / Sogou / …), so it keeps working when any single engine is slow or
+    # unreachable on a given network — much more resilient than a single-engine
+    # scraper. Node-based (npx); launched directly from a stable per-server install
+    # (see harness/mcp.py `_node_*`), never the ephemeral npx cache. `MODE=stdio`
+    # (env_const) keeps it a pure stdio MCP server — without it the default `both`
+    # mode also binds an HTTP port. Pinned (NOT @latest) so warm-on-first-run
+    # installs the exact version the later connect launches; bump it + `updated:`
+    # together when refreshing. Still an HTML scraper, so an engine layout change
+    # can degrade a single engine (the failover absorbs it).
+    description: >-
+      Multi-engine web search (Bing, Baidu, DuckDuckGo, Brave, Sogou, and more)
+      with automatic failover; keyless. Returns title, URL, and snippet per
+      result, and can fetch a result page's content. Some engines may be
+      unreachable on certain networks — it falls back across engines automatically.
     transport: stdio
-    command: uvx
-    args: [--from, mcp-bing-scraper, bing-search-mcp]
-    requires: uv
-    source: https://github.com/iridite/bing-search-mcp
+    command: npx
+    args: ["-y", "open-websearch@2.1.11"]
+    env_const: {MODE: stdio}
+    requires: node
+    source: https://github.com/Aas-ee/open-webSearch
     updated: "2026-06-14"
     tools:
-      - {name: bing_search, risk: safe, default_enabled: true}
+      # All read-only network reads (search + fetch a page) -> safe, so the
+      # read-only plan/ask paradigms can search/read too.
+      - {name: search, risk: safe, default_enabled: true}
+      - {name: fetchWebContent, risk: safe, default_enabled: true}
+      - {name: fetchGithubReadme, risk: safe, default_enabled: true}
+      - {name: fetchCsdnArticle, risk: safe, default_enabled: false}
+      - {name: fetchLinuxDoArticle, risk: safe, default_enabled: false}
+      - {name: fetchJuejinArticle, risk: safe, default_enabled: false}
 
   ddg-search:
-    description: Web search via DuckDuckGo (keyless) plus fetching a result page as markdown. Unreachable from mainland China — prefer bing-search there.
+    # uvx-based (no Node) keyless fallback. DuckDuckGo is unreachable on some
+    # networks — prefer `web-search` (multi-engine) there; this stays as a
+    # lightweight uvx alternative for hosts without Node, or where DuckDuckGo is
+    # reachable. Add with `--mcp-server ddg-search`.
+    description: >-
+      Web search via DuckDuckGo (keyless) plus fetching a result page as
+      markdown. A uvx-based alternative (no Node); DuckDuckGo is unreachable on
+      some networks, where web-search is the better default.
     transport: stdio
     command: uvx
     args: [duckduckgo-mcp-server]
     requires: uv
     source: https://github.com/nickclyde/duckduckgo-mcp-server
-    updated: "2026-06-04"
+    updated: "2026-06-14"
     tools:
       - {name: search, risk: safe, default_enabled: true}
       - {name: fetch_content, risk: safe, default_enabled: true}
