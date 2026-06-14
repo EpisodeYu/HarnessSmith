@@ -257,11 +257,13 @@ class WebAsker:
 
 
 _TITLE_PROMPT = (
-    "Generate a very short title naming the TOPIC of the user's request. "
-    "Reply in the SAME language as the request.\n\n"
+    "You are a session-title generator. You do NOT answer, fulfill, or respond to "
+    "the request — your ONLY job is to name its TOPIC as a short label.\n\n"
     "Rules:\n"
-    "- Output ONLY the title — no quotes, no surrounding punctuation, no commentary.\n"
-    "- A concise noun phrase, not a full sentence.\n"
+    "- Reply in the SAME language as the request.\n"
+    "- Output ONLY the title — no quotes, no surrounding punctuation, no commentary, "
+    "and NEVER an answer to the request.\n"
+    "- A concise noun phrase naming the topic, not a full sentence and not a reply.\n"
     "- <= 8 words, or <= 16 Chinese characters."
 )
 
@@ -292,7 +294,16 @@ def _generate_title(client, question: str) -> str:
         resp = client.complete(
             [
                 {"role": "system", "content": _TITLE_PROMPT},
-                {"role": "user", "content": q[:2000]},
+                # Wrap the message as material to be NAMED (delimited), not a turn to
+                # answer — a bare question like "what is X?" otherwise tempts the model
+                # to reply instead of titling.
+                {
+                    "role": "user",
+                    "content": (
+                        "Name the topic of this request as a short title "
+                        "(do NOT answer it):\n\n<request>\n" + q[:2000] + "\n</request>"
+                    ),
+                },
             ],
             None,
         )
