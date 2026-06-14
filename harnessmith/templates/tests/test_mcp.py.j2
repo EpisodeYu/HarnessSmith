@@ -655,9 +655,10 @@ def test_warm_once_runs_then_skips_via_sentinel(tmp_path, monkeypatch):
     assert forced == [("dc", True, "ready")] and calls == [1, 1]  # force re-runs
 
 
-def test_warm_once_does_not_sticky_skip_on_failure(tmp_path, monkeypatch):
-    """A failed warm writes NO sentinel, so the next launch retries (e.g. once Node
-    is installed) instead of being stuck 'warmed' but broken."""
+def test_warm_once_records_sentinel_even_on_failure(tmp_path, monkeypatch):
+    """A FAILED warm still records the sentinel, so a permanent gap (no Node) doesn't
+    re-nag every launch; the connect-time prefetch + auto-heal recover anything that
+    was merely transient."""
     calls: list[int] = []
     monkeypatch.setattr(
         mcp_module, "prewarm_stdio_packages",
@@ -666,9 +667,9 @@ def test_warm_once_does_not_sticky_skip_on_failure(tmp_path, monkeypatch):
     config = McpConfig(servers=[McpServerConfig(name="dc", command="npx", args=["-y", "pkg"])])
 
     mcp_module.warm_once(config, state_dir=str(tmp_path))
-    assert not (tmp_path / ".mcp-warmed").exists()
-    mcp_module.warm_once(config, state_dir=str(tmp_path))
-    assert calls == [1, 1]  # retried, not skipped
+    assert (tmp_path / ".mcp-warmed").is_file()  # recorded despite the failure
+    second = mcp_module.warm_once(config, state_dir=str(tmp_path))
+    assert second is None and calls == [1]  # skipped: not re-warmed every launch
 
 
 def test_warm_once_noop_without_package_servers(tmp_path):
@@ -791,6 +792,59 @@ def test_no_auto_heal_when_max_retries_zero(monkeypatch):
         assert _wait_until(lambda: mgr.errors.get("dummy") is not None)
         time.sleep(0.2)  # give any (wrongly-scheduled) retry a chance to fire
         assert attempts["n"] == 1  # exactly one attempt, no retry
+    finally:
+        mgr.close()
+
+
+def test_missing_launcher_is_not_retried(monkeypatch):
+    """A missing launcher (no Node/uv → FileNotFoundError, possibly wrapped in a
+    TaskGroup) goes red at once — retrying can't conjure the binary."""
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_BASE", 0.02)
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_CAP", 0.02)
+    attempts = {"n": 0}
+
+    async def fake_prefetch(self, server, errlog):
+        return None
+
+    async def missing(self, stack, server, errlog=None):
+        attempts["n"] += 1
+        raise BaseExceptionGroup("unhandled errors in a TaskGroup", [FileNotFoundError("npx")])
+
+    monkeypatch.setattr(mcp_module.McpManager, "_prefetch", fake_prefetch)
+    monkeypatch.setattr(mcp_module.McpManager, "_connect", missing)
+    mgr = mcp_module.McpManager(_dummy_cfg(connect_max_retries=5))  # retries available …
+    mgr.start()
+    try:
+        assert _wait_until(lambda: mgr.errors.get("dummy") is not None)
+        time.sleep(0.2)
+        assert attempts["n"] == 1  # … but a missing launcher isn't retried
+    finally:
+        mgr.close()
+
+
+def test_auto_heal_respects_total_deadline(monkeypatch):
+    """Auto-heal stops at the total heal budget even with retries left — so a server
+    that hangs/fails every attempt can't churn forever."""
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_BASE", 0.02)
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_CAP", 0.02)
+    monkeypatch.setattr(mcp_module.McpManager, "_HEAL_DEADLINE_SECONDS", 0.01)
+    attempts = {"n": 0}
+
+    async def fake_prefetch(self, server, errlog):
+        return None
+
+    async def keep_failing(self, stack, server, errlog=None):
+        attempts["n"] += 1
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(mcp_module.McpManager, "_prefetch", fake_prefetch)
+    monkeypatch.setattr(mcp_module.McpManager, "_connect", keep_failing)
+    mgr = mcp_module.McpManager(_dummy_cfg(connect_max_retries=100))  # deadline, not count, stops it
+    mgr.start()
+    try:
+        assert _wait_until(lambda: mgr.errors.get("dummy") is not None)
+        time.sleep(0.2)
+        assert attempts["n"] < 100  # bounded by the deadline, not the retry count
     finally:
         mgr.close()
 

@@ -615,7 +615,8 @@ The **Config → MCP** tab is the management view: each server shows a live
 connection dot — **green** = connected, **amber** = connecting *or auto-healing*
 (e.g. a `uvx`/`npx` package still downloading, or a failed connect retrying in the
 background; the page re-polls until it settles), **red** = unreachable, shown only
-once auto-heal retries (`connect_max_retries`) are exhausted (with the error) — plus
+once auto-heal retries (`connect_max_retries`) are exhausted (with the error), or
+right away for a missing launcher (no Node/uv — retrying can't fix it) — plus
 its transport + tool counts and editable fields. A connect is two-phase: a survivable
 package **prefetch** (so a slow download finishes once instead of being killed by the
 handshake timeout, which on Windows would lose all progress every attempt) then the

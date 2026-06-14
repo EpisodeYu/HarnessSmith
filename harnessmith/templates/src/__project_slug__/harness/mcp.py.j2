@@ -330,6 +330,17 @@ def _format_exception(exc: BaseException) -> str:
     return str(exc) or type(exc).__name__
 
 
+def _exc_has(exc: BaseException, exc_type: type[BaseException]) -> bool:
+    """True if ``exc`` IS ``exc_type`` or contains it as an (anyio TaskGroup)
+    ExceptionGroup leaf — e.g. the ``FileNotFoundError`` a missing npx/uvx surfaces
+    (bare on Windows, wrapped in a TaskGroup on POSIX)."""
+    if isinstance(exc, exc_type):
+        return True
+    if isinstance(exc, BaseExceptionGroup):
+        return any(_exc_has(inner, exc_type) for inner in exc.exceptions)
+    return False
+
+
 class McpManager:
     """Owns one background event loop + the full MCP session lifecycle.
 
@@ -352,6 +363,7 @@ class McpManager:
 
     _BACKOFF_BASE = 5.0  # auto-heal backoff: doubles each attempt …
     _BACKOFF_CAP = 60.0  # … capped here
+    _HEAL_DEADLINE_SECONDS = 300.0  # total auto-heal budget per failure streak (bounds a hanging server)
 
     def __init__(self, config: McpConfig, on_connected=None) -> None:
         self._config = config
@@ -459,14 +471,17 @@ class McpManager:
         stops the loop (shutdown or reconnect).
 
         A connect failure is isolated AND retried in the background with exponential
-        backoff (up to ``connect_max_retries``): the dot stays amber while retrying
-        and goes red only once retries are exhausted, so a server that was merely slow
-        or briefly unreachable heals on its own. Every successful connect re-syncs the
-        registry via :meth:`_fire_connected`.
+        backoff (up to ``connect_max_retries``, but never longer than
+        ``_HEAL_DEADLINE_SECONDS`` total): the dot stays amber while retrying and goes
+        red only once retries are exhausted, so a server that was merely slow or
+        briefly unreachable heals on its own. A MISSING launcher (no Node/uv) is not
+        retried — retrying can't conjure it, so it goes red at once. Every successful
+        connect re-syncs the registry via :meth:`_fire_connected`.
         """
         name = server.name
         settled = self._settled[name]
         attempt = 0
+        heal_started: float | None = None  # monotonic of the first failure in a streak
         while True:
             self._notes.pop(name, None)
             self._connect_started[name] = time.monotonic()
@@ -520,11 +535,21 @@ class McpManager:
                 self._server_inboxes.pop(name, None)
                 detail = _connect_error(server, exc, self._net_env)
                 attempt += 1
+                if heal_started is None:
+                    heal_started = time.monotonic()
                 if not settled.is_set():
                     settled.set()  # let start()/wait_ready() proceed after the first attempt
-                if attempt > self._config.connect_max_retries or self._closing.is_set():
+                # Stop retrying if: the launcher is MISSING (no Node/uv — retrying can't
+                # fix it), retries are exhausted, the total heal budget elapsed (bounds a
+                # server that hangs the handshake every attempt), or we're shutting down.
+                missing_launcher = _exc_has(exc, FileNotFoundError)
+                expired = time.monotonic() - heal_started > self._HEAL_DEADLINE_SECONDS
+                if (missing_launcher or expired or self._closing.is_set()
+                        or attempt > self._config.connect_max_retries):
                     self.errors[name] = detail  # give up: red, until a manual reconnect
-                    log.debug("mcp %s: connect FAILED (gave up after %d): %s", name, attempt, detail)
+                    why = ("missing launcher" if missing_launcher else
+                           "heal deadline" if expired else f"gave up after {attempt}")
+                    log.debug("mcp %s: connect FAILED (%s): %s", name, why, detail)
                     return
                 # Auto-heal: stay amber (no error set) and retry after a backoff.
                 self.errors.pop(name, None)
@@ -891,7 +916,13 @@ def warm_once(
 
     Returns the per-server results, or ``None`` when there is nothing to warm or the
     set was already warmed. Best-effort: a sentinel read/write error never blocks
-    warming, and warming itself never raises (see :func:`prewarm_stdio_packages`)."""
+    warming, and warming itself never raises (see :func:`prewarm_stdio_packages`).
+
+    The sentinel is written even when warming reports a FAILURE (e.g. no Node, or an
+    unreachable registry while the package is already installed locally): re-running a
+    foreground warm every launch can't fix a permanent gap and only nags, while a
+    transient miss is still recovered by the connect-time prefetch + auto-heal. So
+    warm-once means once, not once-per-launch-until-everything-succeeds."""
     import os
 
     if not any(s.kind == "stdio" and _warm_argv(s) is not None for s in config.servers):
@@ -912,7 +943,7 @@ def warm_once(
         )
         log.flush()
     results = prewarm_stdio_packages(config, log=log)
-    if results and all(ok for _, ok, _ in results):  # don't sticky-skip a failure
+    if results:  # warm ran (success OR failure) → record it; don't re-nag every launch
         try:
             os.makedirs(state_dir, exist_ok=True)
             with open(sentinel, "w", encoding="utf-8") as fh:
