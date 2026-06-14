@@ -515,7 +515,13 @@ class Config(BaseModel):
 def _env_file_values() -> dict[str, str]:
     try:
         return {key.upper(): str(value) for key, value in _EnvFile().model_dump().items()}
-    except Exception:
+    except Exception as exc:
+        # A malformed/unreadable .env silently yields {} here, which downstream looks
+        # exactly like "key not set" — log the cause (TYPE only, never contents) so the
+        # real problem (a broken .env) is diagnosable instead of misattributed.
+        from .debuglog import log
+
+        log.debug("could not read .env: %s", type(exc).__name__)
         return {}
 
 
@@ -580,6 +586,15 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Config:
         path, [p.name for p in config.llms], config.roles,
         config.paradigms.enabled, len(config.tools),
     )
+    # Env resolution at a glance (referenced NAMES + resolved booleans, NEVER values):
+    # the first thing to check when a key "isn't picked up" — it confirms .env is being
+    # read and which referenced vars actually resolve, without ever logging a secret.
+    env_names = sorted(
+        {p.api_key_env for p in config.llms if p.api_key_env}
+        | {p.base_url_env for p in config.llms if p.base_url_env}
+    )
+    if env_names:
+        log.debug("env resolution: %s", {name: bool(resolve_env(name)) for name in env_names})
 {% if spec.mcp.enabled %}    log.debug("mcp servers configured: %s", [s.name for s in config.mcp.servers])
 {% endif %}    return config
 

@@ -367,6 +367,14 @@ def fit(
     info = ContextInfo(last_prompt_tokens=last_prompt_tokens, context_window=context_window)
     if not force and not should_compact(messages, ctx, info=info):
         return messages
+    # About to compact — record what drove it (real prompt tokens when known, else a
+    # char estimate) + the model window + the configured triggers, so a threshold can
+    # be tuned straight from the log. Counts/thresholds only; never message content.
+    log.debug(
+        "context: compacting via %s (%s); ~%d prompt tokens, window=%s, triggers=%s",
+        ctx.strategy, "forced overflow rescue" if force else "trigger fired",
+        last_prompt_tokens or estimate_tokens(messages), context_window, ctx.triggers,
+    )
 {% if spec.memory.enabled %}    # Let long-term memory rescue insight from the turns about to be dropped,
     # before the strategy discards/summarizes them (no-op unless a backend hooks it).
     if config is not None:
@@ -383,6 +391,13 @@ def fit(
     # loop on pointless "N -> N" compactions every step. The forced path always adopts
     # what it produced — it is the last resort before re-raising an overflow.
     if not force and estimate_tokens(fitted) >= estimate_tokens(messages):
+        # The trigger fired but the strategy shrank nothing: the history is already at
+        # the keep floor. Usual cause — a token threshold set BELOW keep_last_turns /
+        # keep_last_steps; lower those floors or raise the threshold.
+        log.debug(
+            "context: %s trigger fired but at keep floor (%d msgs), no-op",
+            ctx.strategy, len(messages),
+        )
         return messages
     if fitted is not messages:
         log.debug(

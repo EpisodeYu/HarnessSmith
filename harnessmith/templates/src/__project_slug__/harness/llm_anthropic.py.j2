@@ -217,7 +217,8 @@ class AnthropicClient:
     def __init__(self, profile: LLMProfileConfig) -> None:
         from anthropic import Anthropic
 
-        api_key = resolve_env(profile.api_key_env) or "missing-api-key"
+        resolved_key = resolve_env(profile.api_key_env)
+        api_key = resolved_key or "missing-api-key"
         base_url = resolve_env(profile.base_url_env)
         # Per-call reliability is sent to the SDK only when set (else its defaults).
         client_kwargs: dict[str, Any] = {"api_key": api_key, "base_url": base_url}
@@ -226,6 +227,13 @@ class AnthropicClient:
         if profile.max_retries is not None:
             client_kwargs["max_retries"] = profile.max_retries
         self._client = Anthropic(**client_kwargs)
+        # Resolved env at a glance (booleans only, NEVER values): an UNSET key with no
+        # base_url is the usual cause of a later opaque 401 — surface it at build time.
+        log.debug(
+            "llm client built: provider=anthropic model=%s api_key(%s)=%s base_url=%s",
+            profile.model, profile.api_key_env,
+            "set" if resolved_key else "UNSET", "set" if base_url else "unset",
+        )
         self.model = profile.model
         self.temperature = profile.temperature
         self.max_tokens = profile.max_tokens

@@ -2382,3 +2382,100 @@ def test_composite_observer_isolates_a_failing_hook():
 
     CompositeHooks([Boom(), Good()]).before_step(0, [])  # must not raise
     assert hits == ["good"]
+
+
+# --- Debuggability: env-resolution / truncation / compaction-decision logs ---
+
+
+def test_load_config_logs_env_resolution_names_not_values(tmp_path, monkeypatch):
+    """load_config records which referenced env-vars resolve (NAME + boolean) so a
+    'key not picked up' is diagnosable — but never the secret value itself."""
+    from {{ project_slug }}.harness import debuglog
+    from {{ project_slug }}.harness.config import load_config
+
+    log_dir = tmp_path / "logs"
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "llms:\n"
+        "  - name: default\n"
+        "    model: mock-model\n"
+        "    api_key_env: TEST_SECRET_KEY\n"
+        "roles:\n"
+        "  generation: default\n"
+        "observability:\n"
+        "  trace: false\n"
+        "  debug: true\n"
+        f"  debug_dir: {log_dir}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TEST_SECRET_KEY", "super-secret-value")
+    try:
+        load_config(cfg)
+    finally:
+        debuglog.setup(False)
+    text = (log_dir / debuglog.LOG_FILE_NAME).read_text(encoding="utf-8")
+    assert "env resolution" in text
+    assert "TEST_SECRET_KEY" in text and "True" in text  # the NAME + resolved boolean
+    assert "super-secret-value" not in text  # but never the VALUE
+
+
+def test_debug_log_records_tool_result_truncation_sizes_not_content(tmp_path):
+    """A capped tool result logs the char sizes (a context-pressure signal) so a
+    flooding tool is easy to spot — but never the result content itself."""
+    from {{ project_slug }}.harness import debuglog
+
+    registry = Registry()
+
+    @registry.tool(
+        name="flood",
+        description="Returns a large blob.",
+        parameters={"type": "object", "properties": {}},
+    )
+    def flood() -> str:
+        return "FLOOD_MARKER" * 500  # ~6000 chars, well over the cap below
+
+    log_dir = tmp_path / "logs"
+    config = _config(
+        tmp_path,
+        tools=[{"name": "flood", "enabled": True}],
+        observability={"trace": False, "debug": True, "debug_dir": str(log_dir)},
+        context={"strategy": "none", "max_tool_result_chars": 100},
+    )
+    debuglog.setup(config.observability.debug, config.observability.debug_dir)
+    try:
+        client = MockLLM(script=[ScriptedCall("flood", {}), "done"])
+        run("go", client=client, config=config, registry=registry)
+    finally:
+        debuglog.setup(False)
+    text = (log_dir / debuglog.LOG_FILE_NAME).read_text(encoding="utf-8")
+    assert "result truncated" in text  # the size delta is recorded
+    assert "FLOOD_MARKER" not in text  # the content is not
+
+
+def test_debug_log_records_context_compaction_decisions(tmp_path):
+    """fit logs WHY it compacts (token pressure + the configured triggers) and the
+    at-keep-floor no-op — counts/thresholds only, never message content."""
+    from {{ project_slug }}.harness import debuglog
+
+    debuglog.setup(True, str(tmp_path / "logs"))
+    try:
+        # Trigger fires (tiny max_tokens) but the keep floor holds everything, so the
+        # strategy shrinks nothing — exercises both the decision log and the no-op log.
+        ctx = ContextConfig(
+            strategy="truncate", keep_last_turns=6, keep_last_steps=8,
+            triggers={"max_tokens": 10},
+        )
+        fit(
+            [
+                {"role": "system", "content": "s"},
+                {"role": "user", "content": "SECRET_CONTENT" * 20},
+                {"role": "assistant", "content": "a"},
+            ],
+            ctx,
+        )
+    finally:
+        debuglog.setup(False)
+    text = (tmp_path / "logs" / debuglog.LOG_FILE_NAME).read_text(encoding="utf-8")
+    assert "compacting via truncate" in text  # the decision is recorded
+    assert "at keep floor" in text  # the no-op is explained
+    assert "SECRET_CONTENT" not in text  # message content never logged

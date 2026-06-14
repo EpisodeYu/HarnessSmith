@@ -269,7 +269,15 @@ def run_tool(
         result = rewritten
     log.debug("tool %s -> %s in %.2fs", call.name, outcome, time.monotonic() - started)
     trace.event("tool_result", name=call.name, result=result)
-    return _truncate_result(result, max_result_chars)
+    truncated = _truncate_result(result, max_result_chars)
+    if truncated is not result:
+        # A capped observation is a context-pressure signal — record the sizes (chars
+        # only, never the content) so a tool that floods the window is easy to spot.
+        log.debug(
+            "tool %s result truncated: %d -> %d chars (context.max_tool_result_chars)",
+            call.name, len(result), max_result_chars,
+        )
+    return truncated
 
 
 def generate(

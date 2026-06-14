@@ -539,6 +539,18 @@ class McpManager:
     def _thread_main(self) -> None:
         asyncio.set_event_loop(self._loop)
         self._net_env = _stdio_net_env(list(self._config.servers), self._config)  # probe off the loop
+        if self._net_env:
+            # WHICH registry/mirror (+ whether a proxy) the auto-probe picked — the
+            # answer to "why is npx/uvx slow or failing to fetch its package". The
+            # registry/index URLs are not secrets (config calls them "values only");
+            # a proxy URL can embed credentials, so only note that one is in effect.
+            picked = {
+                k: v for k, v in self._net_env.items()
+                if k in ("npm_config_registry", "UV_DEFAULT_INDEX")
+            }
+            if any("proxy" in k.lower() for k in self._net_env):
+                picked["proxy"] = "in_use"
+            log.debug("mcp package-fetch resolved: %s", picked)
         try:
             self._loop.run_until_complete(self._main())
         except Exception as exc:  # surface startup failures to start()
@@ -774,6 +786,13 @@ class McpManager:
             server, tool, arguments, fut = req
             inbox = self._server_inboxes.get(server)
             if inbox is None:
+                # The model tried a tool on a server that never connected — leave a
+                # trail (the connect error / 'not discovered') so the failure isn't
+                # invisible behind a generic tool ERROR.
+                log.debug(
+                    "mcp %s: tool call rejected, server not connected (%s)",
+                    server, self.errors.get(server) or "not discovered",
+                )
                 fut.set_exception(
                     RuntimeError(
                         f"MCP server {server!r} is not connected: "
@@ -788,6 +807,7 @@ class McpManager:
         server = self._servers.get(name)
         if server is None:
             return
+        log.debug("mcp %s: restarting (reconnect requested)", name)
         task = self._tasks.get(name)
         if task is not None and not task.done():
             # Drop the inbox first so the dispatcher fails fast (instead of routing
