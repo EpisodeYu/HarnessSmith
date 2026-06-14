@@ -147,6 +147,14 @@ def _build_context(
                 env_names.append(name)
 
     servers = mcp_servers if (spec.mcp.enabled and mcp_servers) else []
+    # A prefilled MCP server's remote auth token (auth_env) and stdio injected
+    # secrets (env) are env-var NAMES too — seed them into .env.example so the user
+    # knows which values to fill in (NAMES only; never a value). Runtime-added
+    # servers surface the same names in the web panel's per-server auth section.
+    for s in servers:
+        for name in ([s.auth_env] if s.auth_env else []) + list(s.env):
+            if name and name not in env_names:
+                env_names.append(name)
     mcp_server_entries = [s.server_entry() for s in servers]
     mcp_tool_allowlist: list[dict] = []
     for s in servers:

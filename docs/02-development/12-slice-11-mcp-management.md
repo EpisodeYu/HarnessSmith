@@ -43,6 +43,15 @@
 - `interfaces/cli.py` — 新增 `mcp` 子命令组(仅 `spec.mcp.enabled`):`mcp status`(连接全部、`list_tools`,打印每 server 🟢/🟡/🔴 + transport + 工具计数〔启用/总〕+ 不可达错因 + 缺 launcher 提示);`mcp warm`(预拉 server 包;首跑由 `serve`/`chat` 自动触发,本命令为手动/强制重拉,见 §2)。**产物本无 `doctor` 命令**(`harnessmith doctor` 是生成器脚手架预检),健康自检即 `mcp status`。
 - `README.md` / `AGENTS.md` — 「MCP 管理」章节(管理页用法、`transport` 选择、面板增删改 = 本地可信能力勿对公网暴露、`mcp status`、DC 默认开 + HITL 确认)。
 
+### 后续增强 · MCP 密钥面板可填(本次,补「auth 闭环」)
+
+> 背景:原片 server 卡片只暴露 `auth_env`/`env` 的**变量名**,无处填**值** —— 远程带 key 的 server(如 SaaS MCP)必须手改 `.env` 才能用,面板「开箱即用」在 Bearer 之外断在密钥这一步。本次只补「让所需字面量在面板可填 + 脱敏」,不改传输/不加方案(自定义 header / OAuth 仍 v1+,需小改 `harness/mcp.py`)。
+
+- `interfaces/web_index.html` — server 卡片把 `auth_env`/`env` 从主网格挪进一个**折叠的「Auth(令牌/密钥)」区**(仿 LLM 卡片「高级」)。区内:① 远程 Bearer:`auth_env`(名)+ **只写值框 + 写入 .env 按钮**(复用 LLM 的 `keyRow`,`POST /env`);② stdio:`env`(逗号分隔名列表)+ 对每个已声明名各渲染一行**只写值框 + 写入 .env**。脱敏沿用 LLM 同款:已设显示掩码占位、聚焦清空可改、留空恢复掩码、**值绝不回显**;`saveMcpSecret` 复用 `/env`。i18n 加 `mcp_auth_section`(中英)。
+- `interfaces/web.py` — `GET /env-status` 纳入 MCP 的 `auth_env` + stdio `env` 名(`{NAME: bool}`,仅布尔),面板据此对已设 MCP 密钥显掩码、未设可提示;仍只回布尔不回值。
+- `generator.py` — `.env.example` 的 `env_names` 在 `spec.mcp.enabled` 时追加预填 server 的 `auth_env` + `env` 名(**仅名、永不写值**),用户知道该填哪些。
+- **密钥红线不破**:server 配置(`/mcp/servers` / `config.yaml`)仍只存 env 名;密钥**值**走 Slice 3 既有 write-only `/env` 通道入 `.env`,不进 `config.yaml`/trace/日志/响应。
+
 ## 2. 跨平台运行期健壮性(收敛在 `mcp.py` + 启动脚本)
 
 stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健壮性:

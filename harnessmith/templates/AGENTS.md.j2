@@ -633,13 +633,23 @@ usable the moment it connects — narrow it afterwards on the Tools tab; editing
 existing server keeps the allowlist you already set. This lets the product spawn
 local commands / reach URLs you configure — a **local, trusted control**, so don't
 expose `/config` or `/mcp` on a public network.
+
+Each server card has a collapsed **Auth** section: it names the remote bearer token
+(`auth_env`) and the stdio `env` vars, and lets you write their **values** straight
+to `.env` (write-only, never echoed — the same field as the LLM key box), so a keyed
+server (e.g. a remote SaaS MCP) is set up entirely from the panel without hand-editing
+`.env`. `/env-status` only reports whether each name is set (a boolean), never a value.
 {% endif %}
 On the CLI, `{{ project_slug }} mcp status` health-checks every configured server
 (connectivity + tool counts; an unreachable server is shown with its error).
 
-Remote servers use `url` (+ optional `auth_env`). Set `transport: sse` for an
+Remote servers use `url` (+ optional `auth_env`, the env-var **name** holding the
+bearer token sent as `Authorization: Bearer <token>`). Set `transport: sse` for an
 older server that speaks the legacy HTTP+SSE transport instead of Streamable HTTP
-(the `http` default); stdio servers infer their transport from `command`.
+(the `http` default); stdio servers infer their transport from `command`. The
+token's NAME is seeded into `.env.example`; set its **value** by editing `.env`{% if interfaces.web %} or
+from the MCP tab's per-server **Auth** section{% endif %} (only Bearer is built in — a server
+needing a custom header scheme or OAuth needs a small edit to `harness/mcp.py`).
 
 ```yaml
 mcp:

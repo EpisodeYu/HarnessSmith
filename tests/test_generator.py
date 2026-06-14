@@ -70,6 +70,30 @@ def test_env_example_lists_env_names_only(tmp_path, spec):
     assert "sk-" not in env_example  # never a real value
 
 
+def test_env_example_seeds_mcp_auth_and_env_names(tmp_path, spec):
+    """A prefilled remote server's auth token (auth_env) and a stdio server's
+    injected secrets (env) are env-var NAMES too, so .env.example seeds them (names
+    only, never values) — the user knows which values to fill in."""
+    from harnessmith.catalog import CatalogServer
+
+    spec.mcp.enabled = True
+    servers = [
+        CatalogServer(
+            name="remote", transport="remote",
+            url="https://mcp.example.com", auth_env="EXAMPLE_MCP_TOKEN",
+        ),
+        CatalogServer(name="local", command="my-server", env=["MY_SECRET"]),
+    ]
+    out = tmp_path / "mcp-env"
+    generate(spec, out, git_init=False, mcp_servers=servers)
+
+    env_example = (out / ".env.example").read_text(encoding="utf-8")
+    assert "EXAMPLE_MCP_TOKEN=" in env_example  # remote Bearer token name
+    assert "MY_SECRET=" in env_example  # stdio injected secret name
+    assert "OPENAI_API_KEY=" in env_example  # LLM names still present
+    assert "https://" not in env_example  # names only — no url/value leaks through
+
+
 def test_spec_snapshot_has_no_plaintext_secret(tmp_path, spec):
     out = tmp_path / "my-agent"
     generate(spec, out, git_init=False)

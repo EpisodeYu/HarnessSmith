@@ -338,6 +338,41 @@ def test_index_has_per_server_reconnect_and_connecting_dot():
     assert "text-amber-500" in body and "mcp_connecting" in body  # amber connecting dot
     assert "animate-pulse" in body  # the amber dot breathes so a slow connect never looks frozen
     assert "scheduleMcpPoll" in body  # re-poll while anything is still connecting
+
+
+def test_index_has_mcp_auth_value_inputs():
+    """The MCP card folds auth into a collapsible (like the LLM card's Advanced)
+    with a write-only value box for the remote Bearer token AND one per stdio
+    env-var — so every secret a server needs is fillable from the panel, not just
+    nameable. The values post to /env (write-only) just like the LLM key box."""
+    body = _client().get("/").text
+    assert "function mcpAuthSection(" in body and "mcp_auth_section" in body
+    assert "m-setauth" in body and "m-setenvval" in body  # save-to-.env buttons
+    assert "saveMcpSecret" in body  # shared write-only /env save
+
+
+def test_env_status_includes_mcp_auth_and_env_names(tmp_path, monkeypatch):
+    """GET /env-status now also reports MCP servers' auth token + stdio env-var
+    NAMES (booleans only), so the panel can mask an already-set MCP secret and flag
+    a missing one — never echoing a value."""
+    monkeypatch.chdir(tmp_path)
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "mcp": {"servers": [
+            {"name": "remote", "url": "https://mcp.example.com", "auth_env": "EXAMPLE_MCP_TOKEN"},
+            {"name": "local", "command": "my-server", "env": ["MY_SECRET"]},
+        ]},
+    })
+    client = TestClient(create_app(config, mock=True))
+    status = client.get("/env-status").json()
+    assert status.get("EXAMPLE_MCP_TOKEN") is False and status.get("MY_SECRET") is False
+    client.post("/env", json={"name": "EXAMPLE_MCP_TOKEN", "value": "tok-secret-xyz"})
+    resp = client.get("/env-status")
+    assert resp.json()["EXAMPLE_MCP_TOKEN"] is True
+    assert "tok-secret-xyz" not in resp.text  # booleans only — never the value
 {% endif %}
 
 

@@ -478,6 +478,7 @@
         mcp_command: "command", mcp_args: "args (space-separated)", mcp_env: "env var names (comma-separated)",
         mcp_url: "url", mcp_authenv: "auth env var name", mcp_desc: "description",
         mcp_safe_tools: "read-only tools (comma-separated, unprefixed)",
+        mcp_auth_section: "Auth (tokens / secrets)",
         mcp_loading: "loading…", mcp_reconnecting: "reconnecting…", mcp_saved: "saved",
         mcp_reconnect_all: "Reconnect all", mcp_connecting: "connecting…",
         mcp_connected: "connected", mcp_unreachable: "unreachable", mcp_tools_word: "tools",
@@ -620,6 +621,7 @@
         mcp_command: "command", mcp_args: "args(空格分隔)", mcp_env: "env 变量名(逗号分隔)",
         mcp_url: "url", mcp_authenv: "auth 环境变量名", mcp_desc: "描述",
         mcp_safe_tools: "只读工具(逗号分隔,不带前缀)",
+        mcp_auth_section: "鉴权(令牌 / 密钥)",
         mcp_loading: "加载中…", mcp_reconnecting: "重连中…", mcp_saved: "已保存",
         mcp_reconnect_all: "全部重连", mcp_connecting: "连接中…",
         mcp_connected: "已连接", mcp_unreachable: "不可达", mcp_tools_word: "工具",
@@ -2208,6 +2210,37 @@
     // ---- MCP management tab (server list + status + add/edit/delete) --------
     let mcpServers = null;  // last GET /mcp/status payload
 
+    // Auth/secrets for one server, folded into a collapsible (like the LLM card's
+    // Advanced). Holds the remote Bearer token's env-var NAME + a write-only value
+    // box (POST /env), plus the stdio env-var NAME list and a write-only value box
+    // per declared name — so every secret a server needs is fillable from the panel
+    // (NAMES live in config.yaml; the VALUES only ever go to .env, never read back).
+    // A brand-new, never-saved card never masks (the dots would imply "already set").
+    function mcpAuthSection(c, isNew) {
+      c = c || {};
+      const envNames = c.env || [];
+      let rows = "";
+      envNames.forEach((name) => { rows += envValRow(name, !isNew && envSet(name)); });
+      return "<details class='text-xs mt-2'><summary class='cursor-pointer text-slate-600'>" + t("mcp_auth_section") + "</summary>" +
+        "<div class='mt-2 space-y-2'>" +
+          keyRow("mcp_authenv", "m-authenv", esc(c.auth_env), "m-authval", "m-setauth", "m-authstatus", t("set_key_ph"), t("set_key_btn"), "password", !isNew && envSet(c.auth_env)) +
+          "<label class='block'>" + t("mcp_env") + "<input class='m-env mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc(envNames.join(", ")) + "'/></label>" +
+          (rows ? "<div class='space-y-1'>" + rows + "</div>" : "") +
+        "</div></details>";
+    }
+    // One write-only value row for an already-declared stdio env-var NAME: a
+    // read-only name label + a masked value box that posts to /env (the value is
+    // never returned). The NAME itself is edited in the m-env list above; Save the
+    // server first so a freshly added name gets its own value row.
+    function envValRow(name, isSet) {
+      const masked = isSet ? (" value='" + ENV_MASK + "' data-masked='1'") : "";
+      return "<div class='m-envrow flex items-center gap-2'>" +
+        "<span class='w-44 truncate font-mono text-xs text-slate-500' title='" + esc(name) + "'>" + esc(name) + "</span>" +
+        "<input type='password' class='m-envval flex-1 rounded border px-2 py-1' data-envname='" + esc(name) + "' placeholder='" + t("set_key_ph") + "'" + masked + "/>" +
+        "<button type='button' class='m-setenvval rounded border px-2 py-1 text-xs whitespace-nowrap'>" + t("set_key_btn") + "</button>" +
+        "<span class='m-envvalstatus text-xs text-emerald-700'></span>" +
+      "</div>";
+    }
     // One server card: a live status dot + editable transport/command/url/env
     // (env-var NAMES only, never secret values) + Save (POST /mcp/servers, which
     // hot-reconnects) + Remove. `isNew` makes the name editable; an existing
@@ -2246,10 +2279,9 @@
           "<label>" + t("mcp_command") + "<input class='m-command mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc(c.command) + "'/></label>" +
           "<label>" + t("mcp_args") + "<input class='m-args mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc((c.args || []).join(" ")) + "'/></label>" +
           "<label>" + t("mcp_url") + "<input class='m-url mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc(c.url) + "'/></label>" +
-          "<label>" + t("mcp_authenv") + "<input class='m-authenv mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc(c.auth_env) + "'/></label>" +
-          "<label>" + t("mcp_env") + "<input class='m-env mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc((c.env || []).join(", ")) + "'/></label>" +
           "<label>" + t("mcp_safe_tools") + "<input class='m-safe mt-1 w-full rounded border px-2 py-1 font-mono' value='" + esc((c.safe_tools || []).join(", ")) + "'/></label>" +
         "</div>" +
+        mcpAuthSection(c, isNew) +
         "<div class='flex items-center gap-2'>" +
           (isNew ? "" : "<button type='button' class='m-reconnect rounded border px-3 py-1 text-xs'>" + t("mcp_reconnect") + "</button>") +
           "<button type='button' class='m-save rounded border px-3 py-1 text-xs'>" + t("mcp_save") + "</button>" +
@@ -2270,6 +2302,27 @@
       const env = g("m-env"); if (env) o.env = env.split(",").map((x) => x.trim()).filter(Boolean);
       const safe = g("m-safe"); if (safe) o.safe_tools = safe.split(",").map((x) => x.trim()).filter(Boolean);
       return o;
+    }
+    // Write a secret VALUE into .env for an MCP server (its Bearer token or a stdio
+    // env-var). Write-only: POSTed once, never read back; the box re-masks and
+    // envStatus is updated so a later rebuild keeps the placeholder. Mirrors the LLM
+    // card's "Save to .env" contract (status color is left as-is, like that card).
+    async function saveMcpSecret(name, valEl, statusEl) {
+      if (!valEl || !statusEl) return;
+      if (!name) { statusEl.textContent = t("key_need_name"); return; }
+      if (valEl.dataset.masked === "1") { statusEl.textContent = t("key_unchanged"); return; }
+      try {
+        const resp = await fetch("/env", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, value: valEl.value }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          valEl.value = ENV_MASK; valEl.dataset.masked = "1";
+          envStatus[name] = true;
+          statusEl.textContent = t("key_saved");
+        } else { statusEl.textContent = data.error || t("cfg_invalid"); }
+      } catch (err) { statusEl.textContent = String(err); }
     }
     function buildMcp() {
       const box = $("cfg-mcp-list");
@@ -2862,6 +2915,22 @@
     $("cfg-mcp-list").addEventListener("click", async (e) => {
       const card = e.target.closest(".mcp-srv");
       if (!card) return;
+      // Write a secret VALUE into .env (write-only) — the remote Bearer token
+      // (m-setauth) or a stdio env-var (m-setenvval). Handled before the
+      // server-config buttons; each has its own inline status, not .m-status.
+      if (e.target.closest(".m-setauth")) {
+        const nm = card.querySelector(".m-authenv");
+        await saveMcpSecret(nm ? nm.value.trim() : "",
+          card.querySelector(".m-authval"), card.querySelector(".m-authstatus"));
+        return;
+      }
+      const setEnvVal = e.target.closest(".m-setenvval");
+      if (setEnvVal) {
+        const row = setEnvVal.closest(".m-envrow");
+        const valEl = row.querySelector(".m-envval");
+        await saveMcpSecret(valEl.dataset.envname, valEl, row.querySelector(".m-envvalstatus"));
+        return;
+      }
       const status = card.querySelector(".m-status");
       if (e.target.closest(".m-reconnect")) {
         const name = card.querySelector(".m-name").value.trim();
@@ -2891,6 +2960,24 @@
         const resp = await fetch("/mcp/servers/" + encodeURIComponent(name), { method: "DELETE" });
         if (resp.ok) { mcpServers = await resp.json(); mcpDiscovered = null; buildMcp(); }
         else { status.className = "m-status text-xs text-red-600"; status.textContent = t("cfg_invalid"); }
+      }
+    });
+    // Masked secret boxes (auth token + stdio env values): focusing clears the
+    // placeholder so a new value can be typed; leaving it empty restores the mask
+    // (an idle click never wipes the stored secret). Same contract as the LLM card.
+    $("cfg-mcp-list").addEventListener("focusin", (e) => {
+      const el = e.target;
+      if (el.dataset && el.dataset.masked === "1" &&
+          (el.classList.contains("m-authval") || el.classList.contains("m-envval"))) {
+        el.value = ""; el.dataset.masked = "editing";
+      }
+    });
+    $("cfg-mcp-list").addEventListener("focusout", (e) => {
+      const el = e.target;
+      if (el.dataset && el.dataset.masked === "editing" &&
+          (el.classList.contains("m-authval") || el.classList.contains("m-envval"))) {
+        if (el.value === "") { el.value = ENV_MASK; el.dataset.masked = "1"; }
+        else { delete el.dataset.masked; }
       }
     });
 {% endif %}

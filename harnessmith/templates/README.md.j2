@@ -182,7 +182,9 @@ it). uvx servers are prewarmed and baked into the Docker image so `docker run`
 works offline. Add more with `harnessmith new --mcp-server <name>` or by pasting
 a marketplace block into `config.yaml`. Allowlist tools as `<server>__<tool>`;
 read-only tools (`safe_tools`) are also offered to `plan`/`ask`. Secrets are
-referenced by env-var name only.
+referenced by env-var name only — a remote server's bearer token (`auth_env`) and
+a stdio server's injected vars (`env`) are seeded into `.env.example` by name; fill
+their **values**{% if interfaces.web %} from the **MCP** tab's per-server **Auth** section (write-only to `.env`, never echoed — same as the LLM key box) or{% endif %} by editing `.env`.
 
 **First run / connectivity.** The very first `serve`/`chat` pre-fetches each
 `uvx`/`npx` server's package once, printing live progress (with a heartbeat so a
