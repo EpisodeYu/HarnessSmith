@@ -12,9 +12,7 @@
 
 ## Overview
 
-The contemporary consensus is captured by one equation: **`Agent = Model + Harness`**. The model reasons; the harness is everything else that makes an agent work in practice — the orchestration loop, tool execution, context management, session state, guardrails, and observability.
-
-HarnessSmith is a generator for that harness, in the spirit of `create-next-app`. A specification (`HarnessSpec`) is captured through a web wizard, an interactive terminal wizard, a preset, or a hand-written YAML file; HarnessSmith then renders a **complete, independent Python repository** — readable, editable, testable, and runnable on its own. The generated project is not a consumer of HarnessSmith: once generated, it has zero relationship with the generator.
+HarnessSmith is a generator for the agent harness, in the spirit of `create-next-app`. A specification (`HarnessSpec`) is captured through a web wizard, an interactive terminal wizard, a preset, or a hand-written YAML file; HarnessSmith then renders a **complete, independent Python repository** — readable, editable, testable, and runnable on its own. The generated project is not a consumer of HarnessSmith: once generated, it has zero relationship with the generator.
 
 ### Design positioning
 
@@ -29,12 +27,14 @@ HarnessSmith is a generator for that harness, in the spirit of `create-next-app`
 - **Dual LLM protocol, runtime-switchable** — every product ships both an OpenAI Chat Completions client (provider-agnostic via `base_url`: vLLM, Together, Groq, LiteLLM, any compatible endpoint) and a native Anthropic Messages client. Each LLM profile selects its `provider` in runtime configuration; no regeneration required.
 - **Reasoning streams as a first-class signal** — thinking/reasoning deltas are surfaced live (a status line in the CLI; a collapsible reasoning panel in the web UI), and `reasoning_content` is preserved across tool-calling turns for models that require it.
 - **Multi-paradigm runtime** — `agent` (default tool-calling loop), `plan` and `ask` (both read-only), selectable per turn (`--mode` / web dropdown). Paradigms live in a thin registry; users add their own with `@register_paradigm` without touching the built-ins.
-- **Sessions and resumption** — every conversation persists locally; resume with `--continue` / `--resume <id>`, in the multi-turn `chat` REPL, or from the web session sidebar (automatic titling, rename, delete). Interrupted runs are crash-safe: state is checkpointed at message boundaries and repaired on resume.
+- **Sessions and resumption** — every conversation persists locally; resume with `--continue` / `--resume <id>`, in the multi-turn `chat` REPL, or from the web session sidebar (automatic titling, rename, delete). In the web UI, conversations run in parallel — each session streams independently and switching the sidebar never interrupts a background run. Interrupted runs are crash-safe: state is checkpointed at message boundaries and repaired on resume.
 - **Stop / continue / re-ask** — a run can be cancelled mid-turn (cooperative cancellation that also terminates streaming), continued later with full context, or — in the web UI — re-asked by editing any earlier prompt and regenerating from that point.
 - **Human-in-the-loop** — a built-in `ask_question` tool lets the model ask the user structured clarifying questions, and tool-call confirmation (`allow once / reject / allow for session / allow always`) gates risky tools. Non-interactive contexts fail closed.
 - **Persistent per-LLM cost accounting** — a usage ledger accumulates token counts per LLM profile across runs; cost is derived from per-profile prices, and a per-profile `cost_limit` blocks the model before the next call once reached. Managed from the web Budget page or the `usage` CLI.
-- **Context management** — combinable triggers (`window_pct`, `max_tokens`, `max_turns`; driven by real token usage) select when to compact; strategies (`truncate`, `summarize`, `none`) define how; both are user-extensible registries. Oversized tool results are clipped before entering history, and overflow recovery compacts on demand.
-- **Tool ecosystem without built-in bloat** — a decorator-based tool registry with per-tool risk levels, plus an opt-in MCP client (stdio, HTTP, and SSE transports) with a curated catalog (web search, fetch, git, time, Desktop Commander). MCP servers are managed at runtime: health status, add/edit/remove, and hot reconnection from the web panel; `mcp status` from the CLI.
+- **Context management** — combinable triggers (`window_pct`, `max_tokens`, `max_turns`; driven by real token usage) select when to compact; strategies (`truncate`, `summarize`, `none`) define how; both are user-extensible registries. Oversized tool results are clipped before entering history, overflow recovery compacts on demand, a `max_steps` valve bounds runaway tool loops, and compaction folds within a single long turn (sub-turn `keep_last_steps`) so even one agentic turn stays inside the window.
+- **Composable hooks and a thin tool-policy layer** — mount one or more `Hooks` subclasses through `config.hooks` (subclass-and-mount, no `@register_hook`); five lifecycle points (`before_step` / `after_step` / `before_tool` / `after_tool` / `on_error`). `before_tool` may refuse a call and `after_tool` may redact a result — a code-level policy gate with no middleware machinery — and multiple hooks compose in order. The web UI has a dedicated **Hooks** tab with a privacy-safe execution log; `info` (CLI) and `GET /registries` (web) surface every extension point — tools, paradigms, context strategies/conditions, memory backends, imported extensions, and mounted hooks.
+- **Per-session working directory** — an optional working-directory hint (CLI `--cwd`, the `chat` REPL's `/cwd`, or the web chat toolbar with a directory browser) is injected into the system prompt as guidance, not a sandbox. The current date/time is injected each turn too.
+- **Tool ecosystem without built-in bloat** — a decorator-based tool registry with per-tool risk levels, plus an opt-in MCP client (stdio, HTTP, and SSE transports) with a curated catalog (keyless Bing/DuckDuckGo search, fetch, git, time, Desktop Commander, GitHub). The default web-search server is a keyless Bing scraper that reaches `cn.bing.com`, so it works from networks where DuckDuckGo is blocked. MCP servers are managed at runtime: health status, add/edit/remove, and hot reconnection from the web panel; `mcp status` from the CLI.
 - **Agent Skills** — opt-in support for the open `SKILL.md` standard with progressive disclosure; skills are plain files, no framework involved.
 - **Cross-session memory** — an opt-in, self-maintained long-term note injected each turn, written through tools, consolidated by a dedicated LLM role at session boundaries, and replaceable via a thin `@register_memory` backend registry.
 - **Always-applied project rules** — markdown rule files (`AGENTS.md` / `CLAUDE.md` / `.cursor/rules` conventions) injected into every system prompt.
@@ -47,14 +47,15 @@ HarnessSmith is a generator for that harness, in the spirit of `create-next-app`
 
 | Capability | Description |
 |---|---|
-| Agent loop | Native function-calling loop with paradigm dispatch, lifecycle hooks, and graceful stop conditions |
+| Agent loop | Native function-calling loop with paradigm dispatch, lifecycle hooks, and graceful stop conditions (including a `max_steps` valve) |
 | LLM layer | Profile registry with role routing (`generation`, `compaction`, plus optional `title` / `memory` roles), per-profile sampling parameters, timeout/retry/fallback, and dual-protocol clients (OpenAI-compatible + native Anthropic) |
 | Tool registry | Decorator-registered tools with risk levels; high-risk tools disabled by default, allowlist-only |
-| Sessions | Local JSON persistence, `--continue` / `--resume`, `chat` REPL, crash-safe checkpointing |
+| Hooks & policy | Composable `Hooks` subclasses mounted via `config.hooks`; observer + tool-policy lifecycle points (`before_tool` refuse / `after_tool` redact); extension discoverability via `info` / `GET /registries` |
+| Sessions | Local JSON persistence, `--continue` / `--resume`, `chat` REPL, crash-safe checkpointing, per-session working-directory hint |
 | Interaction | `ask_question` structured clarification + HITL tool confirmation, shared CLI/web infrastructure |
-| Context | Trigger/strategy compaction registries, tool-result clipping, overflow recovery |
+| Context | Trigger/strategy compaction registries, tool-result clipping, overflow recovery, `max_steps` bound, sub-turn folding |
 | Budget | Persistent per-LLM cost ledger with per-profile prices and hard cost limits |
-| Prompts | System prompt assembly with always-applied rule-file injection |
+| Prompts | System prompt assembly with always-applied rule-file injection, current date/time, and the working-directory hint |
 | Observability | JSONL trace + token/cost counts; opt-in local-only debug log |
 | CLI | `run`, `chat`, `info`, `test-llm`, `set-key`, `usage` (plus `serve`, `mcp`, `memory` when the matching modules are enabled) |
 | Runnability | `uv.lock` + `.python-version`, Dockerfile + `.dockerignore` + devcontainer, `requirements.txt` pip fallback, mock-LLM test suite, one-click launcher script |
@@ -63,7 +64,7 @@ HarnessSmith is a generator for that harness, in the spirit of `create-next-app`
 
 | Module | Description |
 |---|---|
-| Web interface | FastAPI + SSE chat with token-level streaming, collapsible reasoning and tool-call panels, session sidebar, and a paged bilingual (en/zh) `/config` panel — LLM, Context, Tools, MCP, Paradigms, Prompts, Budget, Observability, and System tabs. Edits apply live and are written back to `config.yaml` with comments preserved |
+| Web interface | FastAPI + SSE chat with token-level streaming, collapsible reasoning and tool-call panels, a session sidebar with parallel per-session conversations, a chat toolbar (paradigm, generation model, working-directory picker), and a paged bilingual (en/zh) `/config` panel — LLM, Context, Tools, MCP, Hooks, Paradigms, Prompts, Budget, Memory, Observability, and System tabs (MCP and Memory appear only when those modules are enabled). Edits apply live and are written back to `config.yaml` with comments preserved |
 | MCP tools | Model Context Protocol client over stdio / HTTP / SSE, allowlist and risk flags, curated catalog prefill, runtime server management with health probes and hot reconnect |
 | Agent Skills | `SKILL.md` discovery, metadata injection, and on-demand loading |
 | Long-term memory | Self-maintained markdown note with tool-driven writes, policy shaping, consolidation, and a pluggable backend registry |
@@ -84,6 +85,7 @@ flowchart LR
     tools["tools.py (+ mcp.py stdio/http/sse)"]
     sessions["session.py + interaction.py"]
     ctx["context.py + usage.py + trace.py"]
+    hooks["hooks.py + extensions.py (policy + discovery)"]
     cli["interfaces/cli.py"]
     web["interfaces/web.py (SSE chat + /config)"]
     extras["skills.py / memory.py (opt-in)"]
@@ -135,29 +137,36 @@ Once published, the same commands will work installation-free via `uvx harnessmi
 
 ### Generating a harness
 
+**The easiest start** is the one-click launcher in the repository root — double-click or run `HarnessSmith.sh` (macOS / Linux) or `HarnessSmith.bat` (Windows). It offers a choice between the **web wizard** (recommended) and the terminal wizard, and installs uv on first use.
+
+Prefer the command line? Each surface is a single command:
+
 ```bash
-uv run harnessmith new my-agent --preset coding-assistant   # from a bundled preset
-uv run harnessmith new my-agent --spec ./harness.spec.yaml  # from a hand-written spec
+uv run harnessmith wizard                                   # web wizard (recommended; uv sync --extra wizard)
 uv run harnessmith new                                      # interactive terminal wizard
-uv run harnessmith wizard                                   # web wizard (uv sync --extra wizard)
+uv run harnessmith new my-agent --preset coding-assistant   # non-interactive, from a bundled preset
+uv run harnessmith new my-agent --spec ./harness.spec.yaml  # non-interactive, from a hand-written spec
 uv run harnessmith doctor                                   # preflight check of the local toolchain
 ```
 
-- The **terminal wizard** (`new` with no `--spec` / `--preset`) and the **web wizard** (`wizard`) collect the same structural choices — display name, paradigms, web interface, MCP, skills, memory — and apply identical defaults; they are suited to headless servers and desktops respectively.
-- Alternatively, the repository root provides one-click launchers — `HarnessSmith.bat` (Windows) and `HarnessSmith.sh` (macOS / Linux) — which offer a choice between the web and terminal wizards and can install uv on first use.
+- The **web wizard** (`wizard`) and the **terminal wizard** (`new` with no `--spec` / `--preset`) collect the same structural choices — display name, paradigms, web interface, MCP, skills, memory — and apply identical defaults; the web wizard suits desktops, the terminal wizard suits headless servers.
 - After rendering, the generator locks dependencies and runs a smoke verification (`uv sync`, import check, one mock function-calling turn, `pytest`). Pass `--no-verify` to skip it, for example when offline.
 - Secrets are never collected by any wizard and never enter the spec, the generated `config.yaml`, or git.
 
 ### Running the generated harness
 
+**The simplest path** is the generated repo's own one-click launcher, named after the display name with spaces collapsed to `-` (e.g. `My-Coding-Assistant.sh` / `.bat`, so it needs no shell quoting). It auto-syncs dependencies and, for web-enabled products, starts the web chat and opens your browser; otherwise it opens a terminal chat.
+
+Equivalently, from the command line:
+
 ```bash
 cd my-agent
 uv sync                                  # uv provisions Python + an isolated venv
 uv run my-agent set-key OPENAI_API_KEY   # write the API key into .env (never echoed, never in git)
+uv run my-agent serve --open             # web chat + /config panel (web-enabled products; recommended)
 uv run my-agent test-llm                 # probe each configured model
 uv run my-agent chat                     # multi-turn conversation in the terminal
-uv run my-agent run "Summarize ./notes"  # single turn; add --mode plan|ask, --stream
-uv run my-agent serve --open             # web chat + /config panel (web-enabled products)
+uv run my-agent run "Summarize ./notes"  # single turn; add --mode plan|ask, --stream, --cwd
 
 # fully containerized alternative (generated by default):
 docker build -t my-agent . && docker run --rm -it my-agent
@@ -165,16 +174,14 @@ docker build -t my-agent . && docker run --rm -it my-agent
 
 Model and endpoint are configured in `config.yaml` (or on the web `/config` LLM tab): set `model`, point `base_url_env` / `api_key_env` at the appropriate environment variables, and choose `provider: openai` or `provider: anthropic` per profile. An offline trial without any key is available via `--mock` on `run`, `chat`, and `serve`.
 
-Each generated repository also ships its own one-click launcher named after its display name (spaces collapse to `-` so it needs no shell quoting, e.g. `My-Coding-Assistant.bat` / `.sh`).
-
 ### Product CLI reference
 
 | Command | Purpose |
 |---|---|
-| `run [PROMPT]` | Execute one turn. Options: `--mode agent\|plan\|ask`, `--stream`, `--continue`, `--resume <id>`, `--role`, `--mock` |
-| `chat` | Multi-turn REPL with persistent sessions; `Ctrl-D` or `/exit` to quit |
+| `run [PROMPT]` | Execute one turn. Options: `--mode agent\|plan\|ask`, `--stream`, `--continue`, `--resume <id>`, `--role`, `--cwd`, `--mock` |
+| `chat` | Multi-turn REPL with persistent sessions; `/cwd` sets the working-directory hint; `Ctrl-D` or `/exit` to quit |
 | `serve` | Start the web interface (`--host`, `--port`, `--open`); web-enabled products |
-| `info` | Introspect registered tools, paradigms, context strategies, and conditions |
+| `info` | Introspect every extension point — registered tools, paradigms, context strategies/conditions, memory backends, imported extensions, and mounted hooks |
 | `test-llm` | Connectivity and capability probe for each configured LLM profile |
 | `set-key <ENV_NAME>` | Write a secret into `.env` without echoing it or touching git |
 | `usage` | Inspect or clear the persistent per-LLM cost ledger |
@@ -186,7 +193,7 @@ Each generated repository also ships its own one-click launcher named after its 
 | Layer | File | Role |
 |---|---|---|
 | Generation-time spec | `harness.spec.yaml` | The recipe: which capabilities are compiled into the product, plus initial values. A snapshot is kept in the generated repository |
-| Runtime configuration | `config.yaml` | The authority for behavior: LLM profiles and roles, prompts and rule files, tool allowlist, context strategy, MCP servers, prices and cost limits, observability. Editable by hand or via the web `/config` panel (live application + comment-preserving write-back) |
+| Runtime configuration | `config.yaml` | The authority for behavior: LLM profiles and roles, prompts and rule files, tool allowlist, context strategy, hooks, MCP servers, prices and cost limits, observability. Editable by hand or via the web `/config` panel (live application + comment-preserving write-back) |
 | Secrets | `.env` (gitignored) | The only location for real credentials. `config.yaml` and the spec reference environment-variable *names* only |
 
 Structural changes (adding or removing an interface or module) require regeneration; behavioral changes never do.
@@ -212,9 +219,7 @@ Structural changes (adding or removing an interface or module) require regenerat
 
 ## 概述
 
-当下的共识可以浓缩为一个等式:**`Agent = Model + Harness`**。模型负责推理;harness 是让 agent 真正可用的其余一切——编排循环、工具执行、上下文管理、会话状态、护栏与可观测性。
-
-HarnessSmith 是这层 harness 的生成器,定位类似 `create-next-app`。通过 Web 向导、终端交互向导、preset 或手写 YAML 采集一份规格(`HarnessSpec`),HarnessSmith 据此渲染出一个**完整、独立的 Python 代码仓库**——可读、可改、可测试、可独立运行。生成的项目与 HarnessSmith 没有任何运行期关系:生成即脱离。
+HarnessSmith 是 agent harness 的生成器,定位类似 `create-next-app`。通过 Web 向导、终端交互向导、preset 或手写 YAML 采集一份规格(`HarnessSpec`),HarnessSmith 据此渲染出一个**完整、独立的 Python 代码仓库**——可读、可改、可测试、可独立运行。生成的项目与 HarnessSmith 没有任何运行期关系:生成即脱离。
 
 ### 设计定位
 
@@ -229,12 +234,14 @@ HarnessSmith 是这层 harness 的生成器,定位类似 `create-next-app`。通
 - **双 LLM 协议,运行期可切** —— 每个产物同时内置 OpenAI Chat Completions 客户端(经 `base_url` 对接 vLLM、Together、Groq、LiteLLM 等任意兼容端点)与原生 Anthropic Messages 客户端;每个 LLM profile 在运行期配置中选择 `provider`,无需重新生成。
 - **推理过程一等公民** —— thinking/reasoning 增量实时呈现(CLI 状态行、Web 可折叠推理面板),并在工具调用多轮间保留 `reasoning_content`,兼容有此要求的模型。
 - **多范式运行时** —— `agent`(默认工具调用循环)、`plan` 与 `ask`(均只读),每轮可切(`--mode` / Web 下拉)。范式存放于薄注册表,用户以 `@register_paradigm` 自行扩展,不触碰内置实现。
-- **会话持久化与续聊** —— 每次对话本地落盘;以 `--continue` / `--resume <id>`、多轮 `chat` REPL 或 Web 会话侧栏(自动起标题、重命名、删除)续聊。中断的运行具备崩溃安全:状态在消息边界写入检查点,恢复时自动修复。
+- **会话持久化与续聊** —— 每次对话本地落盘;以 `--continue` / `--resume <id>`、多轮 `chat` REPL 或 Web 会话侧栏(自动起标题、重命名、删除)续聊。Web 界面支持多会话并行——每个会话独立流式输出,切换侧栏不会打断后台运行。中断的运行具备崩溃安全:状态在消息边界写入检查点,恢复时自动修复。
 - **停止 / 继续 / 重问** —— 回合中途可取消(协作式取消,流式输出一并终止),之后携带完整上下文继续;Web 界面支持就地编辑任一历史提问并从该点重新生成。
 - **人在环交互** —— 内置 `ask_question` 工具让模型向用户提出结构化澄清问题;工具调用确认(`允许一次 / 拒绝 / 本会话允许 / 永久允许`)拦截高风险工具,非交互场景默认拒绝。
 - **按 LLM 持久成本核算** —— 用量账本按 LLM profile 跨运行累计 token;成本由各 profile 单价派生,达到 `cost_limit` 即在下次调用前阻止该模型。经 Web Budget 页或 `usage` CLI 管理。
-- **上下文管理** —— 可组合触发条件(`window_pct`、`max_tokens`、`max_turns`,以真实 token 用量驱动)决定何时压缩;策略(`truncate`、`summarize`、`none`)决定如何压缩;两者均为用户可扩展的注册表。超大工具结果在入历史前截断,溢出时按需强制压缩。
-- **不臃肿的工具生态** —— 装饰器注册的工具注册表带按工具风险分级,另有可选 MCP 客户端(stdio、HTTP、SSE 三种传输)与精选 catalog(网页搜索、fetch、git、时间、Desktop Commander)。MCP server 运行期管理:健康状态、增删改、热重连(Web 面板),CLI 侧 `mcp status`。
+- **上下文管理** —— 可组合触发条件(`window_pct`、`max_tokens`、`max_turns`,以真实 token 用量驱动)决定何时压缩;策略(`truncate`、`summarize`、`none`)决定如何压缩;两者均为用户可扩展的注册表。超大工具结果在入历史前截断,溢出时按需强制压缩;`max_steps` 阀值约束失控的工具循环,压缩还能在单个长回合内折叠(子回合 `keep_last_steps`),使一个 agentic 回合也能留在窗口内。
+- **可组合 hooks 与薄 tool-policy 层** —— 通过 `config.hooks` 挂载一个或多个 `Hooks` 子类(子类化并挂载,无 `@register_hook`);五个生命周期点(`before_step` / `after_step` / `before_tool` / `after_tool` / `on_error`)。`before_tool` 可拒绝一次调用、`after_tool` 可改写/脱敏结果——一层代码级 policy 门禁,不引入 middleware 机制——多个 hook 按顺序组合。Web 界面有专门的 **Hooks** tab 并带隐私安全的执行日志;`info`(CLI)与 `GET /registries`(Web)呈现所有扩展点——工具、范式、上下文策略/触发条件、记忆后端、已导入的 extensions 与已挂载的 hooks。
+- **按会话工作目录** —— 可选的工作目录提示(CLI `--cwd`、`chat` REPL 的 `/cwd`,或 Web 聊天工具栏的目录浏览器)注入系统提示,作为指引而非沙箱。当前日期/时间也会每轮注入。
+- **不臃肿的工具生态** —— 装饰器注册的工具注册表带按工具风险分级,另有可选 MCP 客户端(stdio、HTTP、SSE 三种传输)与精选 catalog(免密钥 Bing/DuckDuckGo 搜索、fetch、git、时间、Desktop Commander、GitHub)。默认网页搜索 server 是一个免密钥的 Bing 爬取器,可达 `cn.bing.com`,因此在 DuckDuckGo 被屏蔽的网络下也能用。MCP server 运行期管理:健康状态、增删改、热重连(Web 面板),CLI 侧 `mcp status`。
 - **Agent Skills** —— 可选支持开放的 `SKILL.md` 标准与渐进披露;技能是纯文件,不引入框架。
 - **跨会话记忆** —— 可选的自维护长期笔记,每轮注入系统提示,经工具写入,在会话边界由专用 LLM 角色整理,并可通过薄 `@register_memory` 注册表替换后端。
 - **全局规则常驻注入** —— markdown 规则文件(`AGENTS.md` / `CLAUDE.md` / `.cursor/rules` 惯例)注入每轮系统提示。
@@ -247,14 +254,15 @@ HarnessSmith 是这层 harness 的生成器,定位类似 `create-next-app`。通
 
 | 能力 | 说明 |
 |---|---|
-| Agent 循环 | 原生 function-calling 循环,含范式分发、生命周期 hook 与优雅停止 |
+| Agent 循环 | 原生 function-calling 循环,含范式分发、生命周期 hook 与优雅停止(含 `max_steps` 阀值) |
 | LLM 层 | profile 注册表 + 角色路由(`generation`、`compaction`,以及可选 `title` / `memory` 角色),按 profile 的采样参数、超时/重试/fallback,双协议客户端(OpenAI 兼容 + 原生 Anthropic) |
 | 工具注册表 | 装饰器注册 + 风险分级;高风险工具默认关闭,仅 allowlist 显式开启 |
-| 会话 | 本地 JSON 持久化、`--continue` / `--resume`、`chat` REPL、崩溃安全检查点 |
+| Hooks 与 policy | 经 `config.hooks` 挂载的可组合 `Hooks` 子类;observer + tool-policy 生命周期点(`before_tool` 拒绝 / `after_tool` 脱敏);经 `info` / `GET /registries` 提供扩展可发现性 |
+| 会话 | 本地 JSON 持久化、`--continue` / `--resume`、`chat` REPL、崩溃安全检查点、按会话工作目录提示 |
 | 交互层 | `ask_question` 结构化澄清 + HITL 工具确认,CLI/Web 共用同一套底座 |
-| 上下文 | 触发条件/策略双注册表、工具结果截断、溢出自救 |
+| 上下文 | 触发条件/策略双注册表、工具结果截断、溢出自救、`max_steps` 约束、子回合折叠 |
 | 预算 | 按 LLM 持久成本账本,按 profile 设单价与硬性成本上限 |
-| 提示词 | 系统提示拼装 + 规则文件常驻注入 |
+| 提示词 | 系统提示拼装 + 规则文件常驻注入、当前日期/时间、工作目录提示 |
 | 可观测性 | JSONL trace + token/成本计数;可选仅本地 debug 日志 |
 | CLI | `run`、`chat`、`info`、`test-llm`、`set-key`、`usage`(启用对应模块时另有 `serve`、`mcp`、`memory`) |
 | 可运行性 | `uv.lock` + `.python-version`、Dockerfile + `.dockerignore` + devcontainer、`requirements.txt` pip 兜底、mock LLM 测试套件、一键启动脚本 |
@@ -263,7 +271,7 @@ HarnessSmith 是这层 harness 的生成器,定位类似 `create-next-app`。通
 
 | 模块 | 说明 |
 |---|---|
-| Web 界面 | FastAPI + SSE 聊天,token 级流式、可折叠推理与工具调用面板、会话侧栏,以及分页双语(中/英)`/config` 面板——LLM、Context、Tools、MCP、Paradigms、Prompts、Budget、Observability、System 各 tab。修改即时生效并回写 `config.yaml`(保留注释) |
+| Web 界面 | FastAPI + SSE 聊天,token 级流式、可折叠推理与工具调用面板、支持多会话并行的会话侧栏、聊天工具栏(范式、生成模型、工作目录选择),以及分页双语(中/英)`/config` 面板——LLM、Context、Tools、MCP、Hooks、Paradigms、Prompts、Budget、Memory、Observability、System 各 tab(MCP 与 Memory 仅在对应模块启用时出现)。修改即时生效并回写 `config.yaml`(保留注释) |
 | MCP 工具 | Model Context Protocol 客户端(stdio / HTTP / SSE),allowlist 与风险标记,精选 catalog 预填,运行期 server 管理(健康探测 + 热重连) |
 | Agent Skills | `SKILL.md` 发现、元数据注入与按需加载 |
 | 长期记忆 | 自维护 markdown 笔记,工具驱动写入、策略塑形、整理压缩,后端可插拔 |
@@ -313,29 +321,36 @@ uv sync
 
 ### 生成 harness
 
+**最简单的方式**是仓库根目录的一键启动器——双击或运行 `HarnessSmith.sh`(macOS / Linux)或 `HarnessSmith.bat`(Windows)。它会让你在 **Web 向导(推荐)** 与终端向导之间选择,并在首次使用时代为安装 uv。
+
+偏好命令行?每条都是单命令:
+
 ```bash
-uv run harnessmith new my-agent --preset coding-assistant   # 使用内置 preset
-uv run harnessmith new my-agent --spec ./harness.spec.yaml  # 使用手写 spec
+uv run harnessmith wizard                                   # Web 向导(推荐;uv sync --extra wizard)
 uv run harnessmith new                                      # 终端交互向导
-uv run harnessmith wizard                                   # Web 向导(uv sync --extra wizard)
+uv run harnessmith new my-agent --preset coding-assistant   # 非交互,使用内置 preset
+uv run harnessmith new my-agent --spec ./harness.spec.yaml  # 非交互,使用手写 spec
 uv run harnessmith doctor                                   # 本机工具链预检
 ```
 
-- **终端向导**(`new` 不带 `--spec` / `--preset`)与 **Web 向导**(`wizard`)采集同一组结构选项——显示名、范式、Web 界面、MCP、技能、记忆——并应用一致的默认值;前者适合无图形界面的服务器,后者适合桌面环境。
-- 也可使用仓库根目录的一键启动器——`HarnessSmith.bat`(Windows)与 `HarnessSmith.sh`(macOS / Linux)——它会让你在 Web 向导与终端向导之间选择,并可在首次使用时代为安装 uv。
+- **Web 向导**(`wizard`)与 **终端向导**(`new` 不带 `--spec` / `--preset`)采集同一组结构选项——显示名、范式、Web 界面、MCP、技能、记忆——并应用一致的默认值;Web 向导适合桌面环境,终端向导适合无图形界面的服务器。
 - 渲染完成后,生成器锁定依赖并执行冒烟验证(`uv sync`、import 检查、一次 mock function-calling、`pytest`);离线等场景可用 `--no-verify` 跳过。
 - 任何向导都不采集密钥;密钥不会进入 spec、生成的 `config.yaml` 或 git。
 
 ### 运行生成的 harness
 
+**最简单的方式**是生成仓库自带的一键启动器,以其显示名命名、空白折叠为 `-`(如 `My-Coding-Assistant.sh` / `.bat`,终端无需引号)。它会自动 `uv sync`,并在启用 Web 的产物里启动 Web 聊天并打开浏览器;否则打开终端聊天。
+
+等价的命令行方式:
+
 ```bash
 cd my-agent
 uv sync                                  # uv 自动准备 Python 与隔离 venv
 uv run my-agent set-key OPENAI_API_KEY   # 把 API key 写入 .env(不回显、不进 git)
+uv run my-agent serve --open             # Web 聊天 + /config 面板(启用 Web 的产物;推荐)
 uv run my-agent test-llm                 # 探测各配置模型
 uv run my-agent chat                     # 终端多轮对话
-uv run my-agent run "总结 ./notes"        # 单轮;可加 --mode plan|ask、--stream
-uv run my-agent serve --open             # Web 聊天 + /config 面板(启用 Web 的产物)
+uv run my-agent run "总结 ./notes"        # 单轮;可加 --mode plan|ask、--stream、--cwd
 
 # 完全容器化的替代方案(默认生成):
 docker build -t my-agent . && docker run --rm -it my-agent
@@ -343,16 +358,14 @@ docker build -t my-agent . && docker run --rm -it my-agent
 
 模型与端点在 `config.yaml`(或 Web `/config` 的 LLM tab)配置:设置 `model`,将 `base_url_env` / `api_key_env` 指向对应环境变量,并为每个 profile 选择 `provider: openai` 或 `provider: anthropic`。`run`、`chat`、`serve` 均支持 `--mock`,可在没有任何 key 的情况下离线试用。
 
-每个生成的仓库同样附带以其显示名命名的一键启动器(空白折叠为 `-`,终端无需引号,如 `My-Coding-Assistant.bat` / `.sh`)。
-
 ### 产物 CLI 参考
 
 | 命令 | 用途 |
 |---|---|
-| `run [PROMPT]` | 执行一轮。选项:`--mode agent\|plan\|ask`、`--stream`、`--continue`、`--resume <id>`、`--role`、`--mock` |
-| `chat` | 多轮 REPL,会话自动持久化;`Ctrl-D` 或 `/exit` 退出 |
+| `run [PROMPT]` | 执行一轮。选项:`--mode agent\|plan\|ask`、`--stream`、`--continue`、`--resume <id>`、`--role`、`--cwd`、`--mock` |
+| `chat` | 多轮 REPL,会话自动持久化;`/cwd` 设置工作目录提示;`Ctrl-D` 或 `/exit` 退出 |
 | `serve` | 启动 Web 界面(`--host`、`--port`、`--open`);启用 Web 的产物 |
-| `info` | 内省已注册的工具、范式、上下文策略与触发条件 |
+| `info` | 内省所有扩展点——已注册的工具、范式、上下文策略/触发条件、记忆后端、已导入的 extensions 与已挂载的 hooks |
 | `test-llm` | 对每个 LLM profile 做连通性与能力探测 |
 | `set-key <ENV_NAME>` | 将密钥写入 `.env`,不回显、不触碰 git |
 | `usage` | 查看或清空按 LLM 的持久成本账本 |
@@ -364,7 +377,7 @@ docker build -t my-agent . && docker run --rm -it my-agent
 | 层 | 文件 | 角色 |
 |---|---|---|
 | 生成期 spec | `harness.spec.yaml` | 配方:哪些能力被编译进产物,以及初始值;快照保留在生成的仓库中 |
-| 运行期配置 | `config.yaml` | 行为的权威来源:LLM profile 与角色、提示词与规则文件、工具 allowlist、上下文策略、MCP server、单价与成本上限、可观测性。可手改,也可经 Web `/config` 面板修改(即时生效 + 保留注释回写) |
+| 运行期配置 | `config.yaml` | 行为的权威来源:LLM profile 与角色、提示词与规则文件、工具 allowlist、上下文策略、hooks、MCP server、单价与成本上限、可观测性。可手改,也可经 Web `/config` 面板修改(即时生效 + 保留注释回写) |
 | 密钥 | `.env`(gitignored) | 真实凭证的唯一存放处;`config.yaml` 与 spec 仅引用环境变量*名称* |
 
 结构性变更(增删接口或模块)需要重新生成;行为性变更永远不需要。
