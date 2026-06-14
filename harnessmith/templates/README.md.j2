@@ -189,10 +189,14 @@ referenced by env-var name only.
 slow download never looks frozen) in the terminal you launched from; a marker
 (`.harness/.mcp-warmed`) records it, so every later launch skips straight to a fast
 cache hit. By the time the page opens, tools are ready. (The one-shot `run` skips
-this — it's the scripting/Docker path.) If a server is still warming or fails, the
-web **MCP** tab shows it as **connecting** (amber) / **red** (with the reason);
-each server has its own **Reconnect** button (retry just that one). Adding a server
-from the **MCP** tab enables its whole toolset by default (narrow it on the Tools tab).
+this — it's the scripting/Docker path.) Connecting is two-phase: the package is
+pre-fetched in a survivable step (so a slow download finishes once and isn't killed
+by the handshake timeout), then the session handshake runs. If a connect fails, it
+**heals on its own** — retrying in the background with backoff (`connect_max_retries`):
+the web **MCP** tab shows it **connecting** (amber) while retrying and **red** only
+once retries are exhausted, and tools light up by themselves once it recovers. Each
+server also has a **Reconnect** button (retry just that one). Adding a server from
+the **MCP** tab enables its whole toolset by default (narrow it on the Tools tab).
 Behind the GFW, when PyPI
 or the npm registry is unreachable, `uvx`/`npx` are pointed at a domestic mirror
 automatically (only if you haven't set your own index). Desktop Commander needs

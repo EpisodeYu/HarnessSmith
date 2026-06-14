@@ -281,13 +281,18 @@ def _start_mcp(config):
     ``None`` when nothing needs launching; the caller must ``.close()`` the
     manager when done (``serve`` lets it live for the process lifetime).
     """
-    from ..harness.mcp import McpManager, register_mcp_tools
+    from ..harness.mcp import McpManager, register_mcp_tools, sync_mcp_tools
 
     active = {n.split("__", 1)[0] for n in config.enabled_tool_names() if "__" in n}
     servers = [s for s in config.mcp.servers if s.name in active]
     if not servers:
         return None
-    manager = McpManager(config.mcp.model_copy(update={"servers": servers}))
+    # on_connected: re-sync the registry on each (re)connect so a server that
+    # auto-heals later in the session still gets its tools to the model.
+    manager = McpManager(
+        config.mcp.model_copy(update={"servers": servers}),
+        on_connected=lambda m: sync_mcp_tools(config, m),
+    )
     manager.start()
     register_mcp_tools(config, manager)
     return manager

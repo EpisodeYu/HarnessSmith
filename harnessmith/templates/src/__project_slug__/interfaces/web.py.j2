@@ -399,11 +399,16 @@ def _ensure_mcp_manager(app):
     immediately report a live "connecting" state instead of hanging until every
     (possibly slow uvx/npx cold-start) server is up.
     """
-    from ..harness.mcp import McpManager
+    from ..harness.mcp import McpManager, sync_mcp_tools
 
     with app.state.mcp_lock:
         if app.state.mcp_manager is None:
-            manager = McpManager(app.state.config.mcp)
+            # on_connected: re-sync the registry on EVERY (re)connect, so a server
+            # that auto-heals in the background still gets its tools to the model.
+            manager = McpManager(
+                app.state.config.mcp,
+                on_connected=lambda m: sync_mcp_tools(app.state.config, m),
+            )
             manager.begin()  # start connecting without blocking the request
             app.state.mcp_manager = manager
             _warm_mcp_tools(app, manager)
@@ -435,7 +440,11 @@ def _rebuild_mcp_manager(app):
     from ..harness.mcp import rebuild_manager, sync_mcp_tools
 
     with app.state.mcp_lock:
-        manager = rebuild_manager(app.state.mcp_manager, app.state.config.mcp)
+        manager = rebuild_manager(
+            app.state.mcp_manager,
+            app.state.config.mcp,
+            on_connected=lambda m: sync_mcp_tools(app.state.config, m),
+        )
         sync_mcp_tools(app.state.config, manager)
         app.state.mcp_manager = manager
         return manager

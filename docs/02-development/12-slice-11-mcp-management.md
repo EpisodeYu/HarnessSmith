@@ -23,7 +23,7 @@
 - `catalog/mcp_servers.yaml` — desktop-commander 条目补 `transport: stdio`;远程条目可标 `transport: sse`/`http` 作示例。
 
 ### 生成产物侧(`spec.mcp.enabled` 门控,关掉零痕迹不变)
-- `harness/config.py` — `McpServerConfig` 新增运行期字段 `transport: Literal["stdio","http","sse"] | None = None`(留空按形态推断:`command`→stdio、`url`→http;设了则权威)。校验:`stdio` 必须有 `command`、`http`/`sse` 必须有 `url`。运行期旋钮 `McpConfig.proxy/npm_registry/pip_index`(覆盖自动探测,仅值)。
+- `harness/config.py` — `McpServerConfig` 新增运行期字段 `transport: Literal["stdio","http","sse"] | None = None`(留空按形态推断:`command`→stdio、`url`→http;设了则权威)。校验:`stdio` 必须有 `command`、`http`/`sse` 必须有 `url`。运行期旋钮 `McpConfig.proxy/npm_registry/pip_index`(覆盖自动探测,仅值)+ `McpConfig.connect_max_retries`(默认 4;连接自愈重试上限,0=关)。
 - `harness/mcp.py`(约 250 行,仍单文件、无新抽象层)—
   - `_open_streams` 新增 **SSE 分支**(`sse_client(url, headers=...)`),按 `transport` 三选一,远程仍注入 `auth_env` Bearer header。
   - `McpManager`:连接传入的全部 server(web 常驻路径传全部;CLI 一次性路径传子集);**每个 server 一个长期 Task 同时拥有连接、session 生命周期与 `call_tool` 执行**(dispatcher 只投递请求,避免跨 task 用 session);连接超时用同 task 内的 `asyncio.timeout()`;失败隔离进 `errors`,展开 `ExceptionGroup` 叶子错误。轻量 `status()`(每 server `connected/connecting/error/tool_count`,读缓存不重连)+ 单 server `reconnect_server(name)`(只重连一个,其余不动)。
@@ -52,6 +52,7 @@ stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健
 - **可读报错 + 自动预热(首跑即就绪)**:连接失败经 `_connect_error` 翻译为可读建议;**预热改为自动**:`warm_once`(sentinel `.harness/.mcp-warmed` 门控)在**首次 `serve`/`chat`** 连接前**前台**跑一遍 fetch-only 预拉,`_stream_subprocess` 把 npx/uvx 输出**逐行流式**写到终端 + 静默时发**心跳行**(冷下载不像卡死);跑通后写 sentinel,**后续启动直接跳过、秒连缓存**。一次性 `run`(脚本/Docker 路径,每次容器全新)**不预热**保持精简。catalog 里 npx/uvx 包**钉版本**(如 desktop-commander `@0.2.42`,非 `@latest`),预热缓存的就是连接要解析的那一份。手动 `mcp warm`(force,刷新 sentinel)仍在。
 
   > 翻转早先「`mcp warm` opt-in、不进 bootstrap 以免阻塞产物页打开」的取舍:现首跑前台预热(带进度)正是为消除「装完→MCP 超时→工具不可用→以为产物垃圾」的脏首跑;serve 仍**端口秒开**——只有「未预热过」的首跑会先跑预热,sentinel 命中后秒开不变。
+- **两阶段连接 + 静默自愈(运行期兜底,覆盖没走 warm 的路径:web 后台连/重连按钮/新增 server/`run`)**:`_run_server` 拆成 ①**prefetch**(npx/uvx 经 `_warm_one_server` 用**可存活子进程**off-loop 预拉、进度进 errlog→`status().log_tail`,即便被杀 orphan 续传不丢进度)② **handshake**(`connect_timeout_seconds` 内 `initialize`+`list_tools`,缓存命中即快)。连接失败**后台带退避重试**至 `mcp.connect_max_retries`(默认 4;指数退避 base 5s、cap 60s):重试期清 error 保持 **amber**,耗尽才标 **red**;`shutdown`/`reconnect` 取消不重试(`CancelledError` 直接退出)。每次成功连接经 `on_connected(self)` 回调让属主**重同步 registry**(`McpManager(on_connected=…)`、`rebuild_manager(…, on_connected=…)`;web/CLI 都传 `sync_mcp_tools`)——否则自愈上来的 server 连上了但工具到不了模型。`mcp.connect_max_retries=0` = 关自愈、快速失败。
 - **首连实时进度 + 工具增量**:`status()` 经 `stdio_client(errlog=临时文件)` 捕获 npx/uvx 拉包 stderr,管理页/Tools 页 amber 时显示进度;`/mcp/discover` 非阻塞 + Tools 页轮询,先就绪先显示,不被慢/失败者卡住。
 - **stdout 纯净(JSON-RPC 契约)**:stdio 子进程的 stdout 必须只承载 JSON-RPC。npm 的 `added N packages …` 安装摘要在旧版 npm 下会随 `npx` 首跑漏到 stdout,被 reader 当协议解析、刷出多段 parse traceback。catalog 的 desktop-commander 故用 `npx --silent -y …`:`--silent` 只压 npm 自身输出(日志/警告本就走 stderr→errlog),不碰被启动 server 自己的 stdout,协议流不受影响。
 - **便携 Node 自举**:仅当预填了 Node 系 server 时,产物启动脚本与向导一键 job 在缺 Node 时引导下便携 Node(pin LTS,本会话 prepend PATH);跳过/失败均不致命。
@@ -66,6 +67,8 @@ stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健
 - 状态一致:Tools 页 / 管理页状态读 `/mcp/status`(同一常驻 manager);server 掉线即红。
 - 大复选框:server 主复选框全开/全关/部分三态 + 联动小框 + 回写 allowlist。
 - CLI `mcp status`:连通性 + 工具计数 + 不可达标红 + 缺 launcher 提示(对真实 stdio dummy + broken server)。
+- 首跑预热:`serve`/`chat` 首跑前台 `warm_once` 带流式进度 + 心跳、写 sentinel 后续跳过;`run` 不预热(Docker `run` 不变、不挂)。DC 钉版本(catalog 断言无 `@latest`)。
+- 两阶段 + 自愈:prefetch 先于 handshake;失败按 `connect_max_retries` 后台退避重试(amber→耗尽 red),成功经 `on_connected` 重同步 registry;`connect_max_retries=0` 快速失败不重试。
 - wizard DC 默认 + HITL:wizard 产物默认 DC 勾选 + `confirm: high`。
 - 不泄密:`/mcp/status` 仅回 env 名;server 增删改只收 env 名;trace/日志不回显。
 - 关 MCP 零痕迹:`spec.mcp.enabled=false` 产物不含 `mcp.py`/MCP 标签/`/mcp/*`/`mcp` CLI 段。

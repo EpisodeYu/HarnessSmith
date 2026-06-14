@@ -343,9 +343,17 @@ class McpManager:
     a one-shot CLI run that needs tools up front). ``reconnect_server()`` restarts
     one server in place; ``call()`` is synchronous + thread-safe; ``close()`` shuts
     everything down cleanly.
+
+    Connecting is TWO phases (see :meth:`_run_server`): a survivable package PREFETCH
+    (npx/uvx) then a bounded HANDSHAKE; a failed connect auto-heals in the background
+    with backoff, and ``on_connected`` (called with ``self`` on every successful
+    connect) lets the owner re-sync its tool registry so healed tools reach the model.
     """
 
-    def __init__(self, config: McpConfig) -> None:
+    _BACKOFF_BASE = 5.0  # auto-heal backoff: doubles each attempt …
+    _BACKOFF_CAP = 60.0  # … capped here
+
+    def __init__(self, config: McpConfig, on_connected=None) -> None:
         self._config = config
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._thread_main, daemon=True)
@@ -362,6 +370,8 @@ class McpManager:
         self._logpaths: dict[str, str] = {}  # per-server stderr capture (npx/uvx fetch log)
         self.discovered: dict[str, list] = {}
         self.errors: dict[str, str] = {}
+        self._on_connected = on_connected  # called(self) after each successful connect
+        self._notes: dict[str, str] = {}  # transient per-server status line (e.g. retrying)
 
     def _thread_main(self) -> None:
         asyncio.set_event_loop(self._loop)
@@ -402,66 +412,130 @@ class McpManager:
         self._settled[name] = asyncio.Event()
         self._tasks[name] = asyncio.create_task(self._run_server(server))
 
+    async def _prefetch(self, server: McpServerConfig, errlog) -> None:
+        """Phase 1 (npx/uvx only): pre-download the package via a SURVIVABLE
+        subprocess, off the event loop, with a generous budget and progress streamed
+        to ``errlog`` (so the status page shows it). This is what makes a slow cold
+        download finish ONCE — the short handshake timeout would otherwise kill it,
+        and on Windows that tears down the whole download tree, losing all progress
+        every attempt. No-op for non-package servers; never fatal (a fetch hiccup
+        just falls through to the handshake, which then errors + auto-heals)."""
+        if _warm_argv(server) is None:
+            return
+        warm_timeout = max(120.0, self._config.connect_timeout_seconds)
+
+        def _blocking() -> None:
+            outcome = _warm_one_server(server, self._net_env, errlog, warm_timeout=warm_timeout)
+            if outcome is not None and errlog is not None:
+                ok, detail = outcome
+                errlog.write(f"[{server.name}] {'ready' if ok else 'fetch: ' + detail}\n")
+                errlog.flush()
+
+        try:
+            await self._loop.run_in_executor(None, _blocking)
+        except Exception:  # never let a prefetch glitch abort the handshake
+            log.debug("mcp %s: prefetch error (continuing to handshake)", server.name, exc_info=True)
+
+    def _fire_connected(self) -> None:
+        """Notify the owner a server (re)connected, so it can re-sync its tool
+        registry — without this, a server that auto-heals after the initial round
+        would be connected but its tools never offered to the model."""
+        if self._on_connected is None:
+            return
+        try:
+            self._on_connected(self)
+        except Exception:
+            log.debug("mcp on_connected callback failed", exc_info=True)
+
     async def _run_server(self, server: McpServerConfig) -> None:
         """Own ONE server's session AND its tool calls for the whole run, in a
-        single task.
+        single task — connecting in TWO phases, with silent auto-heal.
 
-        Connect (open transport + ``initialize`` + ``list_tools``) under the timeout,
-        signal ``settled`` (so startup can proceed), then loop on this server's own
-        inbox running each ``call_tool`` HERE — never from the dispatcher task, since
-        anyio requires a session be used in the same task it was entered. A ``None``
-        stops the loop (shutdown or a reconnect); a connect failure/timeout is
-        isolated into ``errors`` and never aborts the other servers.
+        Phase 1 PREFETCH (see :meth:`_prefetch`) downloads an npx/uvx package once in
+        a survivable subprocess; phase 2 opens the transport + ``initialize`` +
+        ``list_tools`` under ``connect_timeout_seconds`` (fast once cached). Each
+        ``call_tool`` runs HERE — never from the dispatcher task, since anyio requires
+        a session be used in the same task it was entered. A ``None`` on the inbox
+        stops the loop (shutdown or reconnect).
+
+        A connect failure is isolated AND retried in the background with exponential
+        backoff (up to ``connect_max_retries``): the dot stays amber while retrying
+        and goes red only once retries are exhausted, so a server that was merely slow
+        or briefly unreachable heals on its own. Every successful connect re-syncs the
+        registry via :meth:`_fire_connected`.
         """
         name = server.name
         settled = self._settled[name]
-        self._connect_started[name] = time.monotonic()
-        errlog = self._open_log(name)
-        try:
-            async with AsyncExitStack() as stack:
-                if errlog is not None:
-                    stack.callback(self._close_log, name, errlog)
-                # `asyncio.wait_for(coro)` wraps `coro` in another Task; anyio's MCP
-                # transports must be entered and exited in the SAME task, so use
-                # `asyncio.timeout()` here instead.
-                async with asyncio.timeout(self._config.connect_timeout_seconds):
-                    await self._connect(stack, server, errlog)
-                inbox: asyncio.Queue = asyncio.Queue()
-                self._server_inboxes[name] = inbox
-                log.debug(
-                    "mcp %s: connected in %.1fs (%d tools)",
-                    name, time.monotonic() - self._connect_started[name],
-                    len(self.discovered.get(name, [])),
-                )
-                settled.set()
-                while True:
-                    req = await inbox.get()
-                    if req is None:
-                        return  # shutdown or reconnect: tear the session down in this task
-                    tool, arguments, fut = req
-                    try:
-                        # Bound each call: a hung server fails this ONE call with a
-                        # timeout ERROR the model can react to, instead of wedging
-                        # the turn (and Stop) forever.
-                        async with asyncio.timeout(self._config.call_timeout_seconds):
-                            fut.set_result(
-                                _result_text(await self._sessions[name].call_tool(tool, arguments))
-                            )
-                    except TimeoutError:
-                        fut.set_exception(TimeoutError(
-                            f"MCP tool {name}__{tool} timed out after "
-                            f"{self._config.call_timeout_seconds:.0f}s "
-                            "(mcp.call_timeout_seconds in config.yaml)"
-                        ))
-                    except Exception as exc:
-                        fut.set_exception(exc)
-        except Exception as exc:  # connect failure/timeout: isolate, never fatal
-            self.errors[name] = _connect_error(server, exc, self._net_env)
-            log.debug("mcp %s: connect FAILED: %s", name, self.errors[name])
-            self._sessions.pop(name, None)
-            self._server_inboxes.pop(name, None)
-            if not settled.is_set():
-                settled.set()
+        attempt = 0
+        while True:
+            self._notes.pop(name, None)
+            self._connect_started[name] = time.monotonic()
+            errlog = self._open_log(name)
+            try:
+                async with AsyncExitStack() as stack:
+                    if errlog is not None:
+                        stack.callback(self._close_log, name, errlog)
+                    await self._prefetch(server, errlog)  # phase 1 (no-op for non-package)
+                    # `asyncio.wait_for(coro)` wraps `coro` in another Task; anyio's MCP
+                    # transports must be entered and exited in the SAME task, so use
+                    # `asyncio.timeout()` here instead.
+                    async with asyncio.timeout(self._config.connect_timeout_seconds):
+                        await self._connect(stack, server, errlog)  # phase 2
+                    inbox: asyncio.Queue = asyncio.Queue()
+                    self._server_inboxes[name] = inbox
+                    self.errors.pop(name, None)  # connected (or healed)
+                    attempt = 0  # a clean connection resets the backoff
+                    log.debug(
+                        "mcp %s: connected in %.1fs (%d tools)",
+                        name, time.monotonic() - self._connect_started[name],
+                        len(self.discovered.get(name, [])),
+                    )
+                    settled.set()
+                    self._fire_connected()  # re-sync the registry so healed tools reach the model
+                    while True:
+                        req = await inbox.get()
+                        if req is None:
+                            return  # shutdown or reconnect: tear the session down in this task
+                        tool, arguments, fut = req
+                        try:
+                            # Bound each call: a hung server fails this ONE call with a
+                            # timeout ERROR the model can react to, instead of wedging
+                            # the turn (and Stop) forever.
+                            async with asyncio.timeout(self._config.call_timeout_seconds):
+                                fut.set_result(
+                                    _result_text(await self._sessions[name].call_tool(tool, arguments))
+                                )
+                        except TimeoutError:
+                            fut.set_exception(TimeoutError(
+                                f"MCP tool {name}__{tool} timed out after "
+                                f"{self._config.call_timeout_seconds:.0f}s "
+                                "(mcp.call_timeout_seconds in config.yaml)"
+                            ))
+                        except Exception as exc:
+                            fut.set_exception(exc)
+            except asyncio.CancelledError:
+                raise  # reconnect/shutdown cancelled us — don't auto-heal, just exit
+            except Exception as exc:  # connect failure/timeout: isolate, never fatal
+                self._sessions.pop(name, None)
+                self._server_inboxes.pop(name, None)
+                detail = _connect_error(server, exc, self._net_env)
+                attempt += 1
+                if not settled.is_set():
+                    settled.set()  # let start()/wait_ready() proceed after the first attempt
+                if attempt > self._config.connect_max_retries or self._closing.is_set():
+                    self.errors[name] = detail  # give up: red, until a manual reconnect
+                    log.debug("mcp %s: connect FAILED (gave up after %d): %s", name, attempt, detail)
+                    return
+                # Auto-heal: stay amber (no error set) and retry after a backoff.
+                self.errors.pop(name, None)
+                delay = min(self._BACKOFF_BASE * (2 ** (attempt - 1)), self._BACKOFF_CAP)
+                self._notes[name] = f"connect failed; retrying in {int(delay)}s ({detail[:80]})"
+                log.debug("mcp %s: connect failed (attempt %d), retrying in %.0fs: %s", name, attempt, delay, detail)
+                try:
+                    await asyncio.wait_for(self._closing.wait(), timeout=delay)
+                    return  # shutting down during backoff
+                except TimeoutError:
+                    pass  # backoff elapsed → loop and retry
 
     def _open_log(self, name: str):
         """A per-server file that captures the child's stderr (npx/uvx fetch output);
@@ -626,7 +700,8 @@ class McpManager:
                     # Live feedback while a (possibly slow) connect/fetch is in flight:
                     # how long it's been trying + the latest stderr line (npx/uvx output).
                     "connecting_seconds": round(time.monotonic() - started, 1) if (connecting and started) else None,
-                    "log_tail": self._log_tail(name) if connecting else "",
+                    # live fetch/handshake stderr, or the auto-heal note while backing off
+                    "log_tail": (self._log_tail(name) or self._notes.get(name, "")) if connecting else "",
                     "error": error,
                     "tool_count": len(tools) if tools is not None else 0,
                 }
@@ -634,14 +709,18 @@ class McpManager:
         return out
 
 
-def rebuild_manager(old: "McpManager | None", config: McpConfig) -> McpManager:
+def rebuild_manager(
+    old: "McpManager | None", config: McpConfig, on_connected=None
+) -> McpManager:
     """Reconnect: start a fresh manager for ``config``, then close the old one.
 
     The new manager is fully started (every server connected or failure-isolated)
     BEFORE the old one is closed, so a hot-reconnect never leaves a window with no
     sessions. The caller keeps the returned manager and re-syncs the registry.
+    ``on_connected`` carries over to the fresh manager so its servers auto-heal +
+    re-sync just like the original (see :class:`McpManager`).
     """
-    manager = McpManager(config)
+    manager = McpManager(config, on_connected=on_connected)
     manager.start()
     if old is not None:
         old.close()
@@ -710,6 +789,56 @@ def _stream_subprocess(argv, env, timeout, on_line, heartbeat_every: float = 5.0
     return proc.returncode, False
 
 
+def _warm_one_server(
+    server: McpServerConfig, net_env: dict[str, str], log, *, warm_timeout: float
+) -> tuple[bool, str] | None:
+    """Pre-download ONE npx/uvx server's package, streaming progress to ``log``.
+
+    Returns ``(ok, detail)`` or ``None`` when there's nothing to fetch (a non-npx/uvx
+    launcher). Best-effort (never raises): an unreachable registry / missing launcher
+    / non-zero exit each come back as ``(False, reason)``; a timeout is ``(True, …)``
+    because the (survivable) download keeps going and finishes for the next attempt.
+    Shared by :func:`prewarm_stdio_packages` and ``McpManager._prefetch``."""
+    import os
+
+    warm = _warm_argv(server)
+    if warm is None:  # a local script / non-npx-uvx launcher — nothing to fetch
+        return None
+    configured, family = _source_status(server, net_env)
+    if not configured:  # no reachable registry found — don't hang, report it
+        return False, _unreachable_advice(family)
+    try:
+        command, args = _windows_stdio_command(warm[0], warm[1])
+    except FileNotFoundError as exc:
+        return False, str(exc)
+    env = dict(os.environ)
+    for key, value in net_env.items():
+        env.setdefault(key, value)
+
+    def _say(msg: str) -> None:
+        if log is not None:
+            log.write(msg + "\n")
+            log.flush()
+
+    _say(f"[{server.name}] downloading: {server.command} {' '.join(server.args)} …")
+    tail: list[str] = []
+
+    def _on_line(line: str) -> None:
+        tail.append(line)
+        del tail[:-5]  # keep only the last few lines for the failure detail
+        _say(f"  [{server.name}] {line}")
+
+    try:
+        code, timed_out = _stream_subprocess([command, *args], env, warm_timeout, _on_line)
+    except Exception as exc:  # spawn failure (missing launcher, etc.)
+        return False, _format_exception(exc)
+    if timed_out:
+        return True, f"still fetching after {int(warm_timeout)}s (will finish on first connect)"
+    if code == 0:
+        return True, "ready"
+    return False, f"launcher exited {code}: {'; '.join(tail[-3:])}".strip()
+
+
 def prewarm_stdio_packages(
     config: "McpConfig", *, log=None, timeout: float | None = None
 ) -> list[tuple[str, bool, str]]:
@@ -720,58 +849,20 @@ def prewarm_stdio_packages(
     exits promptly without starting the server. Returns ``(name, ok, detail)`` per
     server; best-effort (never raises).
     """
-    import os
-
-    def _say(msg: str) -> None:
-        if log is not None:
-            log.write(msg + "\n")
-            log.flush()
-
     net_env = _stdio_net_env(list(config.servers), config)
-    env = dict(os.environ)
-    for key, value in net_env.items():
-        env.setdefault(key, value)
     warm_timeout = timeout or max(120.0, config.connect_timeout_seconds)
     results: list[tuple[str, bool, str]] = []
     for server in config.servers:
         if server.kind != "stdio":
             continue
-        warm = _warm_argv(server)
-        if warm is None:  # a local script / non-npx-uvx launcher — nothing to fetch
+        outcome = _warm_one_server(server, net_env, log, warm_timeout=warm_timeout)
+        if outcome is None:  # nothing to fetch for this launcher
             continue
-        configured, family = _source_status(server, net_env)
-        if not configured:  # no reachable registry found — don't hang, report it
-            advice = _unreachable_advice(family)
-            results.append((server.name, False, advice))
-            _say(f"[{server.name}] FAILED: {advice}")
-            continue
-        try:
-            command, args = _windows_stdio_command(warm[0], warm[1])
-        except FileNotFoundError as exc:
-            results.append((server.name, False, str(exc)))
-            _say(f"[{server.name}] FAILED: {exc}")
-            continue
-        _say(f"[{server.name}] downloading: {server.command} {' '.join(server.args)} …")
-        tail: list[str] = []
-
-        def _on_line(line: str, _name: str = server.name, _tail: list[str] = tail) -> None:
-            _tail.append(line)
-            del _tail[:-5]  # keep only the last few lines for the failure detail
-            _say(f"  [{_name}] {line}")
-
-        try:
-            code, timed_out = _stream_subprocess([command, *args], env, warm_timeout, _on_line)
-        except Exception as exc:  # spawn failure (missing launcher, etc.)
-            ok, detail = False, _format_exception(exc)
-        else:
-            if timed_out:
-                ok, detail = True, f"still fetching after {int(warm_timeout)}s (will finish on first connect)"
-            elif code == 0:
-                ok, detail = True, "ready"
-            else:
-                ok, detail = False, f"launcher exited {code}: {'; '.join(tail[-3:])}".strip()
+        ok, detail = outcome
         results.append((server.name, ok, detail))
-        _say(f"[{server.name}] {'ok' if ok else 'FAILED'}: {detail}")
+        if log is not None:
+            log.write(f"[{server.name}] {'ok' if ok else 'FAILED'}: {detail}\n")
+            log.flush()
     return results
 
 

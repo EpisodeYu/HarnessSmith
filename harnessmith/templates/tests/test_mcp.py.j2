@@ -678,6 +678,123 @@ def test_warm_once_noop_without_package_servers(tmp_path):
     assert not (tmp_path / ".mcp-warmed").exists()
 
 
+def _dummy_cfg(**kw):
+    return McpConfig(
+        servers=[McpServerConfig(name="dummy", command=sys.executable, args=[DUMMY])], **kw
+    )
+
+
+def _wait_until(predicate, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
+
+
+def test_connect_prefetches_before_handshake(monkeypatch):
+    """Phase 1 (prefetch) runs before phase 2 (handshake) on every connect."""
+    order: list[str] = []
+
+    async def fake_prefetch(self, server, errlog):
+        order.append("prefetch")
+
+    async def fake_connect(self, stack, server, errlog=None):
+        order.append("connect")
+        self._sessions[server.name] = object()
+        self.discovered[server.name] = []
+
+    monkeypatch.setattr(mcp_module.McpManager, "_prefetch", fake_prefetch)
+    monkeypatch.setattr(mcp_module.McpManager, "_connect", fake_connect)
+    mgr = mcp_module.McpManager(_dummy_cfg())
+    mgr.start()
+    try:
+        assert order[:2] == ["prefetch", "connect"]
+    finally:
+        mgr.close()
+
+
+def test_auto_heal_retries_until_connected(monkeypatch):
+    """A connect that fails the first attempts heals on its own (no manual
+    reconnect): it retries with backoff, ends up connected, clears the error, and
+    fires on_connected so the registry re-syncs."""
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_BASE", 0.05)
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_CAP", 0.05)
+    attempts = {"n": 0}
+
+    async def fake_prefetch(self, server, errlog):
+        return None
+
+    async def flaky_connect(self, stack, server, errlog=None):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise RuntimeError("boom")
+        self._sessions[server.name] = object()
+        self.discovered[server.name] = []
+
+    monkeypatch.setattr(mcp_module.McpManager, "_prefetch", fake_prefetch)
+    monkeypatch.setattr(mcp_module.McpManager, "_connect", flaky_connect)
+    synced: list[int] = []
+    mgr = mcp_module.McpManager(_dummy_cfg(connect_max_retries=5), on_connected=lambda m: synced.append(1))
+    mgr.begin()
+    try:
+        assert _wait_until(lambda: mgr.status()[0]["connected"]), mgr.status()
+        assert attempts["n"] == 3
+        assert mgr.errors.get("dummy") is None  # error cleared on heal
+        assert synced  # registry re-synced on (re)connect
+    finally:
+        mgr.close()
+
+
+def test_auto_heal_gives_up_after_max_retries(monkeypatch):
+    """Once the retries are exhausted the server goes red (error set) instead of
+    retrying forever."""
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_BASE", 0.02)
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_CAP", 0.02)
+
+    async def fake_prefetch(self, server, errlog):
+        return None
+
+    async def always_fail(self, stack, server, errlog=None):
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr(mcp_module.McpManager, "_prefetch", fake_prefetch)
+    monkeypatch.setattr(mcp_module.McpManager, "_connect", always_fail)
+    mgr = mcp_module.McpManager(_dummy_cfg(connect_max_retries=2))
+    mgr.start()  # returns once the first attempt settles; retries continue in the background
+    try:
+        assert _wait_until(lambda: mgr.errors.get("dummy") is not None), mgr.status()
+        assert "nope" in mgr.errors["dummy"]
+        assert mgr.status()[0]["connected"] is False
+    finally:
+        mgr.close()
+
+
+def test_no_auto_heal_when_max_retries_zero(monkeypatch):
+    """connect_max_retries=0 fails fast: one attempt, straight to red."""
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_BASE", 0.02)
+    attempts = {"n": 0}
+
+    async def fake_prefetch(self, server, errlog):
+        return None
+
+    async def always_fail(self, stack, server, errlog=None):
+        attempts["n"] += 1
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr(mcp_module.McpManager, "_prefetch", fake_prefetch)
+    monkeypatch.setattr(mcp_module.McpManager, "_connect", always_fail)
+    mgr = mcp_module.McpManager(_dummy_cfg(connect_max_retries=0))
+    mgr.start()
+    try:
+        assert _wait_until(lambda: mgr.errors.get("dummy") is not None)
+        time.sleep(0.2)  # give any (wrongly-scheduled) retry a chance to fire
+        assert attempts["n"] == 1  # exactly one attempt, no retry
+    finally:
+        mgr.close()
+
+
 def test_connect_error_explains_unreachable_and_cold_start(monkeypatch):
     """A stdio npx connect failure becomes a readable message: unreachable-registry
     advice when no source resolved, else a cold-download / `mcp warm` hint."""

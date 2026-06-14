@@ -225,7 +225,8 @@ mcp:
 {% if s.get("auth_env") %}      auth_env: {{ s.auth_env }}        # env-var NAME holding a bearer token
 {% endif %}{% endif %}{% if s.get("safe_tools") %}      safe_tools: {{ s.safe_tools | tojson }}
 {% endif %}{% endfor %}{% else %}  servers: []
-{% endif %}  connect_timeout_seconds: 120  # per-server startup timeout (generous: first uvx/npx launch can cold-download, slow on Windows/behind GFW); a slow/failing server is skipped, not fatal
+{% endif %}  connect_timeout_seconds: 120  # per-server HANDSHAKE timeout (the npx/uvx package is pre-fetched in a separate phase first, so this isn't the download budget); a slow/failing server is skipped, not fatal
+  # connect_max_retries: 4  # auto-heal: retry a failed connect in the background with backoff (amber while retrying, red once exhausted); 0 = off
   # Package fetch for stdio servers (npx/uvx). Left unset, the harness auto-resolves:
   # it reuses the system proxy and probes for a reachable registry (official, else a
   # domestic mirror), directly or via proxy. Override only if needed (values, not

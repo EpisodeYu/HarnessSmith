@@ -324,6 +324,12 @@ class McpConfig(BaseModel):
     # (a hung server otherwise blocks Stop until the process is killed). Raise it
     # if a server's tools legitimately run longer.
     call_timeout_seconds: float = Field(default=120.0, gt=0)
+    # Auto-heal: if a server's connect fails (the package was still downloading, the
+    # network blipped, the server wasn't up yet), retry it in the background with
+    # exponential backoff up to this many times — so it comes up on its own without a
+    # manual Reconnect. The dot stays amber while retrying, red only once exhausted.
+    # 0 = no auto-heal (fail fast; reconnect by hand).
+    connect_max_retries: int = Field(default=4, ge=0)
     # How stdio servers that fetch their package (npx/uvx) reach the network. Left
     # empty, the harness auto-resolves: it reuses the system proxy and probes for a
     # reachable registry (official, else a domestic mirror). Set any of these to

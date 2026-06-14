@@ -612,10 +612,15 @@ server's tools are listed under a collapsed group with a **master checkbox**
 Save.
 
 The **Config → MCP** tab is the management view: each server shows a live
-connection dot — **green** = connected, **amber** = connecting (e.g. a `uvx`/`npx`
-package still cold-downloading; the page re-polls until it settles), **red** =
-unreachable (with the error) — plus its transport + tool counts and editable
-fields. Each server has its own **Reconnect** button (retry just that one without
+connection dot — **green** = connected, **amber** = connecting *or auto-healing*
+(e.g. a `uvx`/`npx` package still downloading, or a failed connect retrying in the
+background; the page re-polls until it settles), **red** = unreachable, shown only
+once auto-heal retries (`connect_max_retries`) are exhausted (with the error) — plus
+its transport + tool counts and editable fields. A connect is two-phase: a survivable
+package **prefetch** (so a slow download finishes once instead of being killed by the
+handshake timeout, which on Windows would lose all progress every attempt) then the
+**handshake**; a healed server re-registers its tools automatically, so they reach
+the model without a manual reconnect. Each server has its own **Reconnect** button (retry just that one without
 disturbing the others); **Reconnect all** rebuilds them together. Add / edit /
 delete a server there and it **reconnects immediately** (writing `config.yaml`
 back, env-var names only). A **newly added** server defaults to its whole toolset
