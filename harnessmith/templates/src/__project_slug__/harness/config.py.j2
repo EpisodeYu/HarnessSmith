@@ -283,7 +283,9 @@ class McpServerConfig(BaseModel):
     env: list[str] = Field(default_factory=list)  # env-var NAMES to inject (secrets, from .env)
     # Literal NON-secret env to set on the stdio child (e.g. {"MODE": "stdio"} to
     # force a server into pure-stdio mode). Values live here in config.yaml (they
-    # are not secrets); a user/process env value for the same name wins. For
+    # are not secrets). AUTHORITATIVE: these OVERRIDE an ambient same-named var in
+    # the parent process — the name can be generic (`MODE`), so a stray value
+    # inherited from the launching shell must not silently break the server. For
     # secrets use `env` (names resolved from .env), never `env_const`.
     env_const: dict[str, str] = Field(default_factory=dict)
     # remote (Streamable HTTP / SSE) transport:

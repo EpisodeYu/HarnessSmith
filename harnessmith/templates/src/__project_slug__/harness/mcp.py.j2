@@ -432,8 +432,15 @@ def _open_streams(server: McpServerConfig, net_env: dict[str, str] | None = None
         from mcp.client.stdio import stdio_client
 
         env = dict(os.environ)
-        for key, value in server.env_const.items():  # literal non-secret env (e.g. MODE=stdio); a real env value wins
-            env.setdefault(key, value)
+        # `env_const` is AUTHORITATIVE: it OVERRIDES an ambient same-named var in
+        # the parent process. These are per-server REQUIRED literals from config.yaml
+        # (e.g. MODE=stdio, which forces open-websearch into pure-stdio) — and the
+        # names can be generic (`MODE`!), so a stray value inherited from the shell
+        # that launched the harness must NOT win, or the server breaks (open-websearch
+        # with MODE=web starts no transport and exits -> "Connection closed"). To
+        # change it, edit config.yaml's env_const, not an ambient env var.
+        for key, value in server.env_const.items():
+            env[key] = value
         for name in server.env:  # inject named secrets from .env into the child
             value = resolve_env(name)
             if value is not None:

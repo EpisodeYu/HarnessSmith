@@ -638,6 +638,31 @@ def test_node_server_launches_node_directly_with_env_const(tmp_path, monkeypatch
     assert params.env.get("MODE") == "stdio"  # literal non-secret env injected
 
 
+def test_env_const_overrides_ambient_process_env(tmp_path, monkeypatch):
+    """`env_const` is AUTHORITATIVE: it overrides a same-named var inherited from the
+    parent process. A stray generic `MODE` in the shell that launched the harness must
+    not win, or open-websearch (MODE != stdio) starts NO transport and exits at once
+    ("Connection closed")."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MODE", "web")  # stray ambient value (e.g. from the launching shell)
+    monkeypatch.setattr(mcp_module, "_windows_stdio_command", lambda command, args: (command, args))
+    _fake_node_install(tmp_path, "web", "open-websearch", version="2.1.11",
+                       bin_field={"open-websearch": "build/index.js"})
+    captured = {}
+
+    def fake_stdio_client(params, errlog=None):
+        captured["params"] = params
+        return params
+
+    monkeypatch.setattr("mcp.client.stdio.stdio_client", fake_stdio_client)
+    web = McpServerConfig(
+        name="web", command="npx", args=["-y", "open-websearch@2.1.11"],
+        env_const={"MODE": "stdio"},
+    )
+    mcp_module._open_streams(web, {})
+    assert captured["params"].env.get("MODE") == "stdio"  # env_const wins over ambient MODE=web
+
+
 def test_node_warm_skips_reconcile_when_pinned_version_installed(tmp_path, monkeypatch):
     """When the pinned package@version is already installed, warm skips `npm install`
     entirely (fast + offline-safe) and never spawns a subprocess."""
