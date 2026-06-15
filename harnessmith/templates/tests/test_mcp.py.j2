@@ -870,6 +870,26 @@ def test_prewarm_streams_progress_and_reports_ready(monkeypatch):
     assert "npm: added 1 package" in blob  # progress actually streamed to the log
 
 
+def test_prewarm_reports_per_server_count_progress(monkeypatch):
+    """Warming streams a discrete per-server counter ('warming i/N: <name>') so the
+    progress reads as 1/2 then 2/2 — a byte-level download % isn't available (npx/uvx
+    only show it on a real TTY, not when piped)."""
+    _clear_net_env(monkeypatch)
+    monkeypatch.setattr(mcp_module, "_url_ok", _fake_probe({(mcp_module._NPM_OFFICIAL, None)}))
+    # Skip launcher resolution + the real subprocess so the test needs no npm/node.
+    monkeypatch.setattr(mcp_module, "_windows_stdio_command", lambda command, args: (command, args))
+    monkeypatch.setattr(mcp_module, "_stream_subprocess", lambda *a, **k: (0, False))
+    log = _Log()
+    config = McpConfig(servers=[
+        McpServerConfig(name="a", command="npx", args=["-y", "pkg-a"]),
+        McpServerConfig(name="b", command="npx", args=["-y", "pkg-b"]),
+    ])
+    mcp_module.prewarm_stdio_packages(config, log=log)
+    blob = "".join(log.lines)
+    assert "warming 1/2: a" in blob
+    assert "warming 2/2: b" in blob
+
+
 def test_warm_once_runs_then_skips_via_sentinel(tmp_path, monkeypatch):
     """The first warm runs and records a sentinel; the next warm for the same set is
     a no-op (returns None) — so only the first launch pays the cold download."""

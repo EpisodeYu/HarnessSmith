@@ -1107,17 +1107,23 @@ def prewarm_stdio_packages(
     """
     net_env = _stdio_net_env(list(config.servers), config)
     warm_timeout = timeout or max(120.0, config.connect_timeout_seconds)
+    # The stdio servers that actually fetch a package (npx/uvx) — counted up front so
+    # progress reads as "warming i/N: <name>" (a discrete per-server counter; the
+    # byte-level download % isn't available, npx/uvx only show it on a real TTY).
+    pending = [s for s in config.servers if s.kind == "stdio" and _warm_argv(s) is not None]
+    total = len(pending)
     results: list[tuple[str, bool, str]] = []
-    for server in config.servers:
-        if server.kind != "stdio":
-            continue
+    for index, server in enumerate(pending, start=1):
+        if log is not None:
+            log.write(f"[mcp] warming {index}/{total}: {server.name} ...\n")
+            log.flush()
         outcome = _warm_one_server(server, net_env, log, warm_timeout=warm_timeout)
         if outcome is None:  # nothing to fetch for this launcher
             continue
         ok, detail = outcome
         results.append((server.name, ok, detail))
         if log is not None:
-            log.write(f"[{server.name}] {'ok' if ok else 'FAILED'}: {detail}\n")
+            log.write(f"[{server.name}] ({index}/{total}) {'ok' if ok else 'FAILED'}: {detail}\n")
             log.flush()
     return results
 

@@ -431,6 +431,40 @@ def test_run_launch_skips_node_download_when_node_present(tmp_path, monkeypatch)
     assert captured["extra_path"] is None
 
 
+def test_run_launch_warms_mcp_tools_as_its_own_step_before_serve(tmp_path, monkeypatch):
+    """A prefilled stdio MCP server gets a dedicated 'warm' step that runs the product's
+    ``mcp warm`` (pre-fetching npx/uvx packages, portable Node on PATH) BEFORE serve —
+    so the long cold download is its own labelled step, not buried in 'start web', and
+    serve then binds fast (the warm sentinel makes serve's own warm a no-op)."""
+    import harnessmith.wizard.app as app_mod
+
+    monkeypatch.setattr(app_mod, "_uv_sync", lambda td, **kw: (0, ""))
+    monkeypatch.setattr(app_mod, "node_on_path", lambda: True)  # skip the Node download
+    monkeypatch.setattr(app_mod, "_find_free_port", lambda: 8123)
+    monkeypatch.setattr(app_mod, "_wait_port", lambda host, port, timeout=None: True)
+    captured: dict = {}
+
+    def fake_run_uv(args, *, cwd, log, index_url=None, extra_path=None):
+        captured["warm_args"] = args  # the `mcp warm` invocation
+        return 0
+
+    monkeypatch.setattr(app_mod, "_run_uv", fake_run_uv)
+    monkeypatch.setattr(
+        app_mod, "_launch_product",
+        lambda td, slug, port, *, host="127.0.0.1", extra_path=None, index_url=None: captured.update(served=True),
+    )
+
+    job = app_mod._new_job(needs_node=True, needs_warm=True)
+    assert [s["key"] for s in job["steps"]] == ["render", "sync", "node", "warm", "serve"]
+    app_mod._run_launch(job, tmp_path, "demo")
+
+    assert job["done"] is True
+    assert captured["warm_args"] == ["run", "demo", "mcp", "warm"]  # warm step ran `mcp warm`
+    assert captured.get("served") is True  # …then serve started
+    for key in ("node", "warm", "serve"):
+        assert next(s for s in job["steps"] if s["key"] == key)["status"] == "done"
+
+
 def test_ensure_proxy_env_fills_from_system_proxy(monkeypatch):
     """_product_env fills HTTP(S)_PROXY from the system proxy when unset (so uv sync
     + the product's npx servers reach the net through a corporate proxy), but never

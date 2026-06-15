@@ -163,9 +163,10 @@
         ok_produced: "spec 已校验通过。", ok_generated: "已生成", err_fix: "请修正以下字段:",
         open_product: "打开", generating: "正在生成…",
         ready: "产物已就绪,点「打开」查看。", failed: "失败",
-        step_render: "生成代码", step_sync: "安装依赖 (uv sync)", step_node: "准备 Node", step_serve: "启动产物 Web",
+        step_render: "生成代码", step_sync: "安装依赖 (uv sync)", step_node: "准备 Node", step_warm: "准备 MCP 工具", step_serve: "启动产物 Web",
         sync_hint: "首次安装会下载若干依赖包,慢网络下可能需要几分钟。",
         node_hint: "该产物使用 Node 系 MCP(如 desktop-commander),正在下载便携 Node(约 30MB,仅一次)。",
+        warm_hint: "正在预下载各 MCP server 的运行包(npx/uvx),仅首次较慢;完成后启动会很快。",
         serve_hint: "正在启动产物 Web 并等待端口就绪,MCP server 在后台连接,可在产物页查看进度。",
         forward_note: "远程访问产物需先在本地转发端口:",
       },
@@ -194,9 +195,10 @@
         ok_produced: "Spec validated.", ok_generated: "Generated at", err_fix: "Please fix these fields:",
         open_product: "Open", generating: "Generating…",
         ready: "Product is ready, click Open.", failed: "Failed",
-        step_render: "Generate code", step_sync: "Install deps (uv sync)", step_node: "Prepare Node", step_serve: "Start product web",
+        step_render: "Generate code", step_sync: "Install deps (uv sync)", step_node: "Prepare Node", step_warm: "Prepare MCP tools", step_serve: "Start product web",
         sync_hint: "First install downloads several packages; on a slow network this can take a few minutes.",
         node_hint: "This product uses a Node-based MCP server (e.g. desktop-commander); downloading a portable Node (~30MB, one-time).",
+        warm_hint: "Pre-downloading each MCP server's package (npx/uvx); slow only on the first run, then startup is fast.",
         serve_hint: "Starting the product web and waiting for its port. MCP servers connect in the background; watch progress on the product's MCP page.",
         forward_note: "To reach the product remotely, forward its port from your machine first:",
       },
@@ -321,7 +323,7 @@
       error: "text-red-600", pending: "text-slate-400",
     };
     // Per-step "what's happening" hint shown while that step runs (keys map to i18n).
-    const STEP_HINT = { sync: "sync_hint", node: "node_hint", serve: "serve_hint" };
+    const STEP_HINT = { sync: "sync_hint", node: "node_hint", warm: "warm_hint", serve: "serve_hint" };
 
     // Render the step list; beneath ANY actively-running step also show its latest
     // log output + elapsed seconds, so a slow install / Node download / serve startup

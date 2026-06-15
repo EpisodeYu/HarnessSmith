@@ -280,18 +280,25 @@ def _log_tail(path: Path, lines: int = 3) -> str:
     return " | ".join(kept[-lines:])
 
 
-def _run_uv(args: list[str], *, cwd: Path, log, index_url: str | None = None) -> int:
+def _run_uv(
+    args: list[str], *, cwd: Path, log, index_url: str | None = None, extra_path: str | None = None
+) -> int:
     """Run a ``uv`` subcommand, streaming combined output to the open ``log`` handle.
 
+    ``extra_path`` (e.g. a provisioned portable Node's bin dir) is prepended to the
+    child's PATH so a ``uv run <slug> mcp warm`` can launch its ``npx`` servers.
     Returns the exit code; a timeout maps to 124 (after killing the child) so the
     caller reports a failure instead of leaving the UI spinning forever."""
+    env = _product_env(index_url)
+    if extra_path:
+        env["PATH"] = extra_path + os.pathsep + env.get("PATH", "")
     try:
         return subprocess.run(  # noqa: S603 — local dev convenience, fixed argv
             ["uv", *args],
             cwd=str(cwd),
             stdout=log,
             stderr=subprocess.STDOUT,
-            env=_product_env(index_url),
+            env=env,
             timeout=_UV_SYNC_TIMEOUT,
         ).returncode
     except subprocess.TimeoutExpired:
@@ -383,26 +390,31 @@ def _launch_product(
     _LAUNCHED.append(proc)
 
 
-def _job_steps(needs_node: bool) -> tuple[str, ...]:
-    """Ordered launch steps. ``node`` is inserted only when a Node-based MCP server
-    is prefilled (it provisions a portable Node before serve). On the FIRST run the
-    product's ``serve`` pre-fetches the stdio MCP packages (npx/uvx) BEFORE it binds
-    the port (a one-time cold download — later launches hit a sentinel and bind
-    instantly), so the serve step can take a few minutes on a slow network: the
-    wizard streams that progress and waits with a timeout scaled to the server count
-    (see the launch handler), instead of giving up early."""
+def _job_steps(needs_node: bool, needs_warm: bool = False) -> tuple[str, ...]:
+    """Ordered launch steps: render -> sync -> [node] -> [warm] -> serve.
+
+    ``node`` is inserted only when a Node-based MCP server is prefilled (it provisions
+    a portable Node first). ``warm`` is inserted when ANY stdio MCP server is prefilled:
+    it pre-fetches their npx/uvx packages ONCE (a one-time cold download, slow on a
+    first run / behind the GFW) as its OWN clearly-labelled step — so ``serve`` is then
+    a fast bind (the product's serve sees the warm sentinel and skips its own warm)
+    instead of conflating that minutes-long download into "starting the web"."""
+    steps = ["render", "sync"]
     if needs_node:
-        return ("render", "sync", "node", "serve")
-    return _LAUNCH_STEPS
+        steps.append("node")
+    if needs_warm:
+        steps.append("warm")
+    steps.append("serve")
+    return tuple(steps)
 
 
-def _new_job(needs_node: bool = False) -> dict:
+def _new_job(needs_node: bool = False, needs_warm: bool = False) -> dict:
     """A fresh launch-progress record (``render`` already done by generate())."""
     return {
         "id": uuid.uuid4().hex,
         "steps": [
             {"key": k, "status": "done" if k == "render" else "pending"}
-            for k in _job_steps(needs_node)
+            for k in _job_steps(needs_node, needs_warm)
         ],
         "url": None,
         "done": False,
@@ -465,6 +477,23 @@ def _run_launch(
                         project_slug, prefer_mirror=not _pypi_reachable(), log=nlog
                     )
                 _set_step(job, "node", "done")
+
+        # Prepare MCP tools: pre-fetch the stdio MCP packages (npx/uvx) ONCE here,
+        # with per-server progress, as a step of its OWN — so the long cold download
+        # isn't hidden inside "start web". It writes the warm sentinel, so the serve
+        # step below binds instantly (the product's serve skips its own warm). Best-
+        # effort: a server that can't warm is failure-isolated on the product's MCP
+        # page later, so the launch proceeds to serve regardless of the exit code.
+        if any(s["key"] == "warm" for s in job["steps"]):
+            _set_step(job, "warm", "running")
+            warm_log = target_dir / ".warm.log"
+            job["setup_log"] = str(warm_log)
+            with warm_log.open("w", encoding="utf-8") as wlog:
+                _run_uv(
+                    ["run", project_slug, "mcp", "warm"],
+                    cwd=target_dir, log=wlog, index_url=index_url, extra_path=node_path,
+                )
+            _set_step(job, "warm", "done")
 
         _set_step(job, "serve", "running")
         job["setup_log"] = str(target_dir / ".serve.log")  # stream serve output too
@@ -624,7 +653,9 @@ def create_app() -> FastAPI:
             # as "did not become reachable"; a server-less project keeps the 300s base.
             stdio_count = sum(1 for s in servers if (s.command or "").strip())
             serve_timeout = max(300.0, 150.0 * stdio_count)
-            job = _new_job(needs_node)
+            # Any stdio MCP server -> a dedicated "warm" step pre-fetches its packages
+            # before serve (so serve binds instantly; see _job_steps).
+            job = _new_job(needs_node, needs_warm=stdio_count > 0)
             _JOBS[job["id"]] = job
             _spawn_launch(
                 job, Path(result.target_dir), result.project_slug,
