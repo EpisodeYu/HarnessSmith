@@ -235,7 +235,7 @@ def test_generate_launches_product_with_progress_job(client, tmp_path, monkeypat
 
     calls = {}
 
-    def fake_spawn(job, target_dir, project_slug, *, index_url=None):
+    def fake_spawn(job, target_dir, project_slug, *, index_url=None, serve_timeout=300.0):
         calls["project_slug"] = project_slug
         for step in job["steps"]:
             step["status"] = "done"
@@ -389,7 +389,7 @@ def test_run_launch_provisions_portable_node_for_node_servers(tmp_path, monkeypa
 
     monkeypatch.setattr(app_mod, "ensure_portable_node", fake_ensure)
     monkeypatch.setattr(app_mod, "_find_free_port", lambda: 8123)
-    monkeypatch.setattr(app_mod, "_wait_port", lambda host, port: True)
+    monkeypatch.setattr(app_mod, "_wait_port", lambda host, port, timeout=None: True)
     monkeypatch.setattr(
         app_mod, "_launch_product",
         lambda td, slug, port, *, host="127.0.0.1", extra_path=None, index_url=None: captured.update(extra_path=extra_path),
@@ -418,7 +418,7 @@ def test_run_launch_skips_node_download_when_node_present(tmp_path, monkeypatch)
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not download Node")),
     )
     monkeypatch.setattr(app_mod, "_find_free_port", lambda: 8123)
-    monkeypatch.setattr(app_mod, "_wait_port", lambda host, port: True)
+    monkeypatch.setattr(app_mod, "_wait_port", lambda host, port, timeout=None: True)
     captured = {}
     monkeypatch.setattr(
         app_mod, "_launch_product",
@@ -627,7 +627,9 @@ def test_generate_threads_index_url_to_launch(client, tmp_path, monkeypatch):
     captured: dict = {}
     monkeypatch.setattr(
         app_mod, "_spawn_launch",
-        lambda job, td, slug, *, index_url=None: captured.update(index_url=index_url),
+        lambda job, td, slug, *, index_url=None, serve_timeout=300.0: captured.update(
+            index_url=index_url, serve_timeout=serve_timeout
+        ),
     )
     out = tmp_path / "gen"
     r = client.post(
@@ -641,6 +643,33 @@ def test_generate_threads_index_url_to_launch(client, tmp_path, monkeypatch):
     )
     assert r.status_code == 200 and "job_id" in r.json()
     assert captured["index_url"] == "https://mirrors.aliyun.com/pypi/simple/"
+
+
+def test_generate_scales_serve_timeout_to_mcp_server_count(client, tmp_path, monkeypatch):
+    """First-run ``serve`` foreground-warms each stdio MCP package before binding, so
+    the one-click launch scales the web-reachability wait to the prefilled stdio-server
+    count (not the 300s base) — a slow cold warm isn't misreported as a dead web."""
+    import harnessmith.wizard.app as app_mod
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        app_mod, "_spawn_launch",
+        lambda job, td, slug, *, index_url=None, serve_timeout=300.0: captured.update(
+            serve_timeout=serve_timeout
+        ),
+    )
+    out = tmp_path / "gen"
+    r = client.post(
+        "/generate",
+        json={
+            "spec": _valid_spec(),
+            "target_dir": str(out),
+            "launch": True,
+            "mcp_servers": ["fetch", "git", "web-search"],  # 3 stdio servers to warm
+        },
+    )
+    assert r.status_code == 200 and "job_id" in r.json()
+    assert captured["serve_timeout"] == 450.0  # max(300, 150 * 3 stdio servers)
 
 
 def test_wizard_ui_exposes_optional_package_index(client):

@@ -385,9 +385,12 @@ def _launch_product(
 
 def _job_steps(needs_node: bool) -> tuple[str, ...]:
     """Ordered launch steps. ``node`` is inserted only when a Node-based MCP server
-    is prefilled (it provisions a portable Node before serve). The MCP server
-    package itself is fetched lazily on first connect (shown live on the product's
-    MCP page), so the web opens promptly instead of waiting on a cold download."""
+    is prefilled (it provisions a portable Node before serve). On the FIRST run the
+    product's ``serve`` pre-fetches the stdio MCP packages (npx/uvx) BEFORE it binds
+    the port (a one-time cold download — later launches hit a sentinel and bind
+    instantly), so the serve step can take a few minutes on a slow network: the
+    wizard streams that progress and waits with a timeout scaled to the server count
+    (see the launch handler), instead of giving up early."""
     if needs_node:
         return ("render", "sync", "node", "serve")
     return _LAUNCH_STEPS
@@ -421,8 +424,13 @@ def _run_launch(
     *,
     host: str = "127.0.0.1",
     index_url: str | None = None,
+    serve_timeout: float = 300.0,
 ) -> None:
-    """Worker: ``uv sync`` then start serve, updating ``job`` step-by-step."""
+    """Worker: ``uv sync`` then start serve, updating ``job`` step-by-step.
+
+    ``serve_timeout`` is how long to wait for the web port to open — scaled up by the
+    caller when stdio MCP servers are prefilled, since the first ``serve`` foreground-
+    warms their packages before binding (see :func:`_job_steps`)."""
     try:
         # Expose the sync log so the status endpoint can stream uv's live output
         # (the install can be slow behind a firewall; without this the UI looks
@@ -464,7 +472,7 @@ def _run_launch(
         _launch_product(
             target_dir, project_slug, port, host=host, extra_path=node_path, index_url=index_url
         )
-        if _wait_port(host, port):
+        if _wait_port(host, port, timeout=serve_timeout):
             job["url"] = f"http://{host}:{port}"
             _set_step(job, "serve", "done")
             job["done"] = True
@@ -482,13 +490,18 @@ def _run_launch(
 
 
 def _spawn_launch(
-    job: dict, target_dir: Path, project_slug: str, *, index_url: str | None = None
+    job: dict,
+    target_dir: Path,
+    project_slug: str,
+    *,
+    index_url: str | None = None,
+    serve_timeout: float = 300.0,
 ) -> None:
     """Start :func:`_run_launch` on a daemon thread (overridable in tests)."""
     threading.Thread(
         target=_run_launch,
         args=(job, target_dir, project_slug),
-        kwargs={"index_url": index_url},
+        kwargs={"index_url": index_url, "serve_timeout": serve_timeout},
         daemon=True,
     ).start()
 
@@ -604,9 +617,19 @@ def create_app() -> FastAPI:
             # behavior). Lets a user behind a slow corporate proxy point uv at a
             # mirror the proxy can actually reach fast, instead of the auto pick.
             index_url = str(body.get("index_url") or "").strip() or None
+            # First-run `serve` foreground-warms each stdio MCP package (npx/uvx)
+            # before binding the port — a one-time cold download capped per server in
+            # the product (~120s each, sequential). Scale the web-reachability wait to
+            # the prefilled stdio-server count so a slow first warm isn't misreported
+            # as "did not become reachable"; a server-less project keeps the 300s base.
+            stdio_count = sum(1 for s in servers if (s.command or "").strip())
+            serve_timeout = max(300.0, 150.0 * stdio_count)
             job = _new_job(needs_node)
             _JOBS[job["id"]] = job
-            _spawn_launch(job, Path(result.target_dir), result.project_slug, index_url=index_url)
+            _spawn_launch(
+                job, Path(result.target_dir), result.project_slug,
+                index_url=index_url, serve_timeout=serve_timeout,
+            )
             resp["job_id"] = job["id"]
         return resp
 
