@@ -152,12 +152,15 @@ class ContextConfig(BaseModel):
       agentic turn can't grow the history without bound inside one user turn (the
       more aggressive of the two floors wins).
     - ``max_tool_result_chars`` caps a single tool result before it enters the
-      history (the first gate against one huge observation blowing the window);
-      the overflow is replaced with a ``[truncated N chars]`` marker so the model
-      can narrow its query. 0 disables the cap.
+      history (the first gate against one huge observation blowing the window).
+      ``tool_result_strategy`` names a registered truncator deciding HOW it is
+      capped: ``middle`` (keep the head AND tail, drop the middle — the default),
+      ``head`` (keep the start), ``tail`` (keep the end), or your own. The dropped
+      span becomes a ``[truncated N chars]`` marker so the model can narrow its
+      query. 0 chars disables the cap.
 
-    Add your own condition / strategy with ``@register_condition`` /
-    ``@register_strategy`` and reference it by name here.
+    Add your own condition / strategy / truncator with ``@register_condition`` /
+    ``@register_strategy`` / ``@register_truncator`` and reference it by name here.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -177,7 +180,12 @@ class ContextConfig(BaseModel):
     # window — but only once a profile declares its context_window (else it's a
     # no-op and overflow auto-rescue is the safety net).
     triggers: dict[str, float] = Field(default_factory=lambda: {"window_pct": 0.85})
-    max_tool_result_chars: int = Field(default=100_000, ge=0)  # ~25k tokens; 0 = off
+    max_tool_result_chars: int = Field(default=200_000, ge=0)  # ~50k tokens; 0 = off
+    # How an oversized tool result is capped — a registered truncator name (see
+    # harness/context.py): "middle" (keep head+tail, drop the middle — the
+    # default), "head", "tail", or your own @register_truncator. An unknown name
+    # falls back to "middle".
+    tool_result_strategy: str = "middle"
 
 
 class ObservabilityConfig(BaseModel):

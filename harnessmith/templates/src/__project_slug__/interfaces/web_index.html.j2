@@ -176,6 +176,12 @@
         <label class="block text-sm"><span data-i18n="ctx_toolcap_label">max_tool_result_chars</span>
           <input id="cfg-ctx-toolcap" type="number" min="0" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
           <span class="block text-xs text-gray-500" data-i18n="ctx_toolcap_hint">Cap one tool result (0 = off).</span></label>
+        <label class="block text-sm"><span data-i18n="ctx_trunc_label">Tool-result truncation</span>
+          <select id="cfg-ctx-trunc" class="mt-1 block rounded-lg border px-3 py-2"></select>
+          <span class="block text-xs text-gray-500" data-i18n="ctx_trunc_hint">How an oversized result is capped: middle keeps the head and tail.</span></label>
+        <label class="block text-sm"><span data-i18n="ctx_maxsteps_label">max_steps</span>
+          <input id="cfg-ctx-maxsteps" type="number" min="0" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
+          <span class="block text-xs text-gray-500" data-i18n="ctx_maxsteps_hint">Hard ceiling on tool-call steps per turn (0 = unlimited).</span></label>
         <div>
           <p class="text-sm" data-i18n="ctx_triggers_label">Triggers (threshold; blank = off)</p>
           <p class="text-xs text-gray-500" data-i18n="ctx_triggers_hint">Blank = off. window_pct compacts at a fraction of a profile's context_window.</p>
@@ -458,9 +464,13 @@
         ctx_strategy_label: "Compaction strategy", ctx_keep_label: "keep_last_turns", ctx_combine_label: "Trigger combine (or/and)",
         ctx_toolcap_label: "max_tool_result_chars",
         ctx_toolcap_hint: "Cap one tool result before it enters history (0 = off).",
+        ctx_trunc_label: "Tool-result truncation",
+        ctx_trunc_hint: "How an oversized result is capped: middle keeps the head and tail; head/tail keep one end.",
+        ctx_maxsteps_label: "max_steps (agent loop ceiling)",
+        ctx_maxsteps_hint: "Hard ceiling on tool-call steps within one turn (0 = unlimited; continue the session to run past it).",
         ctx_triggers_label: "Trigger thresholds",
         ctx_triggers_hint: "Blank = off. window_pct compacts at a fraction of a profile's context_window.",
-        ctx_extend_hint: "Register @register_strategy / @register_condition in harness/context.py; they appear here once imported. See AGENTS.md.",
+        ctx_extend_hint: "Register @register_strategy / @register_condition / @register_truncator in harness/context.py; they appear here once imported. See AGENTS.md.",
         cfg_unregistered: "not registered in code; import its module.",
         bud_hint: "Accrued cost per LLM, computed from the prices you enter. Set a limit to stop an LLM once its cost reaches it; Clear resets a counter. Usage persists across runs.",
         bud_clear: "Clear", bud_clear_all: "Clear all usage",
@@ -601,9 +611,13 @@
         ctx_strategy_label: "上下文压缩策略", ctx_keep_label: "完整保留最近轮数", ctx_combine_label: "触发组合方式 (or/and)",
         ctx_toolcap_label: "单工具结果上限(字符)",
         ctx_toolcap_hint: "单条工具结果进入历史前的字符上限(0=不限)。",
+        ctx_trunc_label: "工具结果截断策略",
+        ctx_trunc_hint: "超限后如何截断:middle 保留头尾、丢中间;head/tail 只保留一端。",
+        ctx_maxsteps_label: "max_steps(单轮循环上限)",
+        ctx_maxsteps_hint: "单轮内工具调用步数的硬上限(0=不限;继续会话可越过它)。",
         ctx_triggers_label: "触发阈值",
         ctx_triggers_hint: "留空不启用。window_pct 按 profile 的 context_window 的比例触发压缩。",
-        ctx_extend_hint: "在 harness/context.py 用 @register_strategy / @register_condition 注册自定义项,import 后在此出现。详见 AGENTS.md。",
+        ctx_extend_hint: "在 harness/context.py 用 @register_strategy / @register_condition / @register_truncator 注册自定义项,import 后在此出现。详见 AGENTS.md。",
         cfg_unregistered: "代码中未注册,请确认已 import 其模块。",
         bud_hint: "按 LLM 列出累计 cost,依据填写的单价计算。设置限额后用量达到即停止使用该 LLM,清空可重置计数。用量跨多次运行累计。",
         bud_clear: "清空", bud_clear_all: "清空全部用量",
@@ -670,8 +684,18 @@
     // sessions section): conversations render independently, so several can
     // stream at once and switching views can't mix their output. The page only
     // auto-scrolls for the view that is actually on screen.
+    //
+    // "Stick to bottom" only while the reader IS at the bottom: once they scroll
+    // up to reread, streaming output stops yanking them back down. Scrolling back
+    // to the bottom re-arms the follow. The threshold absorbs sub-pixel rounding
+    // and the small jump one freshly appended line adds.
+    let stickBottom = true;
+    function atBottom() {
+      return log.scrollHeight - log.scrollTop - log.clientHeight <= 60;
+    }
+    log.addEventListener("scroll", () => { stickBottom = atBottom(); });
     function scrollChat(view) {
-      if (view === activeView) log.scrollTop = log.scrollHeight;
+      if (view === activeView && stickBottom) log.scrollTop = log.scrollHeight;
     }
 
     function line(view, text, cls) {
@@ -1067,6 +1091,7 @@
       for (const [key, v] of views) {
         if (v !== view && !v.streaming) views.delete(key);
       }
+      stickBottom = true;  // opening a conversation lands at its latest message
       log.scrollTop = log.scrollHeight;
       refreshSendButton();
       updateCtxMeter(view.ctxUsed);
@@ -1599,6 +1624,7 @@
       const message = $("msg").value.trim();
       if (!message) return;
       $("msg").value = "";
+      stickBottom = true;  // sending a message re-arms follow so the reply scrolls in
       startChat(message, {});
     });
 
@@ -1704,7 +1730,7 @@
     let ruleFiles = [];
     // What's registered in code (GET /registries): the universe the Context +
     // Paradigms dropdowns are built from. A configured name missing here is flagged.
-    let reg = { paradigms: [], strategies: [], conditions: [], extensions: [], hooks: []{% if spec.memory.enabled %}, memory: [] {% endif %} };
+    let reg = { paradigms: [], strategies: [], conditions: [], truncators: [], extensions: [], hooks: []{% if spec.memory.enabled %}, memory: [] {% endif %} };
     // Per-LLM accrued usage from GET /usage ([{name, model, prompt_tokens, ...,
     // cost, limit, over}]); drives the Budget tab's used-tokens + derived cost.
     let usageRows = [];
@@ -1799,6 +1825,12 @@
         "</details>";
       return div;
     }
+    // Attributes that stop the browser's password manager from autofilling a saved
+    // credential into these env-var boxes (which would clobber our masked
+    // placeholder with a long, wrong value — the api_key box is type=password so
+    // Chrome targets it). `autocomplete=new-password` is the documented suppressor;
+    // the data-* flags opt out of 1Password / LastPass / Bitwarden / Dashlane.
+    const NOFILL = " data-1p-ignore data-lpignore='true' data-bwignore data-form-type='other'";
     // An env-var row: NAME input + write-only VALUE input that posts to /env.
     // When `isSet`, the value box shows a masked placeholder (the value is already
     // in .env) tagged data-masked — focusing clears it to type a new one, and a
@@ -1807,8 +1839,8 @@
       const masked = isSet ? (" value='" + ENV_MASK + "' data-masked='1'") : "";
       return "<div><div class='text-xs text-slate-500'>" + t(sectionKey) + "</div>" +
         "<div class='mt-1 flex items-center gap-2'>" +
-          "<input class='" + nameCls + " w-44 rounded border px-2 py-1 font-mono text-xs' title='" + t("profile_varname") + "' value='" + nameVal + "'/>" +
-          "<input type='" + valType + "' class='" + valCls + " flex-1 rounded border px-2 py-1' placeholder='" + ph + "'" + masked + "/>" +
+          "<input class='" + nameCls + " w-44 rounded border px-2 py-1 font-mono text-xs' title='" + t("profile_varname") + "' autocomplete='off'" + NOFILL + " value='" + nameVal + "'/>" +
+          "<input type='" + valType + "' class='" + valCls + " flex-1 rounded border px-2 py-1' placeholder='" + ph + "' autocomplete='new-password'" + NOFILL + masked + "/>" +
           "<button type='button' class='" + btnCls + " rounded border px-2 py-1 text-xs whitespace-nowrap'>" + btnLabel + "</button>" +
           "<span class='" + statusCls + " text-xs text-emerald-700'></span>" +
         "</div></div>";
@@ -1916,7 +1948,23 @@
       sel.value = ctx.strategy || "summarize";
       $("cfg-ctx-keep").value = ctx.keep_last_turns ?? 6;
       $("cfg-ctx-combine").value = ctx.combine || "or";
-      $("cfg-ctx-toolcap").value = ctx.max_tool_result_chars ?? 100000;
+      $("cfg-ctx-toolcap").value = ctx.max_tool_result_chars ?? 200000;
+      // Tool-result truncator dropdown — same registry pattern as the strategy
+      // dropdown above (built-ins + any imported @register_truncator; a configured
+      // name that isn't registered round-trips, flagged).
+      const tsel = $("cfg-ctx-trunc"); tsel.innerHTML = "";
+      const truncs = reg.truncators.slice();
+      if (ctx.tool_result_strategy && !truncs.includes(ctx.tool_result_strategy)) truncs.push(ctx.tool_result_strategy);
+      truncs.forEach((name) => {
+        const ok = reg.truncators.includes(name);
+        const o = document.createElement("option");
+        o.value = name; o.textContent = name + (ok ? "" : UNREG);
+        if (!ok) o.title = t("cfg_unregistered");
+        tsel.appendChild(o);
+      });
+      tsel.value = ctx.tool_result_strategy || "middle";
+      // max_steps is a top-level config field (loop safety valve), surfaced here.
+      $("cfg-ctx-maxsteps").value = cfg.max_steps ?? 50;
       const trig = ctx.triggers || {};
       const names = reg.conditions.slice();
       Object.keys(trig).forEach((n) => { if (!names.includes(n)) names.push(n); });
@@ -2236,7 +2284,7 @@
       const masked = isSet ? (" value='" + ENV_MASK + "' data-masked='1'") : "";
       return "<div class='m-envrow flex items-center gap-2'>" +
         "<span class='w-44 truncate font-mono text-xs text-slate-500' title='" + esc(name) + "'>" + esc(name) + "</span>" +
-        "<input type='password' class='m-envval flex-1 rounded border px-2 py-1' data-envname='" + esc(name) + "' placeholder='" + t("set_key_ph") + "'" + masked + "/>" +
+        "<input type='password' class='m-envval flex-1 rounded border px-2 py-1' data-envname='" + esc(name) + "' placeholder='" + t("set_key_ph") + "' autocomplete='new-password'" + NOFILL + masked + "/>" +
         "<button type='button' class='m-setenvval rounded border px-2 py-1 text-xs whitespace-nowrap'>" + t("set_key_btn") + "</button>" +
         "<span class='m-envvalstatus text-xs text-emerald-700'></span>" +
       "</div>";
@@ -2582,7 +2630,10 @@
         keep_last_turns: Number($("cfg-ctx-keep").value || 6),
         combine: $("cfg-ctx-combine").value,
         max_tool_result_chars: Number($("cfg-ctx-toolcap").value || 0),
+        tool_result_strategy: $("cfg-ctx-trunc").value || "middle",
       };
+      // max_steps is a top-level field (not under context), saved alongside.
+      patch.max_steps = Number($("cfg-ctx-maxsteps").value || 0);
       const triggers = {};
       document.querySelectorAll("#cfg-ctx-triggers .cfg-trigger").forEach((el) => {
         const v = numOrNull(el.value); if (v != null) triggers[el.dataset.cond] = v;

@@ -201,7 +201,8 @@ def run(
             else:
                 result = run_tool(
                     registry, call, hooks, trace, allowed=set(active),
-                    max_result_chars=context_cfg.max_tool_result_chars, cancel=cancel,
+                    max_result_chars=context_cfg.max_tool_result_chars,
+                    result_strategy=context_cfg.tool_result_strategy, cancel=cancel,
                 )
             messages.append(
                 {"role": "tool", "tool_call_id": call.id, "content": result}

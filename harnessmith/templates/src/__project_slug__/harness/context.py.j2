@@ -241,6 +241,71 @@ def _strategy_summarize(
     return real_system + [note] + kept
 
 
+# --- Tool-result truncation (a single observation's first gate) --------------
+# A thin name->function registry, same shape as the strategies/conditions above
+# (a written-out dispatch, not an engine). A *truncator* caps ONE oversized tool
+# result before it enters history, so a single huge observation can't blow the
+# window. Built-ins: ``middle`` (keep the head AND the tail, drop the middle —
+# the default, matching what Claude Code / most harnesses do, so neither the
+# start nor the recent end of an output is lost), ``head`` (keep the start only),
+# ``tail`` (keep the end only). Add your own with ``@register_truncator`` and name
+# it in ``config.yaml``'s ``context.tool_result_strategy``.
+Truncator = Callable[[str, int], str]
+
+TRUNCATORS: dict[str, Truncator] = {}
+
+
+def register_truncator(name: str) -> Callable[[Truncator], Truncator]:
+    """Register a tool-result truncator under ``name`` (referenced by
+    ``context.tool_result_strategy``). A truncator takes ``(result, max_chars)``
+    and returns a string no longer than roughly ``max_chars`` plus a short marker.
+    """
+
+    def decorator(fn: Truncator) -> Truncator:
+        TRUNCATORS[name] = fn
+        return fn
+
+    return decorator
+
+
+@register_truncator("middle")
+def _trunc_middle(result: str, max_chars: int) -> str:
+    """Keep the head AND the tail, replacing the middle with a marker — so the
+    start of an output (often the command / the first error) and its end (often
+    the summary / the result) both survive."""
+    dropped = len(result) - max_chars
+    head = (max_chars + 1) // 2
+    tail = max_chars - head
+    marker = f"\n\n[truncated {dropped} chars from the middle]\n\n"
+    return result[:head] + marker + (result[-tail:] if tail else "")
+
+
+@register_truncator("head")
+def _trunc_head(result: str, max_chars: int) -> str:
+    """Keep the start only (the model can paginate / narrow its query)."""
+    dropped = len(result) - max_chars
+    return result[:max_chars] + f"\n\n[truncated {dropped} chars]"
+
+
+@register_truncator("tail")
+def _trunc_tail(result: str, max_chars: int) -> str:
+    """Keep the end only (handy for logs/streams where the latest lines matter)."""
+    dropped = len(result) - max_chars
+    return f"[truncated {dropped} chars]\n\n" + result[-max_chars:]
+
+
+def truncate_tool_result(result: str, max_chars: int | None, strategy: str = "middle") -> str:
+    """Cap one tool result via the configured truncator (no-op under the cap).
+
+    ``max_chars`` of 0 or None means no cap. An unknown ``strategy`` name falls
+    back to ``middle`` so a typo never silently disables truncation.
+    """
+    if not max_chars or len(result) <= max_chars:
+        return result
+    fn = TRUNCATORS.get(strategy) or TRUNCATORS["middle"]
+    return fn(result, max_chars)
+
+
 class _AccountingSummarizer:
     """Wrap the compaction client so its summary call lands in the trace + budget.
 

@@ -1821,7 +1821,9 @@ def test_legacy_two_arg_condition_still_works():
 
 def test_tool_result_truncation_caps_one_observation(tmp_path):
     """A1: run_tool caps an oversized tool result with a [truncated N chars] marker
-    so a single huge observation can't blow the context window."""
+    so a single huge observation can't blow the context window. The default
+    ``middle`` truncator keeps BOTH the head and the tail (so neither the start nor
+    the end of an output is lost), and ``head`` / ``tail`` keep one end."""
     from {{ project_slug }}.harness.paradigms import run_tool
     from {{ project_slug }}.harness.tools import Registry
 
@@ -1829,21 +1831,47 @@ def test_tool_result_truncation_caps_one_observation(tmp_path):
 
     @registry.tool(name="big", description="returns a lot")
     def big() -> str:
-        return "x" * 1000
+        return ("A" * 500) + ("B" * 500)
 
     trace = Trace(enabled=False)
-    capped = run_tool(
-        registry, ToolCall(id="c", name="big", arguments="{}"),
-        Hooks(), trace, allowed={"big"}, max_result_chars=100,
-    )
-    assert capped.startswith("x" * 100)
-    assert "[truncated 900 chars]" in capped
+    call = ToolCall(id="c", name="big", arguments="{}")
+    # default strategy = middle -> head + tail survive, the middle is dropped
+    capped = run_tool(registry, call, Hooks(), trace, allowed={"big"}, max_result_chars=100)
+    assert capped.startswith("A" * 50)
+    assert capped.endswith("B" * 50)
+    assert "[truncated 900 chars from the middle]" in capped
+    # head -> only the start (all A's), no tail
+    head = run_tool(registry, call, Hooks(), trace, allowed={"big"},
+                    max_result_chars=100, result_strategy="head")
+    assert head.startswith("A" * 100)
+    assert "B" not in head
+    # tail -> only the end (all B's), no head
+    tail = run_tool(registry, call, Hooks(), trace, allowed={"big"},
+                    max_result_chars=100, result_strategy="tail")
+    assert tail.endswith("B" * 100)
+    assert "A" not in tail
+    # an unknown strategy name falls back to middle (never silently no caps)
+    fallback = run_tool(registry, call, Hooks(), trace, allowed={"big"},
+                        max_result_chars=100, result_strategy="nope")
+    assert fallback.startswith("A" * 50) and fallback.endswith("B" * 50)
     # no cap (0 / None) -> full result
-    full = run_tool(
-        registry, ToolCall(id="c", name="big", arguments="{}"),
-        Hooks(), trace, allowed={"big"}, max_result_chars=0,
-    )
-    assert full == "x" * 1000
+    full = run_tool(registry, call, Hooks(), trace, allowed={"big"}, max_result_chars=0)
+    assert full == ("A" * 500) + ("B" * 500)
+
+
+def test_register_truncator_is_pluggable():
+    """Extensibility: a custom @register_truncator is selectable by name, same as
+    tools / strategies / conditions."""
+    from {{ project_slug }}.harness.context import register_truncator, truncate_tool_result
+
+    @register_truncator("first_only")
+    def _first_only(result: str, max_chars: int) -> str:
+        return result[:max_chars] + " …(custom)"
+
+    out = truncate_tool_result("y" * 1000, 10, "first_only")
+    assert out == ("y" * 10) + " …(custom)"
+    # under the cap -> untouched
+    assert truncate_tool_result("short", 10, "first_only") == "short"
 
 
 def test_context_custom_condition_and_strategy_are_pluggable():

@@ -19,7 +19,7 @@
 ### A1 工具结果截断上限（单轮顶爆窗口的第一道闸）
 - **问题**：以 user 轮切分压缩时，进行中的当前轮永远整体保留。agent 范式一轮可跑几十个 step、每步喂回工具结果——`fetch` 抓大页面 / Desktop Commander 读大文件，几个大观察值即可顶爆窗口。A1 的单结果截断是入历史前的第一道闸；当前轮的「整轮保留」no-op 已由 §2.6 L1 的 round 级折叠（`_split_for_compaction`）根治。
 - **对标**：Claude Code 对单个 tool result 设上限（约 25k token），超出截断并提示模型。
-- **实现**：`context.max_tool_result_chars`（默认 100k 字符 ≈ 25k token，0=关），在 `paradigms.run_tool` 尾部截断 + `[truncated N chars]` 标注让模型自纠。运行期旋钮。context offload（大输出落盘给引用）是同一问题的高级出口，维持 v1+。
+- **实现**：`context.max_tool_result_chars`（默认 200k 字符 ≈ 50k token，0=关），在 `paradigms.run_tool` 尾部截断 + `[truncated N chars]` 标注让模型自纠。如何截断由 `context.tool_result_strategy` 决定——薄注册表 `TRUNCATORS` + `@register_truncator`（在 `harness/context.py`），内置 `middle`（默认，保留头尾、丢中间，对齐 Claude Code 的中间截断）/`head`/`tail`，运行期可在 Web Context 页下拉或 `@register_truncator` 自加（未注册名回落 `middle`）。运行期旋钮。context offload（大输出落盘给引用）是同一问题的高级出口，维持 v1+。
 
 ### A2 压缩触发回喂真实 usage（修中文 2–4 倍低估）
 - **问题**：`estimate_tokens` 按 4 字符/token 估——对中文是 2–4 倍低估（中文 ≈ 1–1.5 字符/token）→ 压缩触发太晚 → 撞 context overflow。

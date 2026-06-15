@@ -514,7 +514,8 @@ context:
   strategy: summarize     # how: truncate | summarize | none (or your own)
   keep_last_turns: 6       # how many recent turns the strategy keeps
   combine: or              # when: or = any trigger fires; and = all must fire
-  max_tool_result_chars: 100000  # cap one tool result before it enters history (0 = off)
+  max_tool_result_chars: 200000  # cap one tool result before it enters history (0 = off)
+  tool_result_strategy: middle   # how to cap it: middle (head+tail) | head | tail | your own
   triggers:                # when: condition name -> threshold
     window_pct: 0.85       # compact at 85% of the profile's context_window
     # max_tokens: 192000   # ...and/or an absolute token count (real usage when known)
@@ -530,8 +531,21 @@ early), `max_tokens` (an absolute count), and `max_turns` (user turns); built-in
 strategies are `truncate`, `summarize` (folds older turns via the `compaction`
 role), and `none`. Empty `triggers` (or `strategy: none`) means it never fires.
 `max_tool_result_chars` is the first gate — it caps a single huge tool result
-(with a `[truncated N chars]` marker) before it can blow the window. If a request
-still overflows, the loop force-compacts once and retries that step automatically.
+before it can blow the window; `tool_result_strategy` is a registered *truncator*
+deciding HOW (`middle` keeps the head AND tail and drops the middle — the default,
+matching Claude Code; `head` / `tail` keep one end; or your own
+`@register_truncator`). The dropped span becomes a `[truncated N chars]` marker. If
+a request still overflows, the loop force-compacts once and retries automatically.
+
+```python
+from {{ project_slug }}.harness.context import register_truncator
+
+@register_truncator("first_line")       # (result, max_chars) -> str
+def first_line(result, max_chars):
+    return result.split("\n", 1)[0][:max_chars] + "\n[truncated]"
+```
+
+(then `tool_result_strategy: first_line` in `config.yaml`).
 
 Add your own the same way you add a tool — write a function, register it, then
 name it in `config.yaml`. A condition may take an optional third `info` argument

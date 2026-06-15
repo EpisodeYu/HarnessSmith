@@ -133,8 +133,13 @@ confirm: {{ confirm_default }}
   keep_last_steps: {{ sctx.get("keep_last_steps", 8) }}
   combine: {{ sctx.get("combine", "or") }}   # or = any trigger fires; and = all must fire
   # Cap one tool result before it enters history (first gate vs one huge observation
-  # blowing the window); the overflow becomes a [truncated N chars] marker. 0 = off.
-  max_tool_result_chars: {{ sctx.get("max_tool_result_chars", 100000) }}
+  # blowing the window); the dropped span becomes a [truncated N chars] marker. 0 = off.
+  max_tool_result_chars: {{ sctx.get("max_tool_result_chars", 200000) }}
+  # HOW to cap it — a registered truncator (harness/context.py): middle (keep the
+  # head AND tail, drop the middle — the default, so neither the start nor the end
+  # of an output is lost), head (keep the start), tail (keep the end), or your own
+  # @register_truncator. Unknown name -> middle.
+  tool_result_strategy: {{ sctx.get("tool_result_strategy", "middle") }}
   triggers:
 {% for name, value in triggers.items() %}    {{ name }}: {{ value }}
 {% endfor %}{% if not triggers %}    {}

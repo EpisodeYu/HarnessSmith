@@ -129,18 +129,6 @@ def final_assistant_message(answer: str, reasoning: str | None = None) -> dict:
     return message
 
 
-def _truncate_result(result: str, max_chars: int | None) -> str:
-    """Cap one tool result so a single huge observation can't blow the window.
-
-    The tail is replaced with a ``[truncated N chars]`` marker so the model knows
-    to narrow its query / paginate. ``max_chars`` of 0 or None means no cap.
-    """
-    if not max_chars or len(result) <= max_chars:
-        return result
-    dropped = len(result) - max_chars
-    return result[:max_chars] + f"\n\n[truncated {dropped} chars]"
-
-
 class ToolInterrupted(Exception):
     """A Stop arrived while a tool was still running: the loop stops WAITING and
     ends the turn. The tool itself cannot be safely killed, so it finishes on its
@@ -197,6 +185,7 @@ def run_tool(
     trace: Trace,
     allowed: set[str] | None = None,
     max_result_chars: int | None = None,
+    result_strategy: str = "middle",
     cancel: Callable[[], bool] | None = None,
 ) -> str:
     """Execute one tool call; tool errors are captured, never crash the loop.
@@ -215,7 +204,9 @@ def run_tool(
     the loop never crashes); with no confirmer set (confirmation off) it is a no-op.
 
     ``max_result_chars`` caps the result the model sees (A1): a too-large result is
-    truncated with a marker. The trace/hooks still receive the full result.
+    truncated with a marker via ``result_strategy`` (a registered truncator —
+    ``middle``/``head``/``tail`` or your own ``@register_truncator``). The
+    trace/hooks still receive the full, untruncated result.
 
     ``cancel`` makes the wait abortable: a Stop while the tool runs abandons the
     wait within ~0.2s (the tool finishes on a daemon thread, discarded) and this
@@ -269,13 +260,15 @@ def run_tool(
         result = rewritten
     log.debug("tool %s -> %s in %.2fs", call.name, outcome, time.monotonic() - started)
     trace.event("tool_result", name=call.name, result=result)
-    truncated = _truncate_result(result, max_result_chars)
+    from ..context import truncate_tool_result
+
+    truncated = truncate_tool_result(result, max_result_chars, result_strategy)
     if truncated is not result:
         # A capped observation is a context-pressure signal — record the sizes (chars
         # only, never the content) so a tool that floods the window is easy to spot.
         log.debug(
-            "tool %s result truncated: %d -> %d chars (context.max_tool_result_chars)",
-            call.name, len(result), max_result_chars,
+            "tool %s result truncated: %d -> %d chars via %s (context.max_tool_result_chars)",
+            call.name, len(result), len(truncated), result_strategy,
         )
     return truncated
 

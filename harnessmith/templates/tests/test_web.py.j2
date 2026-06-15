@@ -78,6 +78,25 @@ def test_index_has_unsaved_config_guard():
     assert "if (!dirty) loadConfig()" in body  # don't overwrite edits on tab return
 
 
+def test_index_has_context_max_steps_and_truncation_controls():
+    """The Context tab surfaces the agent-loop step ceiling (max_steps) and the
+    tool-result truncation strategy dropdown, and the key/url boxes opt out of
+    browser autofill (so the masked placeholder isn't clobbered)."""
+    body = _client().get("/").text
+    assert 'id="cfg-ctx-maxsteps"' in body  # max_steps editable in the Context tab
+    assert 'id="cfg-ctx-trunc"' in body  # tool-result truncation strategy dropdown
+    assert "ctx_maxsteps_label" in body and "ctx_trunc_label" in body
+    assert "patch.max_steps" in body  # saved on the config patch
+    assert "data-lpignore" in body and "autocomplete='new-password'" in body  # no autofill
+
+
+def test_index_does_not_yank_reader_to_bottom_mid_stream():
+    """Streaming output only auto-scrolls while the reader is already at the bottom,
+    so scrolling up to reread isn't fought by new tokens."""
+    body = _client().get("/").text
+    assert "stickBottom" in body and "function atBottom()" in body
+
+
 def test_index_groups_tools_by_source():
     """The Tools tab groups the flat allowlist: your tools first, then built-ins,
     then each MCP server's tools folded into a collapsed group (named by server)."""
@@ -663,6 +682,7 @@ def test_registries_lists_registered_extensions():
     assert "agent" in data["paradigms"]
     assert {"truncate", "summarize", "none"} <= set(data["strategies"])
     assert {"max_tokens", "max_turns"} <= set(data["conditions"])
+    assert {"middle", "head", "tail"} <= set(data["truncators"])  # tool-result truncators
     assert "budget_conditions" not in data  # per-run budget conditions are gone
 
 
@@ -793,6 +813,30 @@ def test_config_post_updates_runtime_config():
     assert resp.json()["prompts"]["system"] == "NEW SYSTEM PROMPT"
     # the change is live for subsequent requests in the same process
     assert client.get("/config").json()["prompts"]["system"] == "NEW SYSTEM PROMPT"
+
+
+def test_config_get_exposes_max_steps_for_the_context_tab():
+    """The loop-step ceiling (max_steps) must be readable via /config so the
+    Context tab can show and edit it (it was previously invisible there)."""
+    data = _client().get("/config").json()
+    assert "max_steps" in data
+    assert isinstance(data["max_steps"], int)
+
+
+def test_config_post_round_trips_max_steps_and_tool_result_strategy():
+    """The Context tab edits the agent-loop step ceiling + the tool-result
+    truncator; both must survive a /config round-trip."""
+    client = _client()
+    resp = client.post(
+        "/config",
+        json={"max_steps": 7, "context": {"tool_result_strategy": "head", "max_tool_result_chars": 12345}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["max_steps"] == 7
+    got = client.get("/config").json()
+    assert got["max_steps"] == 7
+    assert got["context"]["tool_result_strategy"] == "head"
+    assert got["context"]["max_tool_result_chars"] == 12345
 
 
 def test_config_post_round_trips_profile_provider():
