@@ -494,8 +494,11 @@ share when reporting a problem. It is the first place to look for the common
 "silent" failures: at load it logs **env-var resolution** (referenced NAMES →
 resolved booleans, never values) and each LLM client's resolved key/base_url, so
 a key that "isn't picked up" is obvious;{% if spec.mcp.enabled %} for MCP it logs which package
-registry/mirror/proxy the auto-probe picked and when a tool hits an unconnected
-server;{% endif %} and for the context window it logs each compaction decision (token
+registry/mirror/proxy the auto-probe picked, each server's connect **phases**
+(prefetch → handshake → connected/failed, with durations and retries — the same
+startup progress the panel streams, so a slow or stalled connect is diagnosable
+after the fact), and when a tool hits an unconnected server;{% endif %} and for the
+context window it logs each compaction decision (token
 pressure + triggers) and the at-keep-floor no-op (why a low threshold appears to
 do nothing). It stays on this machine (`logs/` is gitignored); nothing is ever
 uploaded. See `harness/debuglog.py`.

@@ -621,13 +621,16 @@ class McpManager:
         if _warm_argv(server) is None:
             return
         warm_timeout = max(120.0, self._config.connect_timeout_seconds)
+        log.debug("mcp %s: prefetch starting (package download)", server.name)
 
         def _blocking() -> None:
             outcome = _warm_one_server(server, self._net_env, errlog, warm_timeout=warm_timeout)
-            if outcome is not None and errlog is not None:
+            if outcome is not None:
                 ok, detail = outcome
-                errlog.write(f"[{server.name}] {'ready' if ok else 'fetch: ' + detail}\n")
-                errlog.flush()
+                self._phase(
+                    server.name, errlog,
+                    "prefetch ready" if ok else f"prefetch fetch failed: {detail}",
+                )
 
         try:
             await self._loop.run_in_executor(None, _blocking)
@@ -644,6 +647,23 @@ class McpManager:
             self._on_connected(self)
         except Exception:
             log.debug("mcp on_connected callback failed", exc_info=True)
+
+    def _phase(self, name: str, errlog, msg: str) -> None:
+        """Record one connect-phase transition for ``name``: stream it to the
+        per-server errlog (the status page's live tail) AND mirror it into the debug
+        log, so the startup PROGRESS the panel shows is also persisted for an
+        after-the-fact diagnosis ("why was MCP startup slow / where did it stall").
+
+        Privacy-safe by construction: the mirrored note is OURS — a phase label plus
+        the server name (plus our own bounded outcome string). The child's RAW stderr
+        (the npx/uvx download spew, written straight into the errlog FILE by the OS,
+        never through here) is the one thing not mirrored, so the shareable debug log
+        carries no uncontrolled subprocess output. ``errlog`` may be ``None`` (its
+        open failed) — the debug-log line is still recorded."""
+        if errlog is not None:
+            errlog.write(f"[{name}] {msg}\n")
+            errlog.flush()
+        log.debug("mcp %s: %s", name, msg)
 
     async def _run_server(self, server: McpServerConfig) -> None:
         """Own ONE server's session AND its tool calls for the whole run, in a
@@ -677,9 +697,10 @@ class McpManager:
                     if errlog is not None:
                         stack.callback(self._close_log, name, errlog)
                     await self._prefetch(server, errlog)  # phase 1 (no-op for non-package)
-                    if errlog is not None:  # supersede the prefetch's "ready" so status shows the live phase
-                        errlog.write(f"[{name}] connecting (MCP handshake)...\n")
-                        errlog.flush()
+                    # Supersede the prefetch note so status shows the live phase, and
+                    # persist it: the panel's handshake line now lands in the debug log
+                    # too (errlog=None still records the phase).
+                    self._phase(name, errlog, "connecting (MCP handshake)...")
                     # `asyncio.wait_for(coro)` wraps `coro` in another Task; anyio's MCP
                     # transports must be entered and exited in the SAME task, so use
                     # `asyncio.timeout()` here instead.

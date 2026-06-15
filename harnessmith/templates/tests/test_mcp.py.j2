@@ -73,6 +73,54 @@ def test_call_timeout_fails_one_call_not_the_server():
         mgr.close()
 
 
+def test_connect_phases_land_in_debug_log_without_leaking_secrets(tmp_path, monkeypatch):
+    """The MCP startup PROGRESS the web panel streams (phase notes) is also persisted
+    to the opt-in debug log, so a slow/stalled connect is diagnosable after the fact —
+    while a secret injected into the child's env (``server.env``) never leaks into it."""
+    from {{ project_slug }}.harness import debuglog
+
+    log_dir = tmp_path / "logs"
+    monkeypatch.setenv("MY_MCP_SECRET", "super-secret-mcp-value")
+    debuglog.setup(True, str(log_dir))
+    try:
+        mgr = McpManager(
+            McpConfig(servers=[McpServerConfig(
+                name="dummy", command=sys.executable, args=[DUMMY], env=["MY_MCP_SECRET"],
+            )])
+        )
+        mgr.start()
+        assert "dummy" in mgr.discovered, mgr.errors  # a clean connect
+        mgr.close()
+    finally:
+        debuglog.setup(False)
+    text = (log_dir / debuglog.LOG_FILE_NAME).read_text(encoding="utf-8")
+    # The phase trace the panel shows is now in the file: the handshake-start note
+    # plus the existing "connected" outcome line, both tagged with the server name.
+    assert "dummy" in text
+    assert "connecting (MCP handshake)" in text
+    assert "connected in" in text
+    # ... but the secret injected into the child's environment never lands here.
+    assert "super-secret-mcp-value" not in text
+
+
+def test_phase_mirrors_to_debug_log_even_when_errlog_is_unavailable(tmp_path):
+    """``_phase`` records the mirror line even when the per-server errlog failed to
+    open (``errlog=None``), so the debug log keeps the phase trace regardless. Only
+    the note we pass is logged; the child's raw stderr never routes through here."""
+    from {{ project_slug }}.harness import debuglog
+
+    log_dir = tmp_path / "logs"
+    debuglog.setup(True, str(log_dir))
+    mgr = McpManager(McpConfig(servers=[]))
+    try:
+        mgr._phase("web", None, "prefetch fetch failed: launcher exited 1")
+    finally:
+        mgr._loop.close()
+        debuglog.setup(False)
+    text = (log_dir / debuglog.LOG_FILE_NAME).read_text(encoding="utf-8")
+    assert "mcp web: prefetch fetch failed: launcher exited 1" in text
+
+
 def test_stdio_discovers_and_calls_tool(manager):
     assert "dummy" in manager.discovered, manager.errors
     names = {tool.name for tool in manager.discovered["dummy"]}
