@@ -7,6 +7,14 @@ __pycache__/
 # uv / virtualenv
 .venv/
 
+# Build artifacts (sdist/wheel) — produced by `uv build`, never tracked.
+dist/
+build/
+.ruff_cache/
+
+# Transient runtime/debug logs (serve, wizard, debuglog) — local-only, never shipped.
+*.log
+
 # Real API keys (human-managed, see CLAUDE.md §0.1) — never tracked.
 .env
 
