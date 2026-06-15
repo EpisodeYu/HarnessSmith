@@ -60,6 +60,7 @@
 - **`McpServerConfig.env_const`(字面量非密钥 env)**:dict,注入 stdio 子进程环境(`env.setdefault`,真实进程 env 优先)。用于 `MODE=stdio` 这类**固定非密钥**配置(open-websearch 默认 `both` 会另起 HTTP 端口,故强制纯 stdio);与 `env`(密钥名,走 `.env`)正交,**不碰密钥红线**、面板 Auth 区不显示它。catalog `env_const` → `server_entry()` → `config.yaml`。
 - **默认搜索 server 换 `web-search`(open-websearch,Node、多引擎、免 key)**:多引擎(Bing/Baidu/DuckDuckGo/Brave/Sogou/…)带探活 + 自动 failover,单引擎慢/不可达不致全挂,比单引擎 Bing 爬虫稳得多。**删除 `bing-search`**(单引擎 + 实测 stdout 污染);`ddg-search` 保留为 uvx 系备选(无 Node 时可用)。preset/wizard 默认勾选从 bing-search 改 web-search。工具描述只说「某些网络下个别引擎可能不可达、会自动 failover」,**不提敏感关键字**。
 - **warm/状态/超时三处兜底**:① warm 对 npm「仅 cleanup 警告致非零退出」按**已装成功**处理(`_node_satisfied` 为准,不看 exit code);② `status().log_tail` 让**实时自愈 note 优先于陈旧的 prefetch「ready」**,并在 prefetch 后写「connecting (MCP handshake)」标记,杜绝「显示 ready 但其实卡在握手」的误导;③ 握手超时的 `_connect_error` 提示补「若包已就绪仍超时,多半是该 server 往 stdout 写了非 JSON-RPC 文本(server 端 bug)」;④ 启动/warm 日志去 `…`,改 ASCII `...`(Windows 控制台不再乱码)。
+- **Node 安装跳过浏览器二进制下载(墙内必需)**:`npm install` Node 系包时,某些**传递依赖**的 postinstall 会从 Google CDN 拉 ~150MB Chrome(实测 `desktop-commander → md-to-pdf → puppeteer`)——墙内不可达,会让整个 `npm install` **退非零、包树残缺**,运行期 `node <bin>` 再因缺模块崩溃成 `McpError: Connection closed`。`_warm_one_server` 对 **Node 安装**(`_npx_package` 非空)注入 `PUPPETEER_SKIP_DOWNLOAD=true` / `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true`(老版名)/ `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`(`_NODE_INSTALL_SKIP_DOWNLOAD`,`setdefault` 不覆盖用户已设值),跳过下载让**安装与启动都过**;预填工具不需要内置浏览器(DC 的终端/文件工具、open-websearch 的 request 抓取都不依赖它,浏览器能力本就惰性加载)。uvx 安装不注入(npm 生态专用)。
 
 ## 2. 跨平台运行期健壮性(收敛在 `mcp.py` + 启动脚本)
 
@@ -86,6 +87,7 @@ stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健
 - 大复选框:server 主复选框全开/全关/部分三态 + 联动小框 + 回写 allowlist。
 - CLI `mcp status`:连通性 + 工具计数 + 不可达标红 + 缺 launcher 提示(对真实 stdio dummy + broken server)。
 - 首跑预热:`serve`/`chat` 首跑前台 `warm_once` 带流式进度 + 心跳、写 sentinel 后续跳过;`run` 不预热(Docker `run` 不变、不挂)。DC 钉版本(catalog 断言无 `@latest`)。
+- Node 安装跳浏览器下载:`_warm_one_server` 对 Node 安装注入 `_NODE_INSTALL_SKIP_DOWNLOAD`(`PUPPETEER_SKIP_DOWNLOAD` 等,`setdefault` 不覆盖用户值);uvx 不注入。测试 `test_node_install_skips_browser_binary_download`。
 - 两阶段 + 自愈:prefetch 先于 handshake;失败按 `connect_max_retries` 后台退避重试(amber→耗尽 red),成功经 `on_connected` 重同步 registry;`connect_max_retries=0` 快速失败不重试。
 - wizard DC 默认 + HITL:wizard 产物默认 DC 勾选 + `confirm: high`。
 - 不泄密:`/mcp/status` 仅回 env 名;server 增删改只收 env 名;trace/日志不回显。

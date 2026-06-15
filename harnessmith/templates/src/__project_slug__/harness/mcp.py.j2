@@ -51,6 +51,22 @@ _PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
 _NPM_OFFICIAL = "https://registry.npmjs.org"
 _NPM_MIRROR = "https://registry.npmmirror.com"
 
+# Skip the bundled-browser download that a Node package's (transitive) postinstall
+# would otherwise run during `npm install` — puppeteer/playwright fetch a ~150MB
+# Chrome from Google's CDN (e.g. desktop-commander -> md-to-pdf -> puppeteer). That
+# download is unreachable behind the GFW and FAILS the whole install (exit 1 ->
+# incomplete package tree -> the later `node <bin>` launch crashes on a missing
+# module -> "Connection closed"). None of the prefilled tools need a bundled
+# browser (desktop-commander's terminal/file tools and open-websearch's request
+# scrapers all work without one), so skipping the download lets BOTH the install
+# and the launch succeed. Injected with `setdefault`, so a user who actually wants
+# the browser can pre-set any of these to keep the download.
+_NODE_INSTALL_SKIP_DOWNLOAD = {
+    "PUPPETEER_SKIP_DOWNLOAD": "true",
+    "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD": "true",  # older puppeteer's env-var name
+    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
+}
+
 
 def _missing_launcher_message(command: str) -> str:
     base = command.lower().removesuffix(".cmd").removesuffix(".bat").removesuffix(".exe")
@@ -1018,6 +1034,9 @@ def _warm_one_server(
     env = dict(os.environ)
     for key, value in net_env.items():
         env.setdefault(key, value)
+    if _npx_package(server) is not None:  # a Node (npm) install: skip blocked browser-binary postinstalls
+        for key, value in _NODE_INSTALL_SKIP_DOWNLOAD.items():
+            env.setdefault(key, value)
 
     def _say(msg: str) -> None:
         if log is not None:

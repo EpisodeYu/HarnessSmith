@@ -673,6 +673,39 @@ def test_node_warm_trusts_installed_tree_over_nonzero_cleanup_exit(tmp_path, mon
     assert ok is True and "ready" in detail
 
 
+def test_node_install_skips_browser_binary_download(tmp_path, monkeypatch):
+    """A Node (npm) install gets the PUPPETEER/PLAYWRIGHT skip-download env injected,
+    so a transitive browser-binary postinstall (e.g. desktop-commander -> md-to-pdf
+    -> puppeteer Chrome, ~150MB from Google) can't fail the whole `npm install`
+    behind the GFW. `setdefault` keeps a value the user already set; uvx installs are
+    left untouched (the knobs are npm-ecosystem only)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PUPPETEER_SKIP_DOWNLOAD", "user-keeps-this")
+    # Skip the launcher-resolution step so the test exercises env injection on any
+    # platform — it must NOT depend on npm/node being installed on the test host.
+    monkeypatch.setattr(mcp_module, "_windows_stdio_command", lambda command, args: (command, args))
+    captured = {}
+
+    def fake_stream(argv, env, timeout, on_line, **kw):
+        captured["env"] = env
+        return 0, False
+
+    monkeypatch.setattr(mcp_module, "_stream_subprocess", fake_stream)
+
+    dc = McpServerConfig(name="dc", command="npx", args=["-y", "@scope/pkg@1.0.0"])
+    mcp_module._warm_one_server(dc, {"npm_config_registry": "x"}, None, warm_timeout=5.0)
+    env = captured["env"]
+    assert env["PUPPETEER_SKIP_DOWNLOAD"] == "user-keeps-this"  # user's value wins (setdefault)
+    assert env["PUPPETEER_SKIP_CHROMIUM_DOWNLOAD"] == "true"
+    assert env["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] == "1"
+
+    captured.clear()
+    monkeypatch.delenv("PUPPETEER_SKIP_DOWNLOAD", raising=False)
+    uvx = McpServerConfig(name="g", command="uvx", args=["mcp-server-git"])
+    mcp_module._warm_one_server(uvx, {"UV_DEFAULT_INDEX": "x"}, None, warm_timeout=5.0)
+    assert "PUPPETEER_SKIP_DOWNLOAD" not in captured["env"]  # uvx is untouched
+
+
 def test_status_note_wins_over_stale_ready_log_tail():
     """While retrying, status() surfaces the live auto-heal note — a stale 'ready'
     prefetch line in the captured stderr must NOT mask that the server is amber."""
