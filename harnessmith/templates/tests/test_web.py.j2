@@ -405,6 +405,24 @@ def test_index_has_mcp_auth_value_inputs():
     assert "saveMcpSecret" in body  # shared write-only /env save
 
 
+def test_index_flags_missing_mcp_key_and_keeps_auth_box_fillable():
+    """A server that won't connect while its declared auth/env value is unset gets an
+    explicit "needs API key / auth" hint naming the var, and its auth box springs
+    open. Crucially, the connecting-poll must NOT rebuild the list while the user is
+    editing it — a rebuild used to collapse the open auth section every ~1.5s, making
+    the key impossible to type."""
+    body = _client().get("/").text
+    # explicit missing-secret hint (#2), naming the unset auth_env / stdio env-var
+    assert "mcp_needs_key" in body
+    assert "missingSecrets" in body and "needsSecret" in body
+    assert "!envSet(c.auth_env)" in body  # detection keys off /env-status, not the raw error
+    # auth box auto-opens for a key-less server, and a manual collapse is remembered
+    assert "mcpAuthDismissed" in body and "openAuth" in body and "details.m-auth" in body
+    # the poll defers the DOM rebuild while the user is editing (#1: stop the collapse)
+    assert 'box.querySelector("details[open]")' in body
+    assert "if (!editing) buildMcp()" in body
+
+
 def test_env_status_includes_mcp_auth_and_env_names(tmp_path, monkeypatch):
     """GET /env-status now also reports MCP servers' auth token + stdio env-var
     NAMES (booleans only), so the panel can mask an already-set MCP secret and flag

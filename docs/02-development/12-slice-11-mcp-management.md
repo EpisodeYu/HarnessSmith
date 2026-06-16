@@ -82,6 +82,16 @@
 - **密钥红线不变**:`config.yaml`/server 配置只存 `BOCHA_API_KEY`/`JINA_API_KEY` 名;真值走 Slice 3 既有 write-only `/env`(Web)/ CLI `set-key` 入 `.env`;`generator` 在 `mcp.enabled` 且预填二者时把名加入 `.env.example`(仅名)。
 - **测试**:`test_catalog.py`(`test_bocha_is_keyed_uvx_china_search` / `test_jina_reader_remote_renders_complex_pages`);`test_cli_wizard.py`(选升级件→system 含偏好段、未选→字节一致);`test_wizard.py`(`/meta` 顺序末位 + 默认不勾、`/spec` 偏好按选择注入);`test_generator.py`(`test_web_access_upgrade_servers_prefill_into_config_and_env`:config.yaml 两 server + 通配、`.env.example` 两 key 名、pyproject 无 langchain/langgraph/adk)。全量快测 + 黄金路径全绿;`harnessmith new --mcp-server bocha jina-reader` 冒烟落盘正确。
 
+### 后续修复 · 缺 key 的 server 可填 + 显式提示(本次)
+
+> 背景:带 key 的 server(如 `bocha`)未配 key 时连接持续失败,manager 进**自愈重试**(amber `connecting`,期间不置 `error`),Web 面板每 1.5s 轮询 `/mcp/status` 后整表 `buildMcp()` 重建 DOM——把用户刚展开的「Auth(令牌/密钥)」折叠区**反复折叠**、半填的值也被抹掉,几乎没法填 key;且重试期无任何错误文案,用户看不出是「缺 key」。
+
+- **`interfaces/web_index.html` — 轮询不再打断编辑**:`loadMcp()` 在轮询路径下,当 `#cfg-mcp-list` 含焦点元素或有 `details[open]` 时只刷新 `mcpServers` 数据、**跳过 `buildMcp()`**(`if (!editing) buildMcp()`),编辑完成后的下一次轮询再重建。显式动作(save/reconnect/reconnect-all)仍各自直接重建,不受影响。
+- **显式「缺 key / auth」提示(#2)**:`mcpServerCard` 据 `/env-status` 算 `missingSecrets`(声明了 `auth_env`/`env` 名但 `.env` 里未设的),server **未连上**且有缺失时在状态行显式标黄「⚠ needs API key / auth — set: `<NAME>`」(中英 i18n `mcp_needs_key`);判定只看 `envSet` 不依赖原始传输错误串(自愈重试期本就无 error)。
+- **Auth 区自动展开**:缺 key 时 `mcpAuthSection(c, isNew, openByDefault)` 渲染为 `<details class='m-auth' open>`,用户无需翻找;手动收起记入 `mcpAuthDismissed`(`toggle` 事件),后续重建不再强行弹开(再次手动展开即清除)。与上面「编辑期不重建」协同:展开后轮询不再折叠它。
+- **密钥红线不破**:仍只读 `/env-status` 布尔、值经既有 write-only `/env` 入 `.env`,提示与展开均不碰真值。
+- **测试**:`test_web.py::test_index_flags_missing_mcp_key_and_keeps_auth_box_fillable`(提示 + 自动展开 + 轮询跳过编辑)。生成 web+mcp 产物 → `uv sync` → 全量 `pytest` 全绿、mock 一步跑通、pyproject 无 langchain/langgraph/adk。
+
 ## 2. 跨平台运行期健壮性(收敛在 `mcp.py` + 启动脚本)
 
 stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健壮性:
