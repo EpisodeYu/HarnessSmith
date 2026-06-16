@@ -41,7 +41,13 @@ from .spec import load_spec
 
 app = typer.Typer(
     add_completion=False,
-    help="HarnessSmith — forge your own agent harness (no agent-framework lock-in).",
+    help="HarnessSmith — forge your own agent harness.",
+    epilog=(
+        "Tip: the web wizard is the easiest way to start.\n\n"
+        'From PyPI, no install:  uvx --from "harnessmith\\[wizard]" '
+        "harnessmith wizard --open\n\n"
+        "Already installed:  harnessmith wizard --open"
+    ),
 )
 
 
@@ -57,7 +63,7 @@ def _stdin_is_tty() -> bool:
 
 @app.callback()
 def _main() -> None:
-    """HarnessSmith — forge your own agent harness (no agent-framework lock-in)."""
+    """HarnessSmith — forge your own agent harness."""
     setup_debug_log()
     log.debug("invoked: %s", sys.argv[1:])
 
