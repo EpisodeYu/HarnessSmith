@@ -9,7 +9,9 @@ other Agent Skills tools. No framework: it is prompt text + a file read.
   ``disable-model-invocation``), and inject each model-invocable skill's
   name + description into the system prompt (~100 tokens each) via ``prompts.py``.
 - **L2 load body**: the model reads the full ``SKILL.md`` on demand — with a file
-  tool (e.g. the MCP baseline) or the built-in :func:`read_skill` tool here.
+  tool (e.g. the MCP baseline) or the built-in :func:`read_skill` tool here. Both
+  L1 and L2 surface the skill's absolute directory so the model can resolve the
+  relative resource paths the body uses (``scripts/x``, ``references/y``).
 - **L3 scripts/resources**: the model runs ``scripts/`` and reads
   ``references/``/``assets/`` with shell/file tools (no harness code); scripts are
   high-risk and off by default.
@@ -78,6 +80,11 @@ def discover_skills(config: "Config") -> list[Skill]:
     return skills
 
 
+def _skill_dir(skill: Skill) -> str:
+    """Absolute directory holding the skill — where scripts/references/assets live."""
+    return str(skill.path.parent.resolve())
+
+
 def build_skills_prompt(config: "Config") -> str:
     """L1 system-prompt section: list model-invocable skills + how to load them."""
     skills = [s for s in discover_skills(config) if s.model_invocable]
@@ -85,19 +92,31 @@ def build_skills_prompt(config: "Config") -> str:
         return ""
     lines = [
         "You have access to these Skills. When one is relevant, first read its "
-        "full instructions with the read_skill tool (or a file tool), then follow "
-        "them:"
+        "full instructions with the read_skill tool (it also returns the skill's "
+        "directory), then follow them. A skill's bundled resources (scripts/, "
+        "references/, assets/) live in the directory shown in brackets after its name:"
     ]
-    lines += [f"- {s.name}: {s.description}" for s in skills]
+    lines += [f"- {s.name} [{_skill_dir(s)}]: {s.description}" for s in skills]
     return "\n".join(lines)
 
 
 def load_skill_body(config: "Config", name: str) -> str:
-    """Return the ``SKILL.md`` body for ``name`` (used by read_skill and /name)."""
+    """Return the ``SKILL.md`` body for ``name`` (used by read_skill and /name).
+
+    The body is prefixed with the skill's absolute directory so the model can
+    resolve the relative paths the instructions use (``scripts/x`` etc.).
+    """
     for skill in discover_skills(config):
         if skill.name == name:
             _, body = _parse_frontmatter(skill.path.read_text(encoding="utf-8"))
-            return body
+            skill_dir = _skill_dir(skill)
+            header = (
+                f"[Skill directory: {skill_dir}\n"
+                f"Resolve any relative paths in the instructions below "
+                f"(scripts/, references/, assets/) against this directory, "
+                f"e.g. {skill_dir}/scripts/<file>.]\n\n"
+            )
+            return header + body
     return f"ERROR: no skill named {name!r}"
 
 

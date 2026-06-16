@@ -30,9 +30,9 @@
 生成产物侧(SKILL 由 `spec.skills.enabled` 门控):
 
 - `src/<pkg>/harness/skills.py`(`skills.enabled` 时生成,≈ 60–130 行)— 标准 Agent Skills 支持:
-  - **L1 发现/注入**:扫描技能目录(默认 `skills/`,可配 `.claude/skills`/`.cursor/skills`/`.agents/skills`)下 `*/SKILL.md`,用已有 `pyyaml` 解析 frontmatter(`name`/`description`,可选 `disable-model-invocation`/`paths`),把 `name + description (+ 路径)` 注入系统提示。
-  - **L2 加载正文**:标准即「模型用文件工具读 `SKILL.md`」(MCP 基线已提供文件读);为不依赖 MCP,提供极薄内置 `read_skill(name)` 工具(读该技能 `SKILL.md` 正文,低风险)。
-  - **L3 脚本/资源**:模型用 shell/文件工具按需跑 `scripts/`、读 `references/`/`assets/`(无 harness 代码;脚本 = 高风险默认关)。
+  - **L1 发现/注入**:扫描技能目录(默认 `skills/`,可配 `.claude/skills`/`.cursor/skills`/`.agents/skills`)下 `*/SKILL.md`,用已有 `pyyaml` 解析 frontmatter(`name`/`description`,可选 `disable-model-invocation`/`paths`),把 `name + description + 技能目录绝对路径`(方括号内)注入系统提示——让模型一眼知道每个技能的 `scripts/`/`references/`/`assets/` 落在哪。
+  - **L2 加载正文**:标准即「模型用文件工具读 `SKILL.md`」(MCP 基线已提供文件读);为不依赖 MCP,提供极薄内置 `read_skill(name)` 工具(读该技能 `SKILL.md` 正文,低风险)。`read_skill` / CLI `/skill-name` 返回的正文**前置一行技能目录绝对路径**,使正文里的相对引用(`scripts/x`、`references/y`)无需模型再用文件工具去现场发现目录即可解析。
+  - **L3 脚本/资源**:模型用 shell/文件工具按需跑 `scripts/`、读 `references/`/`assets/`(无 harness 代码;脚本 = 高风险默认关)。**前提**:产物须装有文件/shell 工具(基线由 MCP Desktop Commander 提供);`skills.enabled` 但 MCP 关闭时,只有 `read_skill`(仅给正文+目录),脚本/资源够不着。
 - `src/<pkg>/harness/prompts.py` — `skills.enabled` 时把可用技能 L1 元数据拼进系统提示(渐进披露,~100 token/技能)。
 - `src/<pkg>/interfaces/cli.py` / `web.py` — 可选 `/skill-name` 手动触发(honor `disable-model-invocation`)。
 - `spec.py` — 新增 `skills` 开关(最小:`skills.enabled: bool = False`)。
@@ -53,7 +53,7 @@
 - 离线/Docker:生成期预热后产物可离线用已缓存 server;Docker build 暖缓存 + `UV_OFFLINE=1`,`docker run --network none` 离线跑通 mock 一步。
 - catalog 落 `config.yaml`:选中 server → 产物 `config.yaml mcp.servers` 含条目(env/auth 仅名、`safe_tools` 标读类),不进 spec/快照。
 - 极薄 example 仍薄:`examples/spec.yaml`(无 MCP)不含 `mcp` 依赖、与 Slice 4 薄基线一致。
-- SKILL 发现 + 注入:样例 skill → L1 `name+description` 进系统提示;`disable-model-invocation` 的只 `/name` 触发。
+- SKILL 发现 + 注入:样例 skill → L1 `name+description+技能目录路径` 进系统提示;`read_skill` 正文前置技能目录路径供相对引用解析;`disable-model-invocation` 的只 `/name` 触发。
 - SKILL 加载并遵循(mock):模型 `read_skill(name)` 读正文 → 按指令完成一步;`read_skill` 低风险且经 allowlist 门控。
 - SKILL 关掉零痕迹:`skills.enabled=false` 产物无 `skills.py`/`read_skill`/提示注入/样例。
 - `ReadLints` clean;大改动回归(全量黄金 + Docker + `uvx` 冒烟)。

@@ -52,6 +52,9 @@ def test_discovers_skills_and_injects_l1(tmp_path):
 
     prompt = build_system_prompt(config)
     assert "summarize" in prompt and "Summarize text in one line." in prompt
+    # L1 surfaces the skill's directory so the model can find its bundled
+    # scripts/references/assets without hunting the filesystem.
+    assert str((sk / "summarize").resolve()) in prompt
     # disable-model-invocation skills are NOT auto-injected (only reachable via /name)
     assert "secret" not in prompt
 
@@ -67,6 +70,24 @@ def test_read_skill_loads_body_including_disabled(tmp_path):
     # the /name manual path uses the same loader and can reach disabled skills
     assert "Top secret steps." in load_skill_body(config, "secret")
     assert load_skill_body(config, "nope").startswith("ERROR")
+
+
+def test_read_skill_surfaces_directory_for_resource_resolution(tmp_path):
+    # A skill whose body uses a RELATIVE script path (like the real Anthropic
+    # document/skill-creator skills). read_skill must hand the model the skill's
+    # absolute directory so it can resolve scripts/references/assets — otherwise
+    # it has to rediscover the location with filesystem tools.
+    sk = tmp_path / "skills"
+    _skill(sk, "csv-helper", "Summarize CSVs.", body="Run scripts/quick_validate.py on the input.")
+    config = _config([sk])
+    activate_skills(config)
+
+    out = read_skill("csv-helper")
+    skill_dir = str((sk / "csv-helper").resolve())
+    assert skill_dir in out  # absolute directory is present
+    assert "Run scripts/quick_validate.py on the input." in out  # body still intact
+    # the directory comes before the body so the relative path resolves in context
+    assert out.index(skill_dir) < out.index("Run scripts/quick_validate.py")
 
 
 def test_read_skill_is_registered_low_risk(tmp_path):
