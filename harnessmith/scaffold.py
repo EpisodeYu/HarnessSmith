@@ -23,6 +23,7 @@ from collections.abc import Iterable
 from dataclasses import replace
 
 from .catalog import CatalogServer, load_catalog
+from .skills_catalog import CatalogSkill, load_skills_catalog
 
 # The built-in loop paradigms (cf. spec.paradigms' Literal). agent is the default
 # tool-calling loop; plan/ask are read-only.
@@ -62,6 +63,14 @@ WIZARD_CATALOG_DEFAULT = frozenset({"fetch", "web-search", "git", "desktop-comma
 # Catalog servers whose tools the wizards ship ENABLED by default (overriding the
 # catalog's off-by-default state). Powerful but HITL-gated (``confirm: high``).
 WIZARD_TOOLS_ON = frozenset({"desktop-commander"})
+
+# Bundled skills the wizards surface (display order) and which are checked by
+# default — the skills twin of WIZARD_CATALOG_ORDER/DEFAULT. Only shown when the
+# product enables skills; a checked skill is copied into the product's skills/.
+# `web-reading` (keyless r.jina.ai page reading) is the recommended default, so it
+# is checked whenever skills are enabled.
+WIZARD_SKILLS_ORDER = ("web-reading",)
+WIZARD_SKILLS_DEFAULT = frozenset({"web-reading"})
 
 # HITL confirmation policy seeded into a wizard product's config.yaml: every
 # risk=high tool (shell / file writes / Desktop Commander) pauses for the user's
@@ -184,6 +193,12 @@ def curated_catalog() -> list[CatalogServer]:
     """The catalog servers the wizards surface, in curated display order."""
     catalog = load_catalog()
     return [catalog[name] for name in WIZARD_CATALOG_ORDER if name in catalog]
+
+
+def curated_skills() -> list[CatalogSkill]:
+    """The bundled skills the wizards surface, in curated display order."""
+    catalog = load_skills_catalog()
+    return [catalog[name] for name in WIZARD_SKILLS_ORDER if name in catalog]
 
 
 def slugify(display_name: str | None) -> str:

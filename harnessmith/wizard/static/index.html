@@ -53,6 +53,10 @@
           <span data-i18n="skills_enable_label">启用标准 Agent Skills</span>
         </label>
         <p class="mt-1 text-xs text-slate-500" data-i18n="skills_hint">关闭则不含 skills,启用后支持 Agent Skills 标准。</p>
+        <div id="skills-wrap" class="mt-2">
+          <label class="block text-sm font-medium" data-i18n="skills_catalog_label">预选内置 skill</label>
+          <div id="skills-list" class="mt-1 space-y-1"></div>
+        </div>
       </div>
       <div>
         <label class="flex items-center gap-2 text-sm font-medium">
@@ -150,6 +154,7 @@
         mcp_hint: "关闭则不含 MCP,启用后可从 catalog 预选 server 写入 config.yaml。",
         catalog_label: "预选 MCP server", skills_enable_label: "启用标准 Agent Skills",
         skills_hint: "关闭则不含 skills,启用后支持 Agent Skills 标准。",
+        skills_catalog_label: "预选内置 skill(勾选后拷入产物 skills/)",
         memory_enable_label: "启用跨会话长期记忆",
         memory_hint: "关闭则不含记忆,启用后提供跨会话文件笔记,可通过 @register_memory 更换后端。",
         generate_heading: "生成产物",
@@ -182,6 +187,7 @@
         mcp_hint: "Off omits MCP; on lets you preselect servers from the catalog, written to config.yaml.",
         catalog_label: "Preselect MCP servers", skills_enable_label: "Enable standard Agent Skills",
         skills_hint: "Off omits skills; on enables the Agent Skills standard.",
+        skills_catalog_label: "Preselect bundled skills (copied into the product's skills/)",
         memory_enable_label: "Enable cross-session long-term memory",
         memory_hint: "Off omits memory; on provides a cross-session file note, with backends swappable via @register_memory.",
         generate_heading: "Generate the product",
@@ -259,10 +265,19 @@
           "<label class='flex items-start gap-2 text-sm'><input type='checkbox' class='cserver mt-1' value='" + s.name + "' " + (s.default_checked ? "checked" : "") + "/>" +
           "<span><span class='font-mono'>" + s.name + "</span>" + req + "<span class='text-slate-500'>: " + s.description + "</span></span></label>");
       });
+      const sl = $("skills-list");
+      (meta.skills_catalog || []).forEach((s) => {
+        sl.insertAdjacentHTML("beforeend",
+          "<label class='flex items-start gap-2 text-sm'><input type='checkbox' class='cskill mt-1' value='" + s.name + "' " + (s.default_checked ? "checked" : "") + "/>" +
+          "<span><span class='font-mono'>" + s.name + "</span><span class='text-slate-500'>: " + s.description + "</span></span></label>");
+      });
     }
 
     $("mcp_enabled").addEventListener("change", () => {
       $("catalog-wrap").classList.toggle("hidden", !$("mcp_enabled").checked);
+    });
+    $("skills_enabled").addEventListener("change", () => {
+      $("skills-wrap").classList.toggle("hidden", !$("skills_enabled").checked);
     });
 
     const checkedValues = (cls) => Array.from(document.querySelectorAll("." + cls + ":checked")).map((e) => e.value);
@@ -287,6 +302,7 @@
       return {
         spec: buildSpec(),
         mcp_servers: $("mcp_enabled").checked ? checkedValues("cserver") : [],
+        skills: $("skills_enabled").checked ? checkedValues("cskill") : [],
         target_dir: $("target_dir").value.trim(),
       };
     }

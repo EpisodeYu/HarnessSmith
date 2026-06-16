@@ -243,7 +243,8 @@ Supports the open [Agent Skills](https://modelcontextprotocol.io) standard
 (`SKILL.md`). Each skill's name + description is injected into the system prompt;
 the model loads the full instructions on demand with the `read_skill` tool. Drop
 a folder under `skills/<name>/SKILL.md` to add one (see `config.yaml` →
-`skills.dirs`); a sample lives in `skills/example-skill/`. See [`AGENTS.md`](./AGENTS.md).
+`skills.dirs`). Any skills you selected at generation time are already under
+`skills/`. See [`AGENTS.md`](./AGENTS.md).
 {% endif %}{% if spec.memory.enabled %}
 ## Long-term memory (cross-session)
 

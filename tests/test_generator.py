@@ -793,7 +793,9 @@ def test_skills_enabled_generates_support(tmp_path, spec):
 
     assert (pkg / "harness" / "skills.py").is_file()
     assert (out / "tests" / "test_skills.py").is_file()
-    assert (out / "skills" / "example-skill" / "SKILL.md").is_file()
+    # No bundled skill is written unless one is selected (skills=) — enabling skills
+    # only adds the support module, not an opinionated skill (no more example-skill).
+    assert not (out / "skills").exists()
 
     config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
     assert "class SkillsConfig" in config_py and "skills: SkillsConfig" in config_py
@@ -810,6 +812,35 @@ def test_skills_enabled_generates_support(tmp_path, spec):
     snapshot = (out / "harness.spec.yaml").read_text(encoding="utf-8")
     assert "enabled: true" in snapshot
     assert "dirs" not in snapshot  # dirs is a runtime knob, not in the spec
+
+
+def test_skills_catalog_prefill_copies_selected_skill(tmp_path, spec):
+    """A selected bundled skill (skills=) is copied verbatim into skills/<name>/ when
+    skills are enabled — the skills twin of the MCP catalog prefill (not in the spec)."""
+    from harnessmith.skills_catalog import resolve_skills
+
+    spec.skills.enabled = True
+    out = tmp_path / "withskill"
+    skills = resolve_skills(["web-reading"])
+    generate(spec, out, git_init=False, skills=skills)
+
+    skill_md = out / "skills" / "web-reading" / "SKILL.md"
+    assert skill_md.is_file()
+    body = skill_md.read_text(encoding="utf-8")
+    assert "r.jina.ai" in body and body.startswith("---")  # frontmatter + content
+    # Selection is a generation-time knob, never recorded in the spec snapshot.
+    snapshot = (out / "harness.spec.yaml").read_text(encoding="utf-8")
+    assert "web-reading" not in snapshot
+
+
+def test_skills_prefill_ignored_when_skills_disabled(tmp_path, spec):
+    """Passing skills= with skills.enabled=false writes nothing (zero footprint)."""
+    from harnessmith.skills_catalog import resolve_skills
+
+    assert spec.skills.enabled is False
+    out = tmp_path / "noskill"
+    generate(spec, out, git_init=False, skills=resolve_skills(["web-reading"]))
+    assert not (out / "skills").exists()
 
 
 # --- Slice 8B: cross-session long-term memory (opt-in, memory.enabled) -------

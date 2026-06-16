@@ -24,6 +24,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from .catalog import CatalogServer
 from .debuglog import log
 from .node_bootstrap import NODE_LTS_VERSION
+from .skills_catalog import CatalogSkill
 from .spec import HarnessSpec, load_spec
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -84,11 +85,12 @@ CONDITIONAL_TEMPLATES: dict[str, Callable[[HarnessSpec], bool]] = {
     "src/__project_slug__/harness/mcp.py.j2": lambda spec: spec.mcp.enabled,
     "tests/test_mcp.py.j2": lambda spec: spec.mcp.enabled,
     "tests/_mcp_dummy_server.py.j2": lambda spec: spec.mcp.enabled,
-    # Standard Agent Skills (Slice 6): skills.py + a sample skill + its test are
-    # generated only when opted in; disabled leaves zero skills footprint.
+    # Standard Agent Skills (Slice 6): skills.py + its test are generated only when
+    # opted in; disabled leaves zero skills footprint. Bundled skills themselves are
+    # NOT rendered here — they are copied from the skills catalog per the selection
+    # passed to generate() (skills=), mirroring the MCP catalog prefill.
     "src/__project_slug__/harness/skills.py.j2": lambda spec: spec.skills.enabled,
     "tests/test_skills.py.j2": lambda spec: spec.skills.enabled,
-    "skills/example-skill/SKILL.md.j2": lambda spec: spec.skills.enabled,
     # Cross-session long-term memory (Slice 8B): the memory module + its test are
     # rendered only when opted in; disabled leaves zero memory footprint.
     "src/__project_slug__/harness/memory.py.j2": lambda spec: spec.memory.enabled,
@@ -261,24 +263,28 @@ def generate(
     templates_dir: Path = TEMPLATES_DIR,
     git_init: bool = True,
     mcp_servers: list[CatalogServer] | None = None,
+    skills: list[CatalogSkill] | None = None,
     confirm_default: str = "none",
 ) -> GenerationResult:
     """Render ``spec`` into ``target_dir``.
 
     ``mcp_servers`` (catalog selections from ``--mcp-server`` / a preset prefill)
     are written into the generated ``config.yaml`` when ``spec.mcp.enabled``; they
-    are a runtime knob, never added to the spec/snapshot. ``confirm_default`` seeds
-    the runtime HITL ``confirm`` policy (``none`` default; the wizard passes
-    ``high``) — also a runtime knob, not part of the spec.
+    are a runtime knob, never added to the spec/snapshot. ``skills`` (bundled-skill
+    selections) are copied into ``skills/<name>/`` when ``spec.skills.enabled`` —
+    likewise a generation-time prefill, never part of the spec/snapshot.
+    ``confirm_default`` seeds the runtime HITL ``confirm`` policy (``none`` default;
+    the wizard passes ``high``) — also a runtime knob, not part of the spec.
 
     Refuses to write into a non-empty existing directory (raises
     :class:`TargetExistsError`) so an existing repo is never clobbered.
     """
     target_dir = Path(target_dir)
     log.debug(
-        "generate: slug=%s target=%s git_init=%s mcp_servers=%s confirm=%s",
+        "generate: slug=%s target=%s git_init=%s mcp_servers=%s skills=%s confirm=%s",
         spec.project_slug, target_dir, git_init,
-        [s.name for s in (mcp_servers or [])], confirm_default,
+        [s.name for s in (mcp_servers or [])],
+        [s.name for s in (skills or [])], confirm_default,
     )
     if target_dir.exists() and any(target_dir.iterdir()):
         raise TargetExistsError(
@@ -310,6 +316,9 @@ def generate(
         _write_rendered(out_path, rendered)
         result.written_files.append(out_path)
 
+    if spec.skills.enabled and skills:
+        _write_catalog_skills(target_dir, skills, result)
+
     snapshot_path = target_dir / SPEC_SNAPSHOT_NAME
     snapshot_path.write_text(_spec_snapshot_yaml(spec), encoding="utf-8")
     result.written_files.append(snapshot_path)
@@ -322,6 +331,25 @@ def generate(
         len(result.written_files), result.git_initialized,
     )
     return result
+
+
+def _write_catalog_skills(
+    target_dir: Path, skills: list[CatalogSkill], result: GenerationResult
+) -> None:
+    """Copy each selected bundled skill verbatim into ``skills/<name>/``.
+
+    Mirrors the MCP catalog prefill (a generation-time selection, not the spec):
+    bundled skills are plain content, so they are copied byte-for-byte (no Jinja)
+    under the product's ``skills.dirs`` root (``skills/``), where the generated
+    ``harness/skills.py`` discovers ``<dir>/<name>/SKILL.md`` at runtime."""
+    for skill in skills:
+        dest_root = target_dir / "skills" / skill.name
+        for rel in skill.files:
+            src = skill.source_dir / rel
+            out_path = dest_root / rel
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(src.read_bytes())
+            result.written_files.append(out_path)
 
 
 def _git_init(target_dir: Path) -> bool:

@@ -22,12 +22,15 @@ from .scaffold import (
     GENERATE_CONFIRM,
     PARADIGMS,
     WIZARD_CATALOG_DEFAULT,
+    WIZARD_SKILLS_DEFAULT,
     apply_web_prefs,
     curated_catalog,
+    curated_skills,
     slugify,
     with_default_tools,
     with_defaults,
 )
+from .skills_catalog import CatalogSkill, resolve_skills
 from .spec import HarnessSpec
 
 
@@ -44,18 +47,23 @@ class WizardResult:
 
     spec: HarnessSpec
     mcp_servers: list[CatalogServer]
+    skills: list[CatalogSkill]
     target_dir: Path
     confirm_default: str
 
 
-def build_spec(answers: dict) -> tuple[HarnessSpec, list[CatalogServer]]:
-    """Turn structural wizard answers into a validated spec + resolved MCP servers.
+def build_spec(
+    answers: dict,
+) -> tuple[HarnessSpec, list[CatalogServer], list[CatalogSkill]]:
+    """Turn structural wizard answers into a validated spec + resolved MCP servers
+    + resolved bundled skills.
 
     The CLI counterpart of the web wizard's ``POST /spec`` + ``/generate`` baking:
-    applies :func:`with_defaults`, validates via :class:`HarnessSpec`, and (when
-    MCP is on) resolves the chosen catalog servers with their wizard tool defaults.
-    Raises ``pydantic.ValidationError`` / ``CatalogError`` on bad input — the same
-    surfaces the CLI already handles.
+    applies :func:`with_defaults`, validates via :class:`HarnessSpec`, and resolves
+    the chosen catalog servers (when MCP is on) and bundled skills (when skills are
+    on — defaulting to the recommended set if the answers don't name any). Raises
+    ``pydantic.ValidationError`` / ``CatalogError`` / ``SkillCatalogError`` on bad
+    input — surfaces the CLI already handles.
     """
     display = (answers.get("display_name") or "").strip()
     spec_data: dict = {
@@ -81,7 +89,12 @@ def build_spec(answers: dict) -> tuple[HarnessSpec, list[CatalogServer]]:
         servers = [
             with_default_tools(s) for s in resolve_servers(list(answers["mcp_servers"]))
         ]
-    return spec, servers
+    skills: list[CatalogSkill] = []
+    if spec.skills.enabled:
+        names = answers.get("skills_list")
+        names = list(names) if names is not None else sorted(WIZARD_SKILLS_DEFAULT)
+        skills = resolve_skills(names)
+    return spec, servers, skills
 
 
 def run_wizard(*, default_target_dir: str | None = None) -> WizardResult:
@@ -143,6 +156,20 @@ def run_wizard(*, default_target_dir: str | None = None) -> WizardResult:
     answers["skills"] = _need(
         questionary.confirm("Enable Agent Skills (SKILL.md discovery)?", default=True).ask()
     )
+    if answers["skills"]:
+        answers["skills_list"] = _need(
+            questionary.checkbox(
+                "Bundled skills to include (copied into skills/):",
+                choices=[
+                    questionary.Choice(
+                        f"{s.name} — {s.description}" if s.description else s.name,
+                        s.name,
+                        checked=s.name in WIZARD_SKILLS_DEFAULT,
+                    )
+                    for s in curated_skills()
+                ],
+            ).ask()
+        )
     answers["memory"] = _need(
         questionary.confirm("Enable cross-session long-term memory?", default=True).ask()
     )
@@ -165,7 +192,7 @@ def run_wizard(*, default_target_dir: str | None = None) -> WizardResult:
             ).ask()
         )
 
-    spec, mcp_servers = build_spec(answers)
+    spec, mcp_servers, skills = build_spec(answers)
 
     default_dir = default_target_dir or f"./{spec.project_slug}"
     target = _need(
@@ -175,6 +202,7 @@ def run_wizard(*, default_target_dir: str | None = None) -> WizardResult:
     return WizardResult(
         spec=spec,
         mcp_servers=mcp_servers,
+        skills=skills,
         target_dir=Path(target.strip() or default_dir),
         confirm_default=GENERATE_CONFIRM,
     )

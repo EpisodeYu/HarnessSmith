@@ -39,6 +39,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import ValidationError
 
 from ..catalog import CatalogError, load_catalog, resolve_servers
+from ..skills_catalog import SkillCatalogError, load_skills_catalog, resolve_skills
 from ..debuglog import log as debug_log, setup as setup_debug_log
 from ..generator import TargetExistsError, generate
 from ..node_bootstrap import ensure_portable_node, node_on_path
@@ -48,6 +49,8 @@ from ..scaffold import (
     PARADIGMS,
     WIZARD_CATALOG_DEFAULT as _WIZARD_CATALOG_DEFAULT,
     WIZARD_CATALOG_ORDER as _WIZARD_CATALOG_ORDER,
+    WIZARD_SKILLS_DEFAULT as _WIZARD_SKILLS_DEFAULT,
+    WIZARD_SKILLS_ORDER as _WIZARD_SKILLS_ORDER,
     apply_web_prefs as _apply_web_prefs,
     with_default_tools as _with_default_tools,
     with_defaults as _with_defaults,
@@ -117,6 +120,24 @@ def _catalog_meta() -> list[dict]:
             }
         )
     return servers
+
+
+def _skills_catalog_meta() -> list[dict]:
+    """Bundled skills the wizard surfaces: curated order + default-checked flag."""
+    catalog = load_skills_catalog()
+    skills = []
+    for name in _WIZARD_SKILLS_ORDER:
+        s = catalog.get(name)
+        if s is None:
+            continue
+        skills.append(
+            {
+                "name": s.name,
+                "description": s.description,
+                "default_checked": name in _WIZARD_SKILLS_DEFAULT,
+            }
+        )
+    return skills
 
 
 def _find_free_port(preferred: int = 8000, host: str = "127.0.0.1") -> int:
@@ -543,6 +564,17 @@ def _resolve_prefill(spec: HarnessSpec, names: list[str]):
     return []
 
 
+def _resolve_skills_prefill(spec: HarnessSpec, names):
+    """Resolve bundled-skill selections (only when skills.enabled); raises
+    SkillCatalogError. ``names is None`` (client didn't send a list) falls back to
+    the recommended default set, mirroring the wizard's default-checked box."""
+    if not spec.skills.enabled:
+        return []
+    if names is None:
+        names = sorted(_WIZARD_SKILLS_DEFAULT)
+    return resolve_skills([str(n) for n in names])
+
+
 def _spec_from_body(body: dict) -> HarnessSpec:
     """Validate the posted spec, applying the soft web-tool preference hint when a
     key-based upgrade server (Bocha / Jina) is prefilled — the web twin of the CLI
@@ -568,6 +600,7 @@ def create_app() -> FastAPI:
         return {
             "paradigms": PARADIGMS,
             "catalog": _catalog_meta(),
+            "skills_catalog": _skills_catalog_meta(),
             "presets": available_presets(),
             "generate_base": str(_GENERATE_BASE),
             # When the wizard runs on Linux the user may be accessing it over an
@@ -590,9 +623,18 @@ def create_app() -> FastAPI:
                 {"ok": False, "errors": [{"loc": "mcp_servers", "msg": str(exc)}]},
                 status_code=400,
             )
+        try:
+            skills = _resolve_skills_prefill(spec, body.get("skills"))
+        except SkillCatalogError as exc:
+            return JSONResponse(
+                {"ok": False, "errors": [{"loc": "skills", "msg": str(exc)}]},
+                status_code=400,
+            )
         target = str(body.get("target_dir") or "").strip() or "<target-dir>"
-        cmd = f"harnessmith new {target} --spec spec.yaml" + "".join(
-            f" --mcp-server {s.name}" for s in servers
+        cmd = (
+            f"harnessmith new {target} --spec spec.yaml"
+            + "".join(f" --mcp-server {s.name}" for s in servers)
+            + "".join(f" --skill {s.name}" for s in skills)
         )
         return {"ok": True, "yaml": _spec_yaml(spec), "new_command": cmd}
 
@@ -618,10 +660,18 @@ def create_app() -> FastAPI:
                 {"ok": False, "errors": [{"loc": "mcp_servers", "msg": str(exc)}]},
                 status_code=400,
             )
+        try:
+            skills = _resolve_skills_prefill(spec, body.get("skills"))
+        except SkillCatalogError as exc:
+            debug_log.debug("wizard: /generate skill prefill invalid: %s", exc)
+            return JSONResponse(
+                {"ok": False, "errors": [{"loc": "skills", "msg": str(exc)}]},
+                status_code=400,
+            )
         debug_log.debug(
-            "wizard: /generate slug=%s target=%s launch=%s servers=%s",
+            "wizard: /generate slug=%s target=%s launch=%s servers=%s skills=%s",
             spec.project_slug, target_dir, bool(body.get("launch")),
-            [s.name for s in servers],
+            [s.name for s in servers], [s.name for s in skills],
         )
         try:
             result = generate(
@@ -629,6 +679,7 @@ def create_app() -> FastAPI:
                 target_dir,
                 git_init=bool(body.get("git", False)),
                 mcp_servers=servers,
+                skills=skills,
                 confirm_default=_GENERATE_CONFIRM,
             )
         except TargetExistsError as exc:

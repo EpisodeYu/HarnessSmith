@@ -37,7 +37,7 @@ def test_slugify_mirrors_web_derive_slug(display, expected):
 def test_build_spec_bakes_behavioral_defaults_from_structural_answers():
     """Structural-only answers -> a validated spec with the same baked LLM /
     prompt defaults the web form produces (runnable out of the box)."""
-    spec, servers = build_spec(
+    spec, servers, skills = build_spec(
         {
             "display_name": "My Coding Assistant",
             "language": "zh",
@@ -59,12 +59,14 @@ def test_build_spec_bakes_behavioral_defaults_from_structural_answers():
     assert spec.llms[0].api_key_env == "OPENAI_API_KEY"
     assert spec.prompts.system == DEFAULT_SYSTEM_PROMPT
     assert servers == []
+    # skills enabled with no explicit list -> the recommended default (web-reading)
+    assert [s.name for s in skills] == ["web-reading"]
 
 
 def test_build_spec_resolves_mcp_servers_with_wizard_tool_defaults():
     """When MCP is on, chosen catalog servers are resolved and Desktop Commander's
     tools are default-enabled (HITL-gated), matching the web wizard product."""
-    spec, servers = build_spec(
+    spec, servers, _ = build_spec(
         {
             "display_name": "Tooly",
             "mcp": True,
@@ -79,14 +81,34 @@ def test_build_spec_resolves_mcp_servers_with_wizard_tool_defaults():
 
 
 def test_build_spec_ignores_servers_when_mcp_disabled():
-    _, servers = build_spec({"display_name": "x", "mcp": False, "mcp_servers": ["fetch"]})
+    _, servers, _ = build_spec({"display_name": "x", "mcp": False, "mcp_servers": ["fetch"]})
     assert servers == []
+
+
+def test_build_spec_resolves_skills_default_and_explicit():
+    """skills.enabled selects the recommended default when no list is given, the
+    chosen list when one is, and nothing when skills are disabled."""
+    _, _, default_skills = build_spec({"display_name": "x", "skills": True})
+    assert [s.name for s in default_skills] == ["web-reading"]
+
+    _, _, chosen = build_spec(
+        {"display_name": "x", "skills": True, "skills_list": ["web-reading"]}
+    )
+    assert [s.name for s in chosen] == ["web-reading"]
+
+    _, _, none_picked = build_spec(
+        {"display_name": "x", "skills": True, "skills_list": []}
+    )
+    assert none_picked == []
+
+    _, _, off = build_spec({"display_name": "x", "skills": False})
+    assert off == []
 
 
 def test_build_spec_appends_web_pref_when_upgrade_server_selected():
     """Prefilling a key-based upgrade (Bocha / Jina) appends the soft preference
     hint to the seeded system prompt — advisory, after the base prompt."""
-    spec, _ = build_spec(
+    spec, _, _ = build_spec(
         {"display_name": "x", "mcp": True, "mcp_servers": ["web-search", "bocha"]}
     )
     assert spec.prompts.system != DEFAULT_SYSTEM_PROMPT
@@ -97,7 +119,7 @@ def test_build_spec_appends_web_pref_when_upgrade_server_selected():
 def test_build_spec_no_web_pref_without_upgrade_server():
     """No upgrade server -> system prompt stays byte-identical to the default
     (the runtime fallback invariant holds for non-upgrade products)."""
-    spec, _ = build_spec(
+    spec, _, _ = build_spec(
         {"display_name": "x", "mcp": True, "mcp_servers": ["fetch", "git"]}
     )
     assert spec.prompts.system == DEFAULT_SYSTEM_PROMPT
@@ -109,7 +131,7 @@ def test_build_spec_rejects_invalid_slug():
 
 
 def test_build_spec_defaults_paradigms_to_agent_when_empty():
-    spec, _ = build_spec({"display_name": "x", "paradigms": []})
+    spec, _, _ = build_spec({"display_name": "x", "paradigms": []})
     assert spec.paradigms == ["agent"]
 
 
@@ -137,8 +159,10 @@ def test_run_wizard_builds_result_from_answers(monkeypatch):
     _stub_questionary(
         monkeypatch,
         texts=["My Coding Assistant", "", "./out"],  # display, slug (blank->derive), dir
+        # paradigms, skills (enabled), mcp servers — the skills checkbox is asked
+        # right after the "enable skills?" confirm.
+        checkboxes=[["agent", "plan"], ["web-reading"], ["fetch", "git"]],
         select="zh",
-        checkboxes=[["agent", "plan"], ["fetch", "git"]],  # paradigms, mcp servers
         confirms=[True, True, True, True],  # web, skills, memory, mcp
     )
     result = run_wizard()
@@ -147,6 +171,7 @@ def test_run_wizard_builds_result_from_answers(monkeypatch):
     assert result.spec.interfaces.web is True
     assert result.spec.mcp.enabled is True
     assert [s.name for s in result.mcp_servers] == ["fetch", "git"]
+    assert [s.name for s in result.skills] == ["web-reading"]
     assert result.target_dir == Path("./out")
     # Wizard products seed the high HITL confirm policy, like the web form.
     assert result.confirm_default == "high"
@@ -157,12 +182,13 @@ def test_run_wizard_skips_server_prompt_when_mcp_off(monkeypatch):
         monkeypatch,
         texts=["Plain", "plain", "./plain"],
         select="en",
-        checkboxes=[["agent"]],  # only the paradigms checkbox is consumed
+        checkboxes=[["agent"]],  # only the paradigms checkbox is consumed (skills+mcp off)
         confirms=[False, False, False, False],  # web, skills, memory, mcp all off
     )
     result = run_wizard()
     assert result.spec.mcp.enabled is False
     assert result.mcp_servers == []
+    assert result.skills == []
 
 
 def test_run_wizard_aborts_when_user_cancels(monkeypatch):

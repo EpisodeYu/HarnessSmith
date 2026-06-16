@@ -62,6 +62,10 @@ def test_meta_lists_paradigms_and_catalog(client):
     m = client.get("/meta").json()
     assert {"agent", "plan", "ask"} <= {p["name"] for p in m["paradigms"]}
     assert "fetch" in {s["name"] for s in m["catalog"]}
+    # The bundled-skills catalog mirrors the MCP catalog: web-reading is surfaced
+    # and default-checked (selected whenever skills are enabled).
+    skills = {s["name"]: s for s in m["skills_catalog"]}
+    assert "web-reading" in skills and skills["web-reading"]["default_checked"] is True
 
 
 def test_meta_catalog_curates_order_defaults_and_hides_niche(client):
@@ -220,6 +224,30 @@ def test_memory_toggle_flows_through_to_spec_and_repo(client, tmp_path):
     spec_off = {**_valid_spec(), "memory": {"enabled": False}}
     client.post("/generate", json={"spec": spec_off, "target_dir": str(out2)})
     assert not (out2 / "src" / "my_ca" / "harness" / "memory.py").exists()
+
+
+def test_skills_selection_copies_bundled_skill_into_product(client, tmp_path):
+    """A selected bundled skill (like an MCP server) is copied into the product's
+    skills/<name>/ when skills are enabled; the /spec command echoes --skill."""
+    spec = {**_valid_spec(), "skills": {"enabled": True}}
+    body = {"spec": spec, "skills": ["web-reading"], "target_dir": ""}
+    cmd = client.post("/spec", json=body).json()["new_command"]
+    assert "--skill web-reading" in cmd
+
+    out = tmp_path / "skilled"
+    r = client.post(
+        "/generate", json={"spec": spec, "skills": ["web-reading"], "target_dir": str(out)}
+    )
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert (out / "skills" / "web-reading" / "SKILL.md").is_file()
+
+    # skills disabled -> nothing copied even if names are sent.
+    out2 = tmp_path / "skilless"
+    spec_off = {**_valid_spec(), "skills": {"enabled": False}}
+    client.post(
+        "/generate", json={"spec": spec_off, "skills": ["web-reading"], "target_dir": str(out2)}
+    )
+    assert not (out2 / "skills").exists()
 
 
 def test_generate_renders_repo_with_display_name(client, tmp_path):

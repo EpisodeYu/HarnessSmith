@@ -37,6 +37,8 @@ from .presets import (
     preset_mcp_servers,
     preset_spec_path,
 )
+from .scaffold import WIZARD_SKILLS_DEFAULT
+from .skills_catalog import SkillCatalogError, available_skills, resolve_skills
 from .spec import load_spec
 
 app = typer.Typer(
@@ -92,6 +94,15 @@ def new(
             f"Catalog: {', '.join(available_servers())}."
         ),
     ),
+    skill: list[str] = typer.Option(
+        [],
+        "--skill",
+        help=(
+            "Bundled skill to copy into the product's skills/ (repeatable; needs "
+            "skills enabled). When skills are enabled and none is given, the "
+            f"recommended set is used. Bundled: {', '.join(available_skills())}."
+        ),
+    ),
     git_init: bool = typer.Option(
         True, "--git/--no-git", help="Run 'git init' in the generated repo."
     ),
@@ -140,6 +151,7 @@ def new(
             raise typer.Exit(code=1)
         harness_spec = wiz.spec
         mcp_servers = wiz.mcp_servers
+        skills = wiz.skills
         confirm_default = wiz.confirm_default
         target_dir = target_dir or wiz.target_dir
     else:
@@ -157,23 +169,32 @@ def new(
             mcp_servers = preset_mcp_servers(preset) if preset else []
             if mcp_server:
                 mcp_servers = mcp_servers + resolve_servers(list(mcp_server))
+            # Skill prefill = explicit --skill, else the recommended default set
+            # when skills are enabled (mirrors the wizard's default-checked box).
+            if skill:
+                skills = resolve_skills(list(skill))
+            elif harness_spec.skills.enabled:
+                skills = resolve_skills(sorted(WIZARD_SKILLS_DEFAULT))
+            else:
+                skills = []
         except (
             FileNotFoundError,
             ValueError,
             ValidationError,
             PresetNotFoundError,
             CatalogError,
+            SkillCatalogError,
         ) as exc:
             log.debug("new: invalid spec (%s: %s)", type(exc).__name__, exc)
             typer.secho(f"Invalid spec: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=2)
     log.debug(
         "new: spec loaded (slug=%s preset=%s web=%s mcp=%s skills=%s memory=%s "
-        "paradigms=%s mcp_prefill=%s)",
+        "paradigms=%s mcp_prefill=%s skill_prefill=%s)",
         harness_spec.project_slug, preset, harness_spec.interfaces.web,
         harness_spec.mcp.enabled, harness_spec.skills.enabled,
         harness_spec.memory.enabled, harness_spec.paradigms,
-        [s.name for s in mcp_servers],
+        [s.name for s in mcp_servers], [s.name for s in skills],
     )
 
     if mcp_servers and not harness_spec.mcp.enabled:
@@ -185,12 +206,22 @@ def new(
         )
         mcp_servers = []
 
+    if skills and not harness_spec.skills.enabled:
+        typer.secho(
+            "Ignoring --skill: spec has skills.enabled = false (set it to true to "
+            "bundle skills).",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        skills = []
+
     try:
         result = generate(
             harness_spec,
             target_dir,
             git_init=git_init,
             mcp_servers=mcp_servers,
+            skills=skills,
             confirm_default=confirm_default,
         )
     except TargetExistsError as exc:

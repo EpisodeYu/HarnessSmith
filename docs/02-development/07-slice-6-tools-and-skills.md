@@ -7,6 +7,8 @@
 > **后续变更(见 [`12-slice-11-mcp-management.md`](./12-slice-11-mcp-management.md) §1 后续增强)**:本片记录的默认搜索 server `bing-search`(单引擎 Bing 爬虫)后续**已删除**,改为多引擎、带 failover 的 `web-search`(open-websearch);`ddg-search` 保留为 uvx 系备选。Node 系 server(web-search / Desktop Commander)运行期改为「`npm install` 进固定目录 + `node` 直跑」,不再走 `npx` 临时缓存。catalog 另加两个**带 key 的 opt-in 候选**:`bocha`(墙内合规搜索,uvx)与 `jina-reader`(复杂/JS 网页阅读,remote)——补 `web-search`/`fetch` 的短板,向导末位默认不勾。下文涉及 `bing-search` 处按此理解。
 >
 > SKILL 放本片因**技能依赖工具**(读 `SKILL.md` 正文、跑脚本都靠文件/shell 工具)。
+>
+> **后续变更(bundled skills catalog)**:原内置示例 `skills/example-skill/` **已删除**;改为镜像 MCP catalog 的**可选内置 skill 列表**(`harnessmith/skills_catalog/`,经 `scaffold.WIZARD_SKILLS_ORDER/DEFAULT` 在向导里勾选、`skill enable 时默认勾选`,选中的 skill 目录由 `generate(skills=...)` 拷入产物 `skills/<name>/`;CLI `--skill`,`skills.enabled` 时默认带入推荐集)。首个内置 skill = `web-reading`(教模型用免 key 的 `https://r.jina.ai/<url>` 经 `fetch` 读复杂/JS 网页,补 `fetch` 短板 + 覆盖无 Jina key / 未开 jina MCP 的用户)。skill 选择是生成期旋钮,不进 spec/快照(同 MCP 预填)。下文「样例 skill」按此理解(默认不再强塞示例,改为可选 catalog)。
 
 ## 0. 边界与口径
 

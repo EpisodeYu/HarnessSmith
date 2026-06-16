@@ -170,14 +170,17 @@ def test_golden_mcp_baseline_prefill_smoke(tmp_path):
 
 @pytest.mark.golden
 def test_golden_skills_enabled_generates_and_smoke_passes(tmp_path):
-    """skills.enabled -> generate -> lock -> sync + import + mock step + pytest
-    (the generated test_skills.py + a mock turn that discovers the example skill)."""
+    """skills.enabled + the bundled web-reading skill -> generate -> lock -> sync +
+    import + mock step + pytest (the generated test_skills.py + a mock turn that
+    discovers the copied skill)."""
+    from harnessmith.skills_catalog import resolve_skills
+
     spec = load_spec(EXAMPLE_SPEC)
     spec.skills.enabled = True
     out = tmp_path / "skills"
-    result = generate(spec, out, git_init=False)
+    result = generate(spec, out, git_init=False, skills=resolve_skills(["web-reading"]))
 
-    assert (out / "skills" / "example-skill" / "SKILL.md").is_file()
+    assert (out / "skills" / "web-reading" / "SKILL.md").is_file()
     lock_dependencies(out)
     lock_text = (out / "uv.lock").read_text(encoding="utf-8").lower()
     for forbidden in FORBIDDEN:

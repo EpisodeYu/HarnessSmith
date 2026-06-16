@@ -45,11 +45,11 @@ def test_new_runs_interactive_wizard_when_no_source(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cli_mod,
         "run_wizard",
-        lambda **k: WizardResult(spec=spec, mcp_servers=[], target_dir=out, confirm_default="high"),
+        lambda **k: WizardResult(spec=spec, mcp_servers=[], skills=[], target_dir=out, confirm_default="high"),
     )
     captured = {}
 
-    def fake_generate(s, td, *, git_init, mcp_servers, confirm_default):
+    def fake_generate(s, td, *, git_init, mcp_servers, skills, confirm_default):
         captured.update(target_dir=Path(td), confirm_default=confirm_default, slug=s.project_slug)
         return GenerationResult(target_dir=Path(td), project_slug=s.project_slug)
 
