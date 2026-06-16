@@ -49,17 +49,6 @@
       </div>
       <div>
         <label class="flex items-center gap-2 text-sm font-medium">
-          <input id="mcp_enabled" type="checkbox" checked />
-          <span data-i18n="mcp_enable_label">启用 MCP 工具</span>
-        </label>
-        <p class="mt-1 text-xs text-slate-500" data-i18n="mcp_hint">关闭则不含 MCP,启用后可从 catalog 预选 server 写入 config.yaml。</p>
-        <div id="catalog-wrap" class="mt-2">
-          <label class="block text-sm font-medium" data-i18n="catalog_label">预选 MCP server</label>
-          <div id="catalog-list" class="mt-1 space-y-1"></div>
-        </div>
-      </div>
-      <div>
-        <label class="flex items-center gap-2 text-sm font-medium">
           <input id="skills_enabled" type="checkbox" checked />
           <span data-i18n="skills_enable_label">启用标准 Agent Skills</span>
         </label>
@@ -71,6 +60,17 @@
           <span data-i18n="memory_enable_label">启用跨会话长期记忆</span>
         </label>
         <p class="mt-1 text-xs text-slate-500" data-i18n="memory_hint">关闭则不含记忆,启用后提供跨会话文件笔记,可通过 @register_memory 更换后端。</p>
+      </div>
+      <div>
+        <label class="flex items-center gap-2 text-sm font-medium">
+          <input id="mcp_enabled" type="checkbox" checked />
+          <span data-i18n="mcp_enable_label">启用 MCP 工具</span>
+        </label>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="mcp_hint">关闭则不含 MCP,启用后可从 catalog 预选 server 写入 config.yaml。</p>
+        <div id="catalog-wrap" class="mt-2">
+          <label class="block text-sm font-medium" data-i18n="catalog_label">预选 MCP server</label>
+          <div id="catalog-list" class="mt-1 space-y-1"></div>
+        </div>
       </div>
     </section>
 
