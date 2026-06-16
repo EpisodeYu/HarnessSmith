@@ -92,9 +92,20 @@ def test_index_has_context_max_steps_and_truncation_controls():
 
 def test_index_does_not_yank_reader_to_bottom_mid_stream():
     """Streaming output only auto-scrolls while the reader is already at the bottom,
-    so scrolling up to reread isn't fought by new tokens."""
+    so scrolling up to reread isn't fought by new tokens.
+
+    The disengage must key off scroll DIRECTION (any upward move), not just the
+    at-bottom threshold: a small wheel-up stays inside the threshold, so a
+    threshold-only check let a fast tool-call burst snap the reader back to the
+    bottom every event — trapping them there (body frozen, only the sticky header
+    moving). The snap is also coalesced via requestAnimationFrame so a burst can't
+    thrash scrollTop and desync the sticky header's compositor layer."""
     body = _client().get("/").text
     assert "stickBottom" in body and "function atBottom()" in body
+    # an upward move disengages regardless of the threshold...
+    assert "top < lastScrollTop - 1" in body
+    # ...and the auto-scroll is coalesced to one write per frame
+    assert "requestAnimationFrame" in body and "scrollPending" in body
 
 
 def test_index_groups_tools_by_source():

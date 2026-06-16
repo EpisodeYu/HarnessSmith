@@ -704,16 +704,42 @@
     // auto-scrolls for the view that is actually on screen.
     //
     // "Stick to bottom" only while the reader IS at the bottom: once they scroll
-    // up to reread, streaming output stops yanking them back down. Scrolling back
-    // to the bottom re-arms the follow. The threshold absorbs sub-pixel rounding
-    // and the small jump one freshly appended line adds.
+    // up to reread, streaming output stops yanking them back down; returning to the
+    // bottom re-arms the follow.
+    //
+    // The disengage keys off scroll DIRECTION (any upward move), NOT the at-bottom
+    // threshold — that distinction is what stops a fast tool-call burst from trapping
+    // the reader at the bottom. Recomputing `stickBottom = atBottom()` on every scroll
+    // (the old behaviour) meant a small wheel-up stayed within the 60px window so the
+    // follow never let go, and the next streamed event snapped them back down before
+    // they could scroll clear — the body looked frozen while only the sticky header
+    // twitched. The threshold now governs RE-ARMING only (returning near the bottom),
+    // where it usefully absorbs sub-pixel rounding and the jump a fresh line adds.
+    //
+    // The snap itself is coalesced to one write per frame (requestAnimationFrame) so a
+    // burst of events can't thrash scrollTop and desync the sticky header's layer.
     let stickBottom = true;
+    let lastScrollTop = 0;       // previous scrollTop, read to tell scroll direction
+    let scrollPending = false;   // a coalesced snap-to-bottom is already queued
     function atBottom() {
       return log.scrollHeight - log.scrollTop - log.clientHeight <= 60;
     }
-    log.addEventListener("scroll", () => { stickBottom = atBottom(); });
+    log.addEventListener("scroll", () => {
+      const top = log.scrollTop;
+      if (top < lastScrollTop - 1) stickBottom = false;  // any upward move stops the follow
+      else if (atBottom()) stickBottom = true;            // back at the bottom re-arms it
+      lastScrollTop = top;
+    });
     function scrollChat(view) {
-      if (view === activeView && stickBottom) log.scrollTop = log.scrollHeight;
+      if (view !== activeView || !stickBottom || scrollPending) return;
+      scrollPending = true;
+      requestAnimationFrame(() => {
+        scrollPending = false;
+        if (stickBottom && view === activeView) {
+          log.scrollTop = log.scrollHeight;
+          lastScrollTop = log.scrollTop;  // our own snap isn't a user scroll-up
+        }
+      });
     }
 
     function line(view, text, cls) {
@@ -1215,6 +1241,7 @@
       }
       stickBottom = true;  // opening a conversation lands at its latest message
       log.scrollTop = log.scrollHeight;
+      lastScrollTop = log.scrollTop;  // so the first manual scroll-up here disengages
       refreshSendButton();
       updateCtxMeter(view.ctxUsed);
       $("cwd").value = view.cwd || "";  // prefill this conversation's working-dir hint
