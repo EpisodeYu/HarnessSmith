@@ -285,3 +285,73 @@ def ask_question(
     if response.text:
         return f"User answered: {response.text}"
     return "User skipped the question (no answer given)."
+
+
+_TODO_MARKS = {"pending": "[ ]", "in_progress": "[~]", "completed": "[x]"}
+
+
+@registry.tool(
+    name="write_todos",
+    description=(
+        "Lay out and update your task list for a multi-step request, then get it "
+        "back rendered. Pass the FULL list every call (it REPLACES the previous "
+        "one). Plan a non-trivial task up front, then keep the list current as you "
+        "work: keep exactly ONE item in_progress, flip it to completed the moment "
+        "it's done, and add follow-ups you discover. Skip it for a trivial one-step "
+        "request. This is a scratchpad that keeps you on track over a long task — it "
+        "has no side effects."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "todos": {
+                "type": "array",
+                "description": "The complete task list (replaces any earlier one).",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "What the step is, as a short imperative.",
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed"],
+                            "description": "Current state of the step.",
+                        },
+                    },
+                    "required": ["content", "status"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["todos"],
+        "additionalProperties": False,
+    },
+    risk=SAFE,
+)
+def write_todos(todos: list | None = None) -> str:
+    """Validate + render the task list the model passed, then echo it back.
+
+    Stateless on purpose: the list lives in the conversation itself (this call's
+    arguments + result), which is exactly where the model re-reads it next step.
+    So it survives a resume, never leaks between concurrent web sessions, and
+    needs no storage — a thin "attention control" scratchpad, not a workflow
+    engine. An unknown status degrades to ``pending`` rather than erroring."""
+    items = list(todos or [])
+    if not items:
+        return "Todo list cleared (no items)."
+    counts = {"pending": 0, "in_progress": 0, "completed": 0}
+    lines: list[str] = []
+    for item in items:
+        content = str((item or {}).get("content", "")).strip()
+        status = str((item or {}).get("status", "pending")).strip()
+        if status not in _TODO_MARKS:
+            status = "pending"
+        counts[status] += 1
+        lines.append(f"{_TODO_MARKS[status]} {content}")
+    header = f"Todo list ({counts['completed']}/{len(items)} done"
+    if counts["in_progress"]:
+        header += f", {counts['in_progress']} in progress"
+    header += "):"
+    return header + "\n" + "\n".join(lines)

@@ -36,6 +36,13 @@ tools:
 A tool is only exposed to the model when it is **enabled in `config.yaml`** — the
 allowlist. Keep dangerous tools disabled until you explicitly opt in.
 
+The harness ships a few safe built-ins already enabled: `get_current_time`,
+`calculator`, `ask_question` (pause and ask the user — see below), and
+`write_todos` — a planning scratchpad the model uses to lay out and tick off the
+steps of a multi-step task. `write_todos` is stateless (the list lives in the
+conversation, so it survives a resume and never crosses sessions); drop it from
+`config.yaml` if you don't want it offered.
+
 **Risk classification (matters for read-only modes).** A tool's `risk` defaults to
 `"safe"`, which also exposes it to the read-only `plan` / `ask` paradigms. So if a
 tool of yours **mutates anything** (writes files, runs commands, calls a
@@ -602,10 +609,12 @@ To add a structural change (a new endpoint, a new module), edit `web.py`
 directly — it's yours. Behavioral knobs belong in `config.yaml` / the panel.{% endif %}{% if spec.mcp.enabled %}
 ## MCP tools (the capability baseline)
 
-This harness ships no built-in productivity tools — its real capabilities come
-from [MCP](https://modelcontextprotocol.io) servers. `harness/mcp.py` connects
-servers and registers their tools into the same registry as the built-ins, so
-the loop is untouched. `config.yaml` is prefilled with a baseline:
+Beyond a couple of safe built-ins (the `write_todos` planning scratchpad, a
+clock, a calculator), this harness ships no built-in **capability** tools
+(file / shell / web access) — those come from [MCP](https://modelcontextprotocol.io)
+servers. `harness/mcp.py` connects servers and registers their tools into the
+same registry as the built-ins, so the loop is untouched. `config.yaml` is
+prefilled with a baseline:
 
 - **`fetch`** (`uvx mcp-server-fetch`) — fetch a known URL as markdown; **on**.
 - **`web-search`** (`open-websearch`, Node) — keyless, **multi-engine** web search

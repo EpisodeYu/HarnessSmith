@@ -30,7 +30,7 @@
 |---|---|
 | Agent 循环 | 原生 function-calling 循环（TAO/ReAct 语义，走 `tool_calls`）+ 范式分发 + 生命周期 hooks + 优雅停止 |
 | LLM 层 | profile 注册表 + 角色路由（`generation`/`compaction`，可选 `title`/`memory`/`embedding`）+ 按 profile 采样参数 + 超时/重试/fallback + 双协议客户端（OpenAI 兼容 + 原生 Anthropic） |
-| 工具注册表 | 装饰器注册 + 风险分级；高风险工具（shell/写文件）默认关，仅 allowlist 显式开 |
+| 工具注册表 | 装饰器注册 + 风险分级；高风险工具（shell/写文件）默认关，仅 allowlist 显式开；默认内置安全工具 `get_current_time`/`calculator`/`ask_question`/`write_todos`（多步任务规划清单，无状态 echo） |
 | 范式 | `harness/paradigms/` 薄注册表 + 内置 `agent`（默认）/`plan`/`ask`（只读）；`@register_paradigm` 运行期可自加、每轮可切 |
 | 会话 | 本地 JSON 持久化、`--continue`/`--resume`、`chat` REPL、崩溃安全检查点 |
 | 交互 | `ask_question` 结构化澄清 + HITL 工具确认，CLI/Web 共用一套交互往返底座 |

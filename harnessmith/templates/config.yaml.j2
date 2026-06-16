@@ -90,6 +90,8 @@ tools:
     enabled: {{ tool.enabled | tojson }}
 {% endfor %}  - name: ask_question
     enabled: true    # built-in: pause and ask the user a clarifying question (safe; off in non-interactive runs)
+  - name: write_todos
+    enabled: true    # built-in: plan/track a multi-step task (safe scratchpad, no side effects)
 {% if mcp_tool_allowlist %}  # MCP tools (allowlist): a `<server>__*` wildcard enables ALL of that server's
   # tools (read + mutating/shell). To narrow it, replace the wildcard with explicit
   # `<server>__<tool>` lines, or toggle individual tools on the web Tools panel.

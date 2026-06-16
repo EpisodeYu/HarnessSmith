@@ -145,6 +145,36 @@ def test_high_risk_tool_is_off_unless_allowlisted(tmp_path):
     assert registry.active_names(on.enabled_tool_names()) == ["danger"]
 
 
+def test_write_todos_renders_and_is_stateless():
+    """The built-in planning scratchpad echoes the FULL list back rendered, counts
+    progress, and degrades an unknown status to pending — no stored state."""
+    from {{ project_slug }}.harness.tools import registry as builtins, write_todos
+
+    out = write_todos(
+        todos=[
+            {"content": "read the code", "status": "completed"},
+            {"content": "make the change", "status": "in_progress"},
+            {"content": "run tests", "status": "bogus"},  # unknown -> pending
+        ]
+    )
+    assert "1/3 done" in out and "1 in progress" in out
+    assert "[x] read the code" in out
+    assert "[~] make the change" in out
+    assert "[ ] run tests" in out  # bogus status degraded to pending, never errors
+    assert write_todos(todos=[]).startswith("Todo list cleared")
+    # Registered as a safe built-in, so read-only paradigms (plan/ask) offer it too.
+    assert builtins.risk_of("write_todos") == "safe"
+
+
+def test_write_todos_is_offered_by_default(tmp_path):
+    """It is seeded into config.yaml's allowlist (like ask_question), so a default
+    product offers it to the model without any extra wiring."""
+    from {{ project_slug }}.harness.tools import registry as builtins
+
+    cfg = _config(tmp_path, tools=[{"name": "write_todos", "enabled": True}])
+    assert "write_todos" in builtins.active_names(cfg.enabled_tool_names())
+
+
 def _ledger(tmp_path):
     """An isolated on-disk usage ledger (so a limit test never reads/clobbers the
     real .harness/usage.json or another test's counts)."""
