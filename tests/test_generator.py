@@ -654,6 +654,40 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     assert dc["args"] == ["--silent", "-y", "@wonderwhy-er/desktop-commander@0.2.42"]
 
 
+def test_web_access_upgrade_servers_prefill_into_config_and_env(tmp_path, spec):
+    """The key-based web upgrades (bocha + jina-reader) land in config.yaml as a
+    stdio (uvx) and a remote (url+Bearer) server, each enabled by its wildcard, and
+    their key NAMES seed .env.example — names only, no framework deps, no values."""
+    from harnessmith.catalog import resolve_servers
+
+    spec.mcp.enabled = True
+    out = tmp_path / "web_up"
+    servers = resolve_servers(["bocha", "jina-reader"])
+    generate(spec, out, git_init=False, mcp_servers=servers)
+
+    config = yaml.safe_load((out / "config.yaml").read_text(encoding="utf-8"))
+    by_name = {s["name"]: s for s in config["mcp"]["servers"]}
+    # Bocha: stdio uvx with the key as an env NAME (no value).
+    assert by_name["bocha"]["command"] == "uvx"
+    assert by_name["bocha"]["args"] == ["mcp-bocha-search"]
+    assert by_name["bocha"]["env"] == ["BOCHA_API_KEY"]
+    # Jina: remote (url + optional Bearer auth_env), no local command.
+    assert by_name["jina-reader"]["url"] == "https://mcp.jina.ai/v1"
+    assert by_name["jina-reader"]["auth_env"] == "JINA_API_KEY"
+    assert "command" not in by_name["jina-reader"]
+    # Both enabled by their `<server>__*` wildcard (whole toolset on by default).
+    enabled = {t["name"] for t in config["tools"] if t["enabled"]}
+    assert {"bocha__*", "jina-reader__*"} <= enabled
+
+    env_example = (out / ".env.example").read_text(encoding="utf-8")
+    assert "BOCHA_API_KEY=" in env_example and "JINA_API_KEY=" in env_example
+    assert "sk-" not in env_example  # NAMES only — never a value
+
+    pyproject = (out / "pyproject.toml").read_text(encoding="utf-8").lower()
+    for forbidden in ("langchain", "langgraph", "adk"):
+        assert forbidden not in pyproject
+
+
 def test_web_config_save_preserves_undiscovered_mcp_allowlist(tmp_path, spec):
     """Regression: a config Save from any tab must NOT wipe the MCP tool allowlist.
 

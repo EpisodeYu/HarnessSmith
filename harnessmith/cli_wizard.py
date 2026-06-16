@@ -22,6 +22,7 @@ from .scaffold import (
     GENERATE_CONFIRM,
     PARADIGMS,
     WIZARD_CATALOG_DEFAULT,
+    apply_web_prefs,
     curated_catalog,
     slugify,
     with_default_tools,
@@ -68,7 +69,12 @@ def build_spec(answers: dict) -> tuple[HarnessSpec, list[CatalogServer]]:
     }
     if display:
         spec_data["display_name"] = display
-    spec = HarnessSpec.model_validate(with_defaults(spec_data))
+    prepared = with_defaults(spec_data)
+    if spec_data["mcp"]["enabled"]:
+        # Prefilling a key-based upgrade server (Bocha / Jina) appends a soft
+        # "prefer the stronger tool, fall back on error/missing key" hint.
+        prepared = apply_web_prefs(prepared, answers.get("mcp_servers") or [])
+    spec = HarnessSpec.model_validate(prepared)
 
     servers: list[CatalogServer] = []
     if spec.mcp.enabled and answers.get("mcp_servers"):

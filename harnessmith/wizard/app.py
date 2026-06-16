@@ -48,6 +48,7 @@ from ..scaffold import (
     PARADIGMS,
     WIZARD_CATALOG_DEFAULT as _WIZARD_CATALOG_DEFAULT,
     WIZARD_CATALOG_ORDER as _WIZARD_CATALOG_ORDER,
+    apply_web_prefs as _apply_web_prefs,
     with_default_tools as _with_default_tools,
     with_defaults as _with_defaults,
 )
@@ -542,6 +543,18 @@ def _resolve_prefill(spec: HarnessSpec, names: list[str]):
     return []
 
 
+def _spec_from_body(body: dict) -> HarnessSpec:
+    """Validate the posted spec, applying the soft web-tool preference hint when a
+    key-based upgrade server (Bocha / Jina) is prefilled — the web twin of the CLI
+    wizard's ``build_spec``. Raises ``ValidationError`` on bad input (handled by the
+    callers, exactly as before)."""
+    raw = dict(body.get("spec") or {})
+    prepared = _with_defaults(raw)
+    if (raw.get("mcp") or {}).get("enabled"):
+        prepared = _apply_web_prefs(prepared, body.get("mcp_servers") or [])
+    return HarnessSpec.model_validate(prepared)
+
+
 def create_app() -> FastAPI:
     setup_debug_log()  # covered by the CLI path too; direct uvicorn use gets it here
     app = FastAPI(title="HarnessSmith wizard")
@@ -567,7 +580,7 @@ def create_app() -> FastAPI:
     async def post_spec(request: Request):
         body = await request.json()
         try:
-            spec = HarnessSpec.model_validate(_with_defaults(dict(body.get("spec") or {})))
+            spec = _spec_from_body(body)
         except ValidationError as exc:
             return JSONResponse({"ok": False, "errors": _format_errors(exc)}, status_code=400)
         try:
@@ -593,7 +606,7 @@ def create_app() -> FastAPI:
                 status_code=400,
             )
         try:
-            spec = HarnessSpec.model_validate(_with_defaults(dict(body.get("spec") or {})))
+            spec = _spec_from_body(body)
         except ValidationError as exc:
             debug_log.debug("wizard: /generate spec invalid: %s", exc)
             return JSONResponse({"ok": False, "errors": _format_errors(exc)}, status_code=400)

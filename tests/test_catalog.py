@@ -102,6 +102,40 @@ def test_remote_server_entry_uses_url_and_auth_env():
     assert "command" not in entry
 
 
+def test_bocha_is_keyed_uvx_china_search():
+    """Bocha (博查): a key-based, China-compliant search SUPPLEMENT to the keyless
+    web-search. uvx-based (rides uv, no Node) so it can be prewarmed/baked offline;
+    the API key is an env NAME only; both search tools are read-only -> safe."""
+    bocha = get_server("bocha")
+    assert bocha.command == "uvx"
+    assert bocha.uvx_package == "mcp-bocha-search"  # prewarmable/bakeable
+    assert bocha.requires == "uv"
+    assert bocha.env == ["BOCHA_API_KEY"]  # secret NAME only (stdio env)
+    assert bocha.auth_env is None  # stdio key rides `env`, not a remote Bearer
+    # Both tools are read-only network reads -> safe (plan/ask can search too).
+    assert bocha.safe_tools == ["bocha_web_search", "bocha_ai_search"]
+    entry = bocha.server_entry()
+    assert entry["command"] == "uvx" and entry["args"] == ["mcp-bocha-search"]
+    assert entry["env"] == ["BOCHA_API_KEY"]  # NAME carried into config.yaml
+    # The prefill is a single `<server>__*` wildcard enabling the whole server.
+    assert bocha.allowlist_entries() == [{"name": "bocha__*", "enabled": True}]
+
+
+def test_jina_reader_remote_renders_complex_pages():
+    """Jina Reader: a remote (Streamable HTTP) MCP for reading complex/JS pages
+    where the keyless fetch falls short. url + Bearer auth_env (NAME only); read
+    tools are read-only -> safe (offered to plan/ask)."""
+    jina = get_server("jina-reader")
+    entry = jina.server_entry()
+    assert entry["url"] == "https://mcp.jina.ai/v1"
+    assert entry["auth_env"] == "JINA_API_KEY"  # optional Bearer, NAME only
+    assert "command" not in entry  # remote, not a local subprocess
+    assert jina.command is None and jina.requires is None  # no uv/node launcher
+    # read_url (+ parallel/search) are read-only network reads -> safe.
+    assert "read_url" in jina.safe_tools and "search_web" in jina.safe_tools
+    assert jina.allowlist_entries() == [{"name": "jina-reader__*", "enabled": True}]
+
+
 def test_resolve_servers_dedupes_and_validates():
     resolved = resolve_servers(["fetch", "git", "fetch"])
     assert [s.name for s in resolved] == ["fetch", "git"]

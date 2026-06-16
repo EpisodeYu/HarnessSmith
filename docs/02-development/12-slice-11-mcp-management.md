@@ -70,6 +70,18 @@
 - **修复(`interfaces/web_index.html` · `collectConfig()`)**:DOM 只对**本次确实渲染了工具复选框**的 server 视为权威(记入 `renderedServers`,仅当该 `details` 有 `.tool-en` 复选框时计入);对**未渲染**的 server(Tools 页没开过,或还在连接、尚无工具),从 `cfg.tools`(上次 `GET /config` 的真相)**逐条回写**其 allowlist 条目(通配或显式),`<server>__*` 与显式 `<server>__<tool>` 都按 `__` 前缀归属到 server。既保留「整 server 全开折叠成单条通配」「取消勾选即收窄/停用」等既有交互,又杜绝「从别的页保存把通配冲掉」。附带改善:Tools 页开了但某 server **连接失败/仍在连(0 工具)** 时其通配也不再被「看一眼就丢」。
 - **验证**:浏览器实测复现(生成 web+4 MCP server 产物 → serve --mock → 仅在 LLM 页填 model 后保存 → 修复前 `config.yaml` 与 `/config` 的四条通配全失、Tools 页四个 server 显示 `0/N` 未勾选;修复后四条通配保留、Tools 页 `1/1`·`6/6`·`12/12`·`26/26` 全勾)。新增守卫测试 `test_web_config_save_preserves_undiscovered_mcp_allowlist`(断言 `collectConfig` 含 `renderedServers` 权威判定 + `!renderedServers.has(server)` 的 `cfg.tools` 回写);生成器全量快测 + 产物自带测试全绿。
 
+### 后续增强 · Web 访问能力增强(Bocha 墙内搜索 + Jina Reader 复杂网页阅读)(本次)
+
+> 背景:基线 web 能力只有免 key 的 `web-search`(open-websearch 多引擎爬虫)与 `fetch`(`mcp-server-fetch`,静态 httpx + readability,**不执行 JS**)。两处短板:① 墙内对高质量、合规、带摘要的搜索有需求,免 key 爬虫覆盖与稳定性有限;② 复杂 / JS 渲染 / 反爬网页上 `fetch` 抓不到正文。本次只在 **catalog 加两个 opt-in 候选** + 向导可选,不改 spec schema、不进默认 preset、不给默认产物加运行期依赖。
+
+- **catalog 两条**(`catalog/mcp_servers.yaml`,Extra candidates 区):
+  - `bocha` —— 墙内合规、**带 key** 搜索(博查)。`uvx mcp-bocha-search`(`requires: uv`,可预热 / 烤进 Docker 离线),`env: [BOCHA_API_KEY]`(仅 env 名)。工具 `bocha_web_search` / `bocha_ai_search` 均只读 → `risk: safe`(plan/ask 可用)。**key 必需**:未配置时工具返回 "API key is not configured" 错误串(不崩),harness 仍连上,agent 回退到免 key 的 `web-search`。
+  - `jina-reader` —— 复杂 / JS 网页阅读,**remote MCP**(Streamable HTTP)。`url: https://mcp.jina.ai/v1` + `auth_env: JINA_API_KEY`(Bearer,仅名)。headless 渲染 JS、输出干净 markdown。`read_url`/`parallel_read_url`/`search_web` 标 `safe`(其余发现工具按 `high` 兜底)。**key 可选**:`read_url` 免 key 匿名直连(限速更严),`search_web` 需 key;`_bearer_headers` 在 key 未设时返回空头匿名连接。墙内对 `r.jina.ai`/`mcp.jina.ai` 一般**直连可用**(无需代理),稳定性需实测;`search_web` 上游历史偶发 Unauthorized(read 不受影响)。
+- **向导**(`scaffold.py`):二者追加到 `WIZARD_CATALOG_ORDER` **末位**、**不**进 `WIZARD_CATALOG_DEFAULT`(默认不勾);它们是 key-based 升级件,非人人需要(且 Bocha key 必需)。勾选后其全部工具经 `<server>__*` 通配默认开(既有机制,无新代码)。
+- **软偏好提示(优先使用,建议性 + 自带回退)**:`scaffold.apply_web_prefs(spec_data, server_names)` —— 当向导选中 `{bocha, jina-reader}` 任一时,把一行 `WEB_PREFERENCE_HINT`(优先用更强的搜索/阅读工具,**报错或无 key 时回退 `web-search`/`fetch`**)追加到产物种子 `prompts.system`。CLI 向导 `build_spec`、Web 向导 `_spec_from_body`(`/spec` + `/generate`)均在 `with_defaults` 后、校验前调用。**仅向导路径**(CLI `--mcp-server` / preset 不注入);**未选升级件时种子 system 与运行期 `_DEFAULT_SYSTEM` 字节一致**(不变量不破)。非硬路由(守不绑编排定位)。
+- **密钥红线不变**:`config.yaml`/server 配置只存 `BOCHA_API_KEY`/`JINA_API_KEY` 名;真值走 Slice 3 既有 write-only `/env`(Web)/ CLI `set-key` 入 `.env`;`generator` 在 `mcp.enabled` 且预填二者时把名加入 `.env.example`(仅名)。
+- **测试**:`test_catalog.py`(`test_bocha_is_keyed_uvx_china_search` / `test_jina_reader_remote_renders_complex_pages`);`test_cli_wizard.py`(选升级件→system 含偏好段、未选→字节一致);`test_wizard.py`(`/meta` 顺序末位 + 默认不勾、`/spec` 偏好按选择注入);`test_generator.py`(`test_web_access_upgrade_servers_prefill_into_config_and_env`:config.yaml 两 server + 通配、`.env.example` 两 key 名、pyproject 无 langchain/langgraph/adk)。全量快测 + 黄金路径全绿;`harnessmith new --mcp-server bocha jina-reader` 冒烟落盘正确。
+
 ## 2. 跨平台运行期健壮性(收敛在 `mcp.py` + 启动脚本)
 
 stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健壮性:
@@ -98,6 +110,7 @@ stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健
 - Node 安装跳浏览器下载:`_warm_one_server` 对 Node 安装注入 `_NODE_INSTALL_SKIP_DOWNLOAD`(`PUPPETEER_SKIP_DOWNLOAD` 等,`setdefault` 不覆盖用户值);uvx 不注入。测试 `test_node_install_skips_browser_binary_download`。
 - 两阶段 + 自愈:prefetch 先于 handshake;失败按 `connect_max_retries` 后台退避重试(amber→耗尽 red),成功经 `on_connected` 重同步 registry;`connect_max_retries=0` 快速失败不重试。
 - wizard DC 默认 + HITL:wizard 产物默认 DC 勾选 + `confirm: high`。
+- Web 访问增强:catalog 有 `bocha`(uvx + `env: [BOCHA_API_KEY]`,工具 safe)/ `jina-reader`(remote `url` + `auth_env: JINA_API_KEY`);向导二者末位 + 默认不勾;选中升级件→种子 `prompts.system` 含软偏好段、未选→字节一致;`--mcp-server bocha jina-reader` 落 config.yaml(两 server + 通配)+ `.env.example`(两 key 名,无值)。
 - 不泄密:`/mcp/status` 仅回 env 名;server 增删改只收 env 名;trace/日志不回显。
 - 关 MCP 零痕迹:`spec.mcp.enabled=false` 产物不含 `mcp.py`/MCP 标签/`/mcp/*`/`mcp` CLI 段。
 - 薄:`mcp.py` 仍单文件聚合、无新抽象层;`loop.py`/`active_names`/`call` 语义不变;`Registry` 仅加 `unregister`/`remove_where`。

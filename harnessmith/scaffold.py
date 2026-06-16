@@ -19,6 +19,7 @@ extra.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import replace
 
 from .catalog import CatalogServer, load_catalog
@@ -40,7 +41,22 @@ PARADIGMS = [
 # confirmation gate (``confirm: high``, see ``GENERATE_CONFIRM``), a deliberate,
 # signed loosening of the "high-risk off by default" baseline for wizard products
 # only (Slice 11). It still needs Node (npx) at runtime.
-WIZARD_CATALOG_ORDER = ("fetch", "web-search", "git", "desktop-commander")
+#
+# ``bocha`` (China-compliant search) and ``jina-reader`` (complex/JS-page reading)
+# are surfaced LAST and default-UNCHECKED: they are key-based UPGRADES over the
+# keyless web-search/fetch baseline, not everyone wants/needs them (and Bocha's key
+# is mandatory). When a user does check one, its whole toolset turns on (the
+# ``<server>__*`` wildcard) and a soft "prefer the stronger tool, fall back on
+# error/missing key" hint is appended to the product's system prompt — see
+# ``WEB_UPGRADE_SERVERS`` / ``apply_web_prefs``.
+WIZARD_CATALOG_ORDER = (
+    "fetch",
+    "web-search",
+    "git",
+    "desktop-commander",
+    "bocha",
+    "jina-reader",
+)
 WIZARD_CATALOG_DEFAULT = frozenset({"fetch", "web-search", "git", "desktop-commander"})
 
 # Catalog servers whose tools the wizards ship ENABLED by default (overriding the
@@ -51,6 +67,24 @@ WIZARD_TOOLS_ON = frozenset({"desktop-commander"})
 # risk=high tool (shell / file writes / Desktop Commander) pauses for the user's
 # OK before it runs. The plain CLI (--spec/--preset) path keeps the "none" default.
 GENERATE_CONFIRM = "high"
+
+# Key-based catalog servers that are web UPGRADES over the keyless baseline
+# (web-search / fetch). When a wizard product prefills one, ``apply_web_prefs``
+# appends ``WEB_PREFERENCE_HINT`` to its seeded system prompt so the model prefers
+# the stronger tool but degrades gracefully (the hint names an explicit keyless
+# fallback, so a missing/unset API key just falls back rather than dead-ends).
+WEB_UPGRADE_SERVERS = frozenset({"bocha", "jina-reader"})
+
+# Advisory (NOT a hard route): prefer the stronger web tools when present, fall
+# back to the keyless ones on error or a missing key. Only appended for wizard
+# products that prefill an upgrade server; the default product never sees it.
+WEB_PREFERENCE_HINT = (
+    "When stronger web tools are available, prefer them: use Bocha "
+    "(bocha_web_search / bocha_ai_search) for web search instead of the keyless "
+    "web-search, and Jina read_url for reading complex or JavaScript-heavy pages "
+    "instead of the basic fetch. If a preferred tool errors or its API key is not "
+    "set, fall back to the keyless web-search / fetch."
+)
 
 # The default base system prompt seeded into wizard/CLI-scaffolded products. Kept
 # byte-identical to the runtime fallback (generated harness/prompts.py) and the
@@ -110,6 +144,25 @@ def with_defaults(spec_data: dict) -> dict:
     for key, value in BAKED_DEFAULTS.items():
         if not out.get(key):
             out[key] = value
+    return out
+
+
+def apply_web_prefs(spec_data: dict, server_names: Iterable[str]) -> dict:
+    """Append the soft web-tool preference hint when an upgrade server is prefilled.
+
+    Wizard-only and gated on ``WEB_UPGRADE_SERVERS``: a no-op unless the selection
+    includes bocha / jina-reader. The hint is advisory and names an explicit
+    keyless fallback, so a missing key just degrades gracefully. Run AFTER
+    :func:`with_defaults` (so ``prompts.system`` is populated); a no-op leaves the
+    default product's system prompt byte-identical to the runtime ``_DEFAULT_SYSTEM``.
+    """
+    if not WEB_UPGRADE_SERVERS.intersection(str(n) for n in server_names):
+        return spec_data
+    out = dict(spec_data)
+    prompts = dict(out.get("prompts") or {})
+    system = (prompts.get("system") or DEFAULT_SYSTEM_PROMPT).rstrip()
+    prompts["system"] = f"{system}\n\n{WEB_PREFERENCE_HINT}"
+    out["prompts"] = prompts
     return out
 
 

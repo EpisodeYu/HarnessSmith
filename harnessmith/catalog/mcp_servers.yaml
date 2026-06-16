@@ -162,6 +162,58 @@ servers:
   # --- Extra candidates (not in the coding-assistant baseline). Add with
   #     `--mcp-server <name>` or paste the server block into config.yaml. ---
 
+  bocha:
+    # Key-based, China-compliant search (博查) — a SUPPLEMENT to the keyless,
+    # multi-engine `web-search`, for in-GFW use. uvx-based (rides uv, no Node), so
+    # it can be prewarmed + baked into the Docker image for offline connect. Both
+    # tools are read-only network reads -> `safe` (plan/ask can search too). The
+    # key (`BOCHA_API_KEY`, env NAME only) is REQUIRED: without it the tools return
+    # an "API key is not configured" error rather than crashing, so the harness
+    # still connects and the agent falls back to the keyless `web-search`.
+    description: >-
+      China-compliant web search (Bocha) — key-based (needs BOCHA_API_KEY).
+      Strong domestic coverage with LLM-ready summaries; data stays in-country.
+      A supplement to the keyless web-search for in-GFW use. Two read-only tools:
+      bocha_web_search (general web) and bocha_ai_search (semantic + structured
+      cards: weather, encyclopedia, stocks, ...).
+    transport: stdio
+    command: uvx
+    args: [mcp-bocha-search]
+    env: [BOCHA_API_KEY]
+    requires: uv
+    source: https://github.com/shibing624/mcp-bocha-search
+    updated: "2026-06-16"
+    tools:
+      - {name: bocha_web_search, risk: safe, default_enabled: true}
+      - {name: bocha_ai_search, risk: safe, default_enabled: true}
+
+  jina-reader:
+    # Remote MCP for reading COMPLEX/JS-rendered pages where the keyless `fetch`
+    # (static httpx + readability) falls short: Jina renders the page in a headless
+    # browser and returns clean, LLM-ready markdown. Streamable HTTP at /v1; the
+    # Bearer token (`JINA_API_KEY`, env NAME only) is OPTIONAL for read_url —
+    # without it the harness connects anonymously and read_url still works at a
+    # lower (rate-limited) quota; search_web requires the key. Jina is generally
+    # reachable from mainland China directly (no proxy needed) for read_url. All
+    # tools are read-only network reads -> `safe`. Note: search_web has had
+    # occasional upstream "Unauthorized" regressions (read_url unaffected).
+    description: >-
+      Jina Reader (remote MCP) — renders JS in a headless browser and returns clean
+      LLM-ready markdown, far stronger than fetch on complex/SPA pages. read_url
+      works keyless (rate-limited); set JINA_API_KEY for higher limits. Also exposes
+      search_web (key required) as a bonus.
+    transport: remote
+    url: https://mcp.jina.ai/v1
+    auth_env: JINA_API_KEY
+    source: https://github.com/jina-ai/MCP
+    updated: "2026-06-16"
+    tools:
+      # Read-only network reads -> safe (offered to plan/ask too). Other discovered
+      # Jina tools (search_arxiv / expand_query / ...) default to high (fail-safe).
+      - {name: read_url, risk: safe, default_enabled: true}
+      - {name: parallel_read_url, risk: safe, default_enabled: true}
+      - {name: search_web, risk: safe, default_enabled: true}
+
   time:
     description: Current time and timezone conversion utilities.
     transport: stdio

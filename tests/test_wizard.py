@@ -65,14 +65,17 @@ def test_meta_lists_paradigms_and_catalog(client):
 
 
 def test_meta_catalog_curates_order_defaults_and_hides_niche(client):
-    """The wizard surfaces a curated subset, fetch/web-search/git first and
-    desktop-commander last; github (needs token) and time (niche) are hidden.
+    """The wizard surfaces a curated subset: fetch/web-search/git first,
+    desktop-commander next, then the key-based upgrades bocha / jina-reader LAST
+    and default-UNCHECKED; github (needs token) and time (niche) are hidden.
     web-search is the default web search (keyless multi-engine; ddg-search is the
     catalog-only uvx fallback). Desktop Commander is checked by default (Slice 11)
-    — HITL-gated."""
+    — HITL-gated; Bocha/Jina are opt-in supplements (Bocha's key is mandatory)."""
     catalog = client.get("/meta").json()["catalog"]
     names = [s["name"] for s in catalog]
-    assert names == ["fetch", "web-search", "git", "desktop-commander"]
+    assert names == [
+        "fetch", "web-search", "git", "desktop-commander", "bocha", "jina-reader"
+    ]
     assert "github" not in names and "time" not in names
     checked = {s["name"] for s in catalog if s["default_checked"]}
     assert checked == {"fetch", "web-search", "git", "desktop-commander"}
@@ -179,6 +182,20 @@ def test_spec_unknown_catalog_server_rejected(client):
     r = client.post("/spec", json={"spec": _valid_spec(), "mcp_servers": ["does-not-exist"]})
     assert r.status_code == 400
     assert any(e["loc"] == "mcp_servers" for e in r.json()["errors"])
+
+
+def test_spec_appends_web_preference_only_for_upgrade_servers(client):
+    """Prefilling a key-based upgrade (Bocha / Jina) appends the soft preference
+    hint to the product's seeded system prompt; a keyless-only selection leaves it
+    byte-identical to the default (no hint)."""
+    base = client.post(
+        "/spec", json={"spec": _valid_spec(), "mcp_servers": ["fetch", "web-search"]}
+    ).json()["yaml"]
+    assert "bocha_web_search" not in base  # no hint for a keyless-only selection
+    upgraded = client.post(
+        "/spec", json={"spec": _valid_spec(), "mcp_servers": ["web-search", "bocha"]}
+    ).json()["yaml"]
+    assert "bocha_web_search" in upgraded and "fall back to the keyless" in upgraded
 
 
 def test_language_threads_into_product_default(client):

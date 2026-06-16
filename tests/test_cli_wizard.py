@@ -16,7 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from harnessmith.cli_wizard import WizardAborted, build_spec, run_wizard
-from harnessmith.scaffold import DEFAULT_SYSTEM_PROMPT, slugify
+from harnessmith.scaffold import DEFAULT_SYSTEM_PROMPT, WEB_PREFERENCE_HINT, slugify
 
 
 @pytest.mark.parametrize(
@@ -81,6 +81,26 @@ def test_build_spec_resolves_mcp_servers_with_wizard_tool_defaults():
 def test_build_spec_ignores_servers_when_mcp_disabled():
     _, servers = build_spec({"display_name": "x", "mcp": False, "mcp_servers": ["fetch"]})
     assert servers == []
+
+
+def test_build_spec_appends_web_pref_when_upgrade_server_selected():
+    """Prefilling a key-based upgrade (Bocha / Jina) appends the soft preference
+    hint to the seeded system prompt — advisory, after the base prompt."""
+    spec, _ = build_spec(
+        {"display_name": "x", "mcp": True, "mcp_servers": ["web-search", "bocha"]}
+    )
+    assert spec.prompts.system != DEFAULT_SYSTEM_PROMPT
+    assert spec.prompts.system.startswith(DEFAULT_SYSTEM_PROMPT)
+    assert spec.prompts.system.endswith(WEB_PREFERENCE_HINT)
+
+
+def test_build_spec_no_web_pref_without_upgrade_server():
+    """No upgrade server -> system prompt stays byte-identical to the default
+    (the runtime fallback invariant holds for non-upgrade products)."""
+    spec, _ = build_spec(
+        {"display_name": "x", "mcp": True, "mcp_servers": ["fetch", "git"]}
+    )
+    assert spec.prompts.system == DEFAULT_SYSTEM_PROMPT
 
 
 def test_build_spec_rejects_invalid_slug():
