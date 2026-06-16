@@ -60,6 +60,10 @@
     html.dark .border-red-300 { border-color: #b91c1c !important; }
     html.dark .border-red-500 { border-color: #ef4444 !important; }
 
+    /* Per-turn header pins to the top of the chat while its turn streams; scrolling
+       up into an earlier turn lets that turn's header take over (pure CSS sticky, no
+       scroll JS). Declared here (not via a CDN utility) so the pin is guaranteed. */
+    .hf-turn-head { position: sticky; top: 0; z-index: 10; }
     /* Collapsible reasoning / tool blocks: hide the native triangle, drive a small
        chevron that rotates open. Used by the chat's thinking box + tool-call cards. */
     details.hf-block > summary { list-style: none; }
@@ -704,7 +708,7 @@
       const el = document.createElement("div");
       el.className = cls || "text-slate-700";
       el.textContent = text;
-      view.container.appendChild(el);
+      (view.body || view.container).appendChild(el);
       scrollChat(view);
       return el;
     }
@@ -735,7 +739,7 @@
       const body = document.createElement("div");
       body.className = "mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-slate-400";
       box.append(summary, body);
-      view.container.appendChild(box);
+      (view.body || view.container).appendChild(box);
       scrollChat(view);
       const started = Date.now();
       let hasText = false;
@@ -797,7 +801,7 @@
       resSec.cap.classList.add("hidden"); resSec.pre.classList.add("hidden");
       wrap.append(argsSec.cap, argsSec.pre, resSec.cap, resSec.pre);
       box.append(summary, wrap);
-      view.container.appendChild(box);
+      (view.body || view.container).appendChild(box);
       scrollChat(view);
       return {
         el: box,
@@ -814,37 +818,46 @@
     }
 
     // Live to-do panel (Cursor/Claude-style): instead of a fresh collapsed tool
-    // block per `write_todos` call, render ONE checklist for the turn that updates
-    // IN PLACE as the model ticks items off — completed items get a ✔ and a
+    // block per `write_todos` call, the turn's checklist lives in the turn's STICKY
+    // header (so it stays pinned with the question while the turn's output streams
+    // below). Collapsed by default to a one-line summary — "To-dos (1/4) · <active
+    // item>" — and a click expands the full list: completed items get a ✔ and a
     // strikethrough, the active one a pulsing ▸, the rest an empty box. The tool is
-    // stateless, so each call carries the FULL list in its arguments and the panel
-    // just mirrors it. `view.todoCard` is reset per turn (on `event: run`), so a
-    // new turn starts a fresh panel at the point its planning begins.
+    // stateless, so each call carries the FULL list and the panel just mirrors it,
+    // updating IN PLACE (the user's expand/collapse choice is preserved). Reset per
+    // turn by beginTurn, so each turn owns its own checklist.
     function renderTodos(view, argsStr) {
       let todos = [];
       try { todos = JSON.parse(argsStr || "{}").todos || []; } catch (_) { /* ignore */ }
       if (!Array.isArray(todos)) todos = [];
+      const host = view.turnHead || view.body || view.container;
       if (!view.todoCard || !view.todoCard.box.isConnected) {
-        const box = document.createElement("div");
-        box.className = "hf-block rounded-md border border-slate-200 bg-white px-3 py-2 text-sm";
-        const head = document.createElement("div");
-        head.className = "mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-500";
-        const icon = document.createElement("span"); icon.textContent = "✔";
-        const label = document.createElement("span");
-        head.append(icon, label);
+        const box = document.createElement("details");  // collapsed by default (no `open`)
+        box.className = "hf-block mt-1.5 border-t border-slate-200 pt-1.5 text-xs";
+        const summary = document.createElement("summary");
+        summary.className = "flex cursor-pointer select-none items-center gap-1.5 text-slate-500";
+        const chevron = document.createElement("span");
+        chevron.className = "hf-chevron text-slate-400"; chevron.textContent = "▸";
+        const icon = document.createElement("span");
+        icon.className = "text-emerald-600"; icon.textContent = "✔";
+        const summaryText = document.createElement("span");
+        summaryText.className = "min-w-0 flex-1 truncate";
+        summary.append(chevron, icon, summaryText);
         const list = document.createElement("ul");
-        list.className = "space-y-0.5";
-        box.append(head, list);
-        view.container.appendChild(box);
-        view.todoCard = { box, label, list };
+        list.className = "mt-1 space-y-0.5";
+        box.append(summary, list);
+        host.appendChild(box);
+        view.todoCard = { box, summaryText, list };
       }
-      const { label, list } = view.todoCard;
+      const { summaryText, list } = view.todoCard;
       list.innerHTML = "";
       let done = 0;
+      let active = "";  // the in-progress item drives the collapsed preview
       for (const item of todos) {
         const status = (item && item.status) || "pending";
         const content = (item && item.content) || "";
         if (status === "completed") done += 1;
+        if (status === "in_progress" && !active) active = content;
         const li = document.createElement("li");
         li.className = "flex items-start gap-2";
         const mark = document.createElement("span");
@@ -863,7 +876,11 @@
         li.append(mark, txt);
         list.appendChild(li);
       }
-      label.textContent = `${t("todos_label")} (${done}/${todos.length})`;
+      if (!active) {  // none in progress -> preview the next pending, else show it's done
+        const pending = todos.find((x) => ((x && x.status) || "pending") !== "completed");
+        active = pending ? (pending.content || "") : (todos.length ? "✓" : "");
+      }
+      summaryText.textContent = `${t("todos_label")} (${done}/${todos.length})` + (active ? ` · ${active}` : "");
       scrollChat(view);
     }
 
@@ -1030,7 +1047,7 @@
         bar.append(send, skip);
         card.appendChild(bar);
       }
-      view.container.appendChild(card);
+      (view.body || view.container).appendChild(card);
       scrollChat(view);
       view.pendingAsk = true;  // amber dot in the sidebar while an answer is awaited
       renderSessionList();
@@ -1116,6 +1133,8 @@
         key: sessionId || ("draft-" + (++viewSeq)),
         sessionId: sessionId || null,  // null until the server mints one (session event)
         container,
+        body: null,        // the current turn's body (set by beginTurn)
+        turnHead: null,    // the current turn's sticky header (hosts the to-do panel)
         title: "",
         preview: "",       // first sent message (labels a not-yet-saved live row)
         es: null,          // open EventSource while streaming
@@ -1362,23 +1381,42 @@
     // A replayed user message + an inline "edit" control (re-ask). `turn` is the
     // user-turn ordinal; clicking edit turns the line into a textarea, then an
     // in-page confirm ("discards the rest"), then regenerates from that turn.
-    function addUserLine(view, text, turn) {
+    // Start a conversation turn: a <section> whose header (the user's question +
+    // this turn's to-do panel) is STICKY, so it pins to the top of the chat while
+    // the turn's output streams into its body below — and scrolling up into an
+    // EARLIER turn swaps in that turn's header automatically (pure CSS sticky: each
+    // section bounds its own header, no scroll listener). `view.body` /
+    // `view.turnHead` point at the CURRENT turn so every append (text, reasoning,
+    // tool blocks, to-dos) lands in the right place.
+    function beginTurn(view, text, opts) {
+      opts = opts || {};
+      const section = document.createElement("section");
+      section.className = "hf-turn space-y-2";
+      const head = document.createElement("div");
+      head.className = "hf-turn-head sticky top-0 z-10 mb-1 rounded-md border border-slate-200 bg-white px-3 py-2 shadow-sm";
       const row = document.createElement("div");
       row.className = "flex items-start gap-2 font-semibold";
       const span = document.createElement("div");
       span.className = "min-w-0 flex-1 whitespace-pre-wrap";
-      span.textContent = "you: " + text;
+      span.textContent = (opts.mode ? "you (" + opts.mode + "): " : "you: ") + text;
       row.appendChild(span);
-      if (view.sessionId && turn >= 0 && !view.streaming) {
+      if (opts.reaskable && view.sessionId && opts.turn >= 0 && !view.streaming) {
         const edit = document.createElement("button");
         edit.type = "button";
         edit.className = "shrink-0 text-xs font-normal text-slate-400 hover:text-slate-700";
         edit.textContent = "✎";
         edit.title = t("reask_edit");
-        edit.addEventListener("click", () => beginReask(view, row, turn, text));
+        edit.addEventListener("click", () => beginReask(view, row, opts.turn, text));
         row.appendChild(edit);
       }
-      view.container.appendChild(row);
+      head.appendChild(row);
+      const body = document.createElement("div");
+      body.className = "hf-turn-body space-y-2";
+      section.append(head, body);
+      view.container.appendChild(section);
+      view.body = body;            // route this turn's output here
+      view.turnHead = head;        // the to-do panel mounts here (pinned)
+      view.todoCard = null;        // fresh per turn
       scrollChat(view);
       return row;
     }
@@ -1390,12 +1428,12 @@
     // from the matching `tool` message (by tool_call_id).
     function renderHistory(view, messages) {
       view.container.innerHTML = "";
-      view.todoCard = null;  // rebuilt from the body's write_todos calls below
+      view.body = null; view.turnHead = null; view.todoCard = null;  // turns rebuilt below
       let turn = -1;
       const toolMap = {};  // tool_call_id -> tool block awaiting its result
       const todoCallIds = new Set();  // write_todos calls: shown as the live panel, not a tool block
       for (const m of messages || []) {
-        if (m.role === "user") { turn += 1; addUserLine(view, m.content || "", turn); view.todoCard = null; }
+        if (m.role === "user") { turn += 1; beginTurn(view, m.content || "", { turn, reaskable: true }); }
         else if (m.role === "assistant") {
           const reasoning = m.reasoning_content || m.reasoning_display;
           if (reasoning) { const rb = reasoningBox(view); rb.append(reasoning); rb.finishReload(); }
@@ -1554,7 +1592,7 @@
       if (!view || view.streaming) return;
       const mode = (opts.mode != null) ? opts.mode : $("mode").value;
       const stream = streamEnabled();  // System tab toggle (default enabled)
-      line(view, "you" + (mode ? " (" + mode + ")" : "") + ": " + message, "font-semibold");
+      beginTurn(view, message, { mode });  // pinned turn header (question + to-dos); reask comes on reload
       if (!view.preview) view.preview = message;  // labels a not-yet-saved live row
 
       let answer = null;        // the live answer text element (null until first token)
@@ -1597,7 +1635,6 @@
         const d = JSON.parse(ev.data);
         view.runId = d.run_id;  // enable Stop for this run
         view.ctxWindow = d.context_window || null;  // generation profile's window (may be unset)
-        view.todoCard = null;  // a new turn starts a fresh to-do panel (updated in place after)
       });
       es.addEventListener("step", (ev) => {
         const d = JSON.parse(ev.data);  // real prompt_tokens of the context just sent

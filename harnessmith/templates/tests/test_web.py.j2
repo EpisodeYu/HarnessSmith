@@ -120,6 +120,18 @@ def test_index_has_live_todo_panel():
     assert "todos_label" in body  # the panel has a header label
 
 
+def test_index_pins_turn_header_with_todos():
+    """Each turn is a section whose header (the question + its collapsed to-do
+    panel) is sticky, so it pins to the top while the turn streams and swaps to the
+    previous turn's header on scroll-up — and the to-do panel lives in that header."""
+    body = _client().get("/").text
+    assert "function beginTurn(" in body
+    assert "hf-turn-head" in body
+    assert "position: sticky" in body  # the pin is a real CSS rule, not a CDN-JIT class
+    assert "view.turnHead" in body  # the to-do panel mounts in the sticky header
+    assert "view.body" in body  # the turn's output is routed into its own body
+
+
 def test_index_new_profile_card_leaves_key_url_unmasked():
     """A just-added LLM profile must not pre-fill its key/url with the masked dots
     (the "already set in .env" sentinel) — those mislead on a fresh profile that
