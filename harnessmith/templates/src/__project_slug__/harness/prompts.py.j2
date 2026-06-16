@@ -82,7 +82,8 @@ def _environment_note(config: Config) -> str:
         lines.append(
             "These capabilities are installed but currently disabled (off by "
             "default — typically shell/file writes). If a task needs one, tell the "
-            "user to enable its tools in config.yaml (e.g. `<server>__<tool>: true`):"
+            "user to enable its tools in config.yaml (e.g. `<server>__<tool>: true`)"
+            "{% if interfaces.web %} or on the web UI's Config → Tools page{% endif %}:"
         )
         for server in dormant:
             desc = f" — {server.description}" if server.description else ""

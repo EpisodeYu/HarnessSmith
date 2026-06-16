@@ -231,6 +231,10 @@ def test_environment_note_surfaces_disabled_capabilities():
     assert "host OS is" in prompt  # OS/shell awareness for correct commands
     assert "- shellbox" in prompt and "Run shell commands." in prompt  # dormant surfaced
     assert "- git" not in prompt  # active server is not listed as disabled
+    assert "config.yaml" in prompt  # the enable route is always named
+{% if interfaces.web %}    assert "Config → Tools page" in prompt  # web users get the panel route too
+{% else %}    assert "Config → Tools" not in prompt  # no web UI -> only config.yaml is offered
+{% endif %}
 
 
 def test_windows_wraps_cmd_shim_for_stdio(monkeypatch):
