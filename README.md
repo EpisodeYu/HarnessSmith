@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
-![Version](https://img.shields.io/badge/version-0.1.0-informational.svg)
+[![PyPI version](https://img.shields.io/pypi/v/harnessmith.svg)](https://pypi.org/project/harnessmith/)
 
 **English** | [中文](#中文)
 
@@ -125,15 +125,21 @@ The generated `pyproject.toml` contains no agent-orchestration framework, and th
 
 ### Installation
 
-HarnessSmith v0.1.0 is a pre-release and is not yet published to PyPI. Run it from a clone:
+HarnessSmith is published on [PyPI](https://pypi.org/project/harnessmith/). With [uv](https://docs.astral.sh/uv/) you can run it without installing anything:
 
 ```bash
-git clone https://github.com/EpisodeYu/HarnessSmith.git
-cd HarnessSmith
-uv sync
+uvx harnessmith new my-agent --preset coding-assistant         # generate on demand
+uvx --from "harnessmith[wizard]" harnessmith wizard --open      # or launch the web wizard
 ```
 
-Once published, the same commands will work installation-free via `uvx harnessmith …`.
+Prefer a persistent install? Any of these work:
+
+```bash
+uv tool install harnessmith        # install the CLI with uv
+pip install harnessmith            # or with pip
+# from source (for development):
+git clone https://github.com/EpisodeYu/HarnessSmith.git && cd HarnessSmith && uv sync
+```
 
 ### Generating a harness
 
@@ -309,15 +315,21 @@ HarnessSmith 是 agent harness 的生成器,定位类似 `create-next-app`。通
 
 ### 安装
 
-HarnessSmith v0.1.0 为预发布版本,尚未发布到 PyPI,需从源码运行:
+HarnessSmith 已发布到 [PyPI](https://pypi.org/project/harnessmith/)。配合 [uv](https://docs.astral.sh/uv/) 可免安装直接运行:
 
 ```bash
-git clone https://github.com/EpisodeYu/HarnessSmith.git
-cd HarnessSmith
-uv sync
+uvx harnessmith new my-agent --preset coding-assistant         # 按需生成
+uvx --from "harnessmith[wizard]" harnessmith wizard --open      # 或启动 Web 向导
 ```
 
-发布到 PyPI 后,同样的命令可经 `uvx harnessmith …` 免安装使用。
+想要常驻安装,以下任选其一:
+
+```bash
+uv tool install harnessmith        # 用 uv 安装 CLI
+pip install harnessmith            # 或用 pip
+# 从源码(开发用):
+git clone https://github.com/EpisodeYu/HarnessSmith.git && cd HarnessSmith && uv sync
+```
 
 ### 生成 harness
 
