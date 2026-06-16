@@ -1398,7 +1398,7 @@
       row.className = "flex items-start gap-2 font-semibold";
       const span = document.createElement("div");
       span.className = "min-w-0 flex-1 whitespace-pre-wrap";
-      span.textContent = (opts.mode ? "you (" + opts.mode + "): " : "you: ") + text;
+      span.textContent = text;
       row.appendChild(span);
       if (opts.reaskable && view.sessionId && opts.turn >= 0 && !view.streaming) {
         const edit = document.createElement("button");
