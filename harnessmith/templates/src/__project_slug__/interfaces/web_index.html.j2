@@ -2780,14 +2780,27 @@
       document.querySelectorAll("#cfg-tools .tool-en").forEach((cb) => {
         if (!cb.closest("details")) pushCb(cb);  // local (custom/built-in) tool
       });
+      const renderedServers = new Set();  // MCP servers actually shown here (their checkboxes are authoritative)
       document.querySelectorAll("#cfg-tools details").forEach((d) => {
         const master = d.querySelector(".mcp-master");
         const cbs = Array.from(d.querySelectorAll(".tool-en"));
+        if (master && cbs.length) renderedServers.add(master.dataset.server);
         if (master && cbs.length && cbs.every((c) => c.checked)) {
           toolsOut.push({ name: master.dataset.server + "__*", enabled: true });
         } else {
           cbs.forEach(pushCb);
         }
+      });
+      // Carry over the allowlist entries of MCP servers NOT rendered this load (the
+      // Tools tab was never opened, or a server is still connecting with no tools
+      // yet), so a Save from another tab never silently drops a server's
+      // `<server>__*` wildcard / explicit entries — which would un-offer all of its
+      // tools to the model even though it's connected and discovered.
+      (cfg.tools || []).forEach((tl) => {
+        const sep = tl.name.indexOf("__");
+        if (sep <= 0) return;  // a local (no server prefix) tool — already taken from the DOM above
+        const server = tl.name.endsWith("__*") ? tl.name.slice(0, -3) : tl.name.slice(0, sep);
+        if (!renderedServers.has(server)) toolsOut.push({ name: tl.name, enabled: tl.enabled });
       });
       patch.tools = toolsOut;
       const prompts = {};

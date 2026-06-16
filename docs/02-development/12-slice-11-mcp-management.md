@@ -62,6 +62,14 @@
 - **warm/状态/超时三处兜底**:① warm 对 npm「仅 cleanup 警告致非零退出」按**已装成功**处理(`_node_satisfied` 为准,不看 exit code);② `status().log_tail` 让**实时自愈 note 优先于陈旧的 prefetch「ready」**,并在 prefetch 后写「connecting (MCP handshake)」标记,杜绝「显示 ready 但其实卡在握手」的误导;③ 握手超时的 `_connect_error` 提示补「若包已就绪仍超时,多半是该 server 往 stdout 写了非 JSON-RPC 文本(server 端 bug)」;④ 启动/warm 日志去 `…`,改 ASCII `...`(Windows 控制台不再乱码)。
 - **Node 安装跳过浏览器二进制下载(墙内必需)**:`npm install` Node 系包时,某些**传递依赖**的 postinstall 会从 Google CDN 拉 ~150MB Chrome(实测 `desktop-commander → md-to-pdf → puppeteer`)——墙内不可达,会让整个 `npm install` **退非零、包树残缺**,运行期 `node <bin>` 再因缺模块崩溃成 `McpError: Connection closed`。`_warm_one_server` 对 **Node 安装**(`_npx_package` 非空)注入 `PUPPETEER_SKIP_DOWNLOAD=true` / `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true`(老版名)/ `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`(`_NODE_INSTALL_SKIP_DOWNLOAD`,`setdefault` 不覆盖用户已设值),跳过下载让**安装与启动都过**;预填工具不需要内置浏览器(DC 的终端/文件工具、open-websearch 的 request 抓取都不依赖它,浏览器能力本就惰性加载)。uvx 安装不注入(npm 生态专用)。
 
+### 后续修复 · 保存配置不再静默抹掉 MCP allowlist(本次)
+
+> 现象(墙内实测,bug):新产物只配了 LLM、确认 MCP 全部连上、没动其它配置页,但模型拿不到任何 MCP 工具、系统提示反把它们列为「已禁用」,必须去 Tools 页手动勾选才好。根因不在连接、也不在生成期(生成的 `config.yaml` 确有 `<server>__*` 通配)——在产物 Web 前端 `web_index.html` 的 `collectConfig()`。
+
+- **根因**:`POST /config` 的 `tools`(allowlist)由前端 `collectConfig()` **从 DOM 整表重建后整体替换**。而 MCP 通配 `<server>__*` 在 Tools 页**未做 discover 扫描前根本不渲染成任何复选框/`details`**(`buildTools()` 把通配只收进 `wildServers`、显式跳过 `__*` 行)。于是用户**没先打开 Tools 页**就从 LLM(或任意非 Tools)页点保存时,`collectConfig()` 产出的 `tools` **只含内置工具**,通配被静默抹除并经 `save_config` 落盘——`mcp.servers` 仍在(照常连接、管理页显示已连),但 allowlist 空了,`active_names`/`_environment_note` 都判定这些 server「无启用工具」。这是把目标 ③「下发给 LLM 的工具集与 Tools 页所见严格一致」反向打穿的一条隐蔽路径(不同于既有退出门禁「LLM == 页面」只覆盖的「勾选新工具即生效」)。
+- **修复(`interfaces/web_index.html` · `collectConfig()`)**:DOM 只对**本次确实渲染了工具复选框**的 server 视为权威(记入 `renderedServers`,仅当该 `details` 有 `.tool-en` 复选框时计入);对**未渲染**的 server(Tools 页没开过,或还在连接、尚无工具),从 `cfg.tools`(上次 `GET /config` 的真相)**逐条回写**其 allowlist 条目(通配或显式),`<server>__*` 与显式 `<server>__<tool>` 都按 `__` 前缀归属到 server。既保留「整 server 全开折叠成单条通配」「取消勾选即收窄/停用」等既有交互,又杜绝「从别的页保存把通配冲掉」。附带改善:Tools 页开了但某 server **连接失败/仍在连(0 工具)** 时其通配也不再被「看一眼就丢」。
+- **验证**:浏览器实测复现(生成 web+4 MCP server 产物 → serve --mock → 仅在 LLM 页填 model 后保存 → 修复前 `config.yaml` 与 `/config` 的四条通配全失、Tools 页四个 server 显示 `0/N` 未勾选;修复后四条通配保留、Tools 页 `1/1`·`6/6`·`12/12`·`26/26` 全勾)。新增守卫测试 `test_web_config_save_preserves_undiscovered_mcp_allowlist`(断言 `collectConfig` 含 `renderedServers` 权威判定 + `!renderedServers.has(server)` 的 `cfg.tools` 回写);生成器全量快测 + 产物自带测试全绿。
+
 ## 2. 跨平台运行期健壮性(收敛在 `mcp.py` + 启动脚本)
 
 stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健壮性:

@@ -654,6 +654,38 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
     assert dc["args"] == ["--silent", "-y", "@wonderwhy-er/desktop-commander@0.2.42"]
 
 
+def test_web_config_save_preserves_undiscovered_mcp_allowlist(tmp_path, spec):
+    """Regression: a config Save from any tab must NOT wipe the MCP tool allowlist.
+
+    The Tools tab renders a server's tool checkboxes only AFTER a discover scan;
+    before that a server's prefilled ``<server>__*`` wildcard lives in config with
+    no checkbox to represent it. ``collectConfig`` rebuilds the WHOLE ``tools`` list
+    from the DOM and POSTs it, so without a carry-over a Save from the LLM (or any
+    non-Tools) tab — Tools never opened — would drop every MCP wildcard: the servers
+    stay configured and connect, but ZERO tools are offered to the model and the
+    system prompt reports them as "disabled". Guard that collectConfig (a) treats
+    the DOM as authoritative only for servers whose tools are actually rendered and
+    (b) carries over the allowlist entries of the rest from ``cfg.tools``.
+    """
+    spec.interfaces.web = True
+    spec.mcp.enabled = True
+    out = tmp_path / "save_keeps_mcp"
+    generate(spec, out, git_init=False)
+    idx = (out / "src" / "agent_harness" / "interfaces" / "web_index.html").read_text(
+        encoding="utf-8"
+    )
+    collect = idx.split("function collectConfig(", 1)[1].split("function configSnapshot", 1)[0]
+    # A fully-on MCP server still collapses to a single wildcard (unchanged behavior).
+    assert 'master.dataset.server + "__*"' in collect
+    # The DOM is authoritative ONLY for servers whose tools are shown this load …
+    assert "renderedServers" in collect
+    assert "if (master && cbs.length) renderedServers.add(master.dataset.server)" in collect
+    # … and every un-rendered server's allowlist entry is carried over from config,
+    # so a Save from another tab can't silently drop a `<server>__*` wildcard.
+    assert "(cfg.tools || [])" in collect
+    assert "!renderedServers.has(server)" in collect
+
+
 def test_mcp_prefill_servers_do_not_leak_into_spec_snapshot(tmp_path, preset_spec):
     """Servers are a runtime knob: they go to config.yaml, never the spec/snapshot."""
     out = tmp_path / "ca"
