@@ -52,12 +52,16 @@ def test_ddg_search_is_keyless_uvx_web_search():
 def test_fetch_is_a_safe_uvx_server():
     fetch = get_server("fetch")
     assert fetch.command == "uvx"
+    # uvx_package skips flags, so it still resolves to the package (for warm/Docker).
     assert fetch.uvx_package == "mcp-server-fetch"
     assert fetch.safe_tools == ["fetch"]
     entry = fetch.server_entry()
     assert entry["command"] == "uvx"
     assert entry["safe_tools"] == ["fetch"]
-    assert entry["args"] == ["mcp-server-fetch"]
+    # --ignore-robots-txt lets user-directed reads (e.g. the keyless r.jina.ai
+    # reader the web-reading skill uses) through; mcp-server-fetch otherwise honors
+    # robots.txt and refuses r.jina.ai (which Disallows `*`).
+    assert entry["args"] == ["mcp-server-fetch", "--ignore-robots-txt"]
 
 
 def test_git_reads_are_safe_writes_are_high():

@@ -24,13 +24,22 @@ version: 1
 
 servers:
   fetch:
-    description: Fetch a URL from the internet and extract its content as markdown.
+    # `--ignore-robots-txt`: by default mcp-server-fetch refuses any URL its
+    # robots.txt disallows for the autonomous user-agent. That blocks legitimate
+    # user-directed reads — notably the keyless `https://r.jina.ai/<url>` reader the
+    # web-reading skill relies on (r.jina.ai's robots allows only named live-fetch
+    # agents like ChatGPT-User and Disallows `*`). An agent harness fetching a
+    # single page on the user's behalf is not a crawler (threat model A: local,
+    # trusted), so we skip the robots gate; the server still sends its honest UA and
+    # r.jina.ai serves the content. Drop the flag if you want strict robots
+    # compliance (then the web-reading skill needs the keyed jina-reader MCP).
+    description: Fetch a URL from the internet and extract its content as markdown (robots.txt gate off for user-directed reads).
     transport: stdio
     command: uvx
-    args: [mcp-server-fetch]
+    args: [mcp-server-fetch, --ignore-robots-txt]
     requires: uv
     source: https://pypi.org/project/mcp-server-fetch/
-    updated: "2026-06-04"
+    updated: "2026-06-16"
     tools:
       - {name: fetch, risk: safe, default_enabled: true}
 
