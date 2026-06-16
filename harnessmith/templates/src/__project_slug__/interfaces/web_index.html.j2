@@ -387,6 +387,7 @@
         reasoning_thinking: "Thinking", reasoning_prefix: "Thought for", reasoning_sec: "s",
         reasoning_label: "Reasoning",
         tool_args_label: "arguments", tool_result_label: "result",
+        todos_label: "To-dos",
         session_rename: "Rename", session_delete: "Delete", session_cancel: "Cancel",
         reask_edit: "Edit this question", reask_send: "Resend",
         reask_warn: "This discards the conversation after this point.", reask_confirm: "Regenerate",
@@ -534,6 +535,7 @@
         reasoning_thinking: "思考中", reasoning_prefix: "已思考", reasoning_sec: " 秒",
         reasoning_label: "思考过程",
         tool_args_label: "参数", tool_result_label: "结果",
+        todos_label: "待办清单",
         session_rename: "重命名", session_delete: "删除", session_cancel: "取消",
         reask_edit: "编辑此问题", reask_send: "重新发送",
         reask_warn: "这会丢弃此处之后的对话。", reask_confirm: "重新生成",
@@ -809,6 +811,60 @@
           scrollChat(view);
         },
       };
+    }
+
+    // Live to-do panel (Cursor/Claude-style): instead of a fresh collapsed tool
+    // block per `write_todos` call, render ONE checklist for the turn that updates
+    // IN PLACE as the model ticks items off — completed items get a ✔ and a
+    // strikethrough, the active one a pulsing ▸, the rest an empty box. The tool is
+    // stateless, so each call carries the FULL list in its arguments and the panel
+    // just mirrors it. `view.todoCard` is reset per turn (on `event: run`), so a
+    // new turn starts a fresh panel at the point its planning begins.
+    function renderTodos(view, argsStr) {
+      let todos = [];
+      try { todos = JSON.parse(argsStr || "{}").todos || []; } catch (_) { /* ignore */ }
+      if (!Array.isArray(todos)) todos = [];
+      if (!view.todoCard || !view.todoCard.box.isConnected) {
+        const box = document.createElement("div");
+        box.className = "hf-block rounded-md border border-slate-200 bg-white px-3 py-2 text-sm";
+        const head = document.createElement("div");
+        head.className = "mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-500";
+        const icon = document.createElement("span"); icon.textContent = "✔";
+        const label = document.createElement("span");
+        head.append(icon, label);
+        const list = document.createElement("ul");
+        list.className = "space-y-0.5";
+        box.append(head, list);
+        view.container.appendChild(box);
+        view.todoCard = { box, label, list };
+      }
+      const { label, list } = view.todoCard;
+      list.innerHTML = "";
+      let done = 0;
+      for (const item of todos) {
+        const status = (item && item.status) || "pending";
+        const content = (item && item.content) || "";
+        if (status === "completed") done += 1;
+        const li = document.createElement("li");
+        li.className = "flex items-start gap-2";
+        const mark = document.createElement("span");
+        const txt = document.createElement("span");
+        txt.textContent = content;
+        if (status === "completed") {
+          mark.textContent = "✔"; mark.className = "shrink-0 text-emerald-600";
+          txt.className = "text-slate-400 line-through";
+        } else if (status === "in_progress") {
+          mark.textContent = "▸"; mark.className = "shrink-0 animate-pulse text-amber-600";
+          txt.className = "font-medium text-slate-800";
+        } else {
+          mark.textContent = "☐"; mark.className = "shrink-0 text-slate-400";
+          txt.className = "text-slate-600";
+        }
+        li.append(mark, txt);
+        list.appendChild(li);
+      }
+      label.textContent = `${t("todos_label")} (${done}/${todos.length})`;
+      scrollChat(view);
     }
 
     // Render the inline interaction card for an `event: ask` (a model
@@ -1334,10 +1390,12 @@
     // from the matching `tool` message (by tool_call_id).
     function renderHistory(view, messages) {
       view.container.innerHTML = "";
+      view.todoCard = null;  // rebuilt from the body's write_todos calls below
       let turn = -1;
       const toolMap = {};  // tool_call_id -> tool block awaiting its result
+      const todoCallIds = new Set();  // write_todos calls: shown as the live panel, not a tool block
       for (const m of messages || []) {
-        if (m.role === "user") { turn += 1; addUserLine(view, m.content || "", turn); }
+        if (m.role === "user") { turn += 1; addUserLine(view, m.content || "", turn); view.todoCard = null; }
         else if (m.role === "assistant") {
           const reasoning = m.reasoning_content || m.reasoning_display;
           if (reasoning) { const rb = reasoningBox(view); rb.append(reasoning); rb.finishReload(); }
@@ -1345,9 +1403,11 @@
           for (const call of m.tool_calls || []) {
             const fn = call.function || {};
             if (fn.name === "ask_question") continue;  // shown inline, not as a tool block
+            if (fn.name === "write_todos") { todoCallIds.add(call.id); renderTodos(view, fn.arguments || ""); continue; }
             toolMap[call.id] = toolBlock(view, fn.name || "", fn.arguments || "");
           }
         } else if (m.role === "tool") {
+          if (todoCallIds.has(m.tool_call_id)) continue;  // its panel is already rendered
           const tb = toolMap[m.tool_call_id];
           if (tb) tb.setResult(m.content || "");
           else line(view, "← " + (m.content || ""), "text-emerald-700");
@@ -1537,6 +1597,7 @@
         const d = JSON.parse(ev.data);
         view.runId = d.run_id;  // enable Stop for this run
         view.ctxWindow = d.context_window || null;  // generation profile's window (may be unset)
+        view.todoCard = null;  // a new turn starts a fresh to-do panel (updated in place after)
       });
       es.addEventListener("step", (ev) => {
         const d = JSON.parse(ev.data);  // real prompt_tokens of the context just sent
@@ -1584,12 +1645,14 @@
         const d = JSON.parse(ev.data);
         answer = null;  // close the current text run so the next one lands below this
         if (d.name === "ask_question") return;  // shown as the ask card instead
+        if (d.name === "write_todos") { renderTodos(view, d.arguments); return; }  // live checklist, not a tool block
         toolQueue.push(toolBlock(view, d.name, d.arguments));
       });
       es.addEventListener("tool_result", (ev) => {
         const d = JSON.parse(ev.data);
         answer = null;  // next streamed text gets a fresh line below the tool block
         if (d.name === "ask_question") return;  // the answer is already on the card
+        if (d.name === "write_todos") return;  // the panel already shows the list (from the call)
         const tb = toolQueue.shift();
         if (tb) tb.setResult(d.result);
         else line(view, "← " + d.name + ": " + d.result, "text-emerald-700");
@@ -2109,7 +2172,7 @@
     // from skills.py when enabled). Any other name without "__" is one YOU
     // registered — those sort to the very top. Only affects grouping, never
     // behavior; keep in sync if you rename a built-in.
-    const BUILTIN_TOOLS = new Set(["get_current_time", "calculator", "ask_question"{% if spec.skills.enabled %}, "read_skill"{% endif %}{% if spec.memory.enabled %}, "memory_read", "memory_append", "memory_write"{% endif %}]);
+    const BUILTIN_TOOLS = new Set(["get_current_time", "calculator", "ask_question", "write_todos"{% if spec.skills.enabled %}, "read_skill"{% endif %}{% if spec.memory.enabled %}, "memory_read", "memory_append", "memory_write"{% endif %}]);
     // Tools discovered from MCP servers (GET /mcp/discover), cached per page load so
     // a server's tools can be offered without hand-writing the allowlist. null =
     // not scanned yet; buildTools then falls back to whatever's already in config.

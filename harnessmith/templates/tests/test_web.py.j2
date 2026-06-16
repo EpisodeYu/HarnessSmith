@@ -103,9 +103,21 @@ def test_index_groups_tools_by_source():
     body = _client().get("/").text
     assert "function buildTools()" in body
     assert "BUILTIN_TOOLS" in body and "get_current_time" in body
+    assert '"write_todos"' in body  # the planning scratchpad groups under built-ins
     assert "tools_group_custom" in body  # user-registered tools sort to the top
     assert "<details" in body and 'indexOf("__")' in body  # MCP folded by server
     assert "tools_extend_hint" in body  # footnote: register + allowlist in config.yaml
+
+
+def test_index_has_live_todo_panel():
+    """write_todos renders as ONE in-place checklist (Cursor/Claude-style) that
+    ticks items off, not a fresh collapsed tool block per call."""
+    body = _client().get("/").text
+    assert "function renderTodos(" in body
+    # the tool_call handler special-cases write_todos into the live panel
+    assert 'd.name === "write_todos"' in body and "renderTodos(view, d.arguments)" in body
+    assert "line-through" in body  # completed items are struck through
+    assert "todos_label" in body  # the panel has a header label
 
 
 def test_index_new_profile_card_leaves_key_url_unmasked():
