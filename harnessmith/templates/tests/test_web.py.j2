@@ -546,6 +546,16 @@ def test_index_has_chat_toolbar_controls():
     assert "/fs/list" in body             # the picker fetches the browse endpoint
 
 
+def test_index_has_permission_policy_dropdown():
+    """The chat composer ships the three-tier HITL permission dropdown (always
+    ask / ask on risky / allow all) that mirrors config.confirm via /config."""
+    body = _client().get("/").text
+    assert 'id="confirm-policy"' in body
+    assert "function populateConfirmPolicy()" in body  # mirrors config.confirm
+    assert 'value="all"' in body and 'value="high"' in body and 'value="none"' in body
+    assert "confirm_all" in body and "confirm_high" in body and "confirm_none" in body
+
+
 def test_chat_disabled_sessions_emit_nothing(tmp_path):
     """sessions.enabled=false: no session event, empty listing, no files."""
     client = _session_client(tmp_path, enabled=False)
@@ -861,6 +871,25 @@ def test_config_post_round_trips_max_steps_and_tool_result_strategy():
     assert got["max_steps"] == 7
     assert got["context"]["tool_result_strategy"] == "head"
     assert got["context"]["max_tool_result_chars"] == 12345
+
+
+def test_config_get_exposes_confirm_policy():
+    """The HITL confirm policy must be readable via /config so the chat-bar
+    permission dropdown can show the current tier (it defaults to "none")."""
+    data = _client().get("/config").json()
+    assert "confirm" in data
+    assert data["confirm"] == "none"
+
+
+def test_config_post_round_trips_confirm_policy():
+    """The chat-bar permission dropdown edits config.confirm; each tier must
+    survive a /config round-trip and apply live for subsequent requests."""
+    client = _client()
+    for tier in ("all", "high", "none"):
+        resp = client.post("/config", json={"confirm": tier})
+        assert resp.status_code == 200
+        assert resp.json()["confirm"] == tier
+        assert client.get("/config").json()["confirm"] == tier
 
 
 def test_config_post_round_trips_profile_provider():
@@ -1613,6 +1642,91 @@ def test_hitl_tool_confirmation_round_trips_over_web(monkeypatch):
     rest = "".join(gen)
     assert "event: final" in rest
     assert "42" in rest  # calculator actually ran after the approval
+
+
+def test_confirm_all_policy_gates_even_a_safe_tool(monkeypatch):
+    """The "always ask" tier (config.confirm == "all") pauses on EVERY tool, even a
+    read-only one — proving the chat-bar permission dropdown's strictest tier maps
+    onto the existing confirm policy (the dropdown just edits config.confirm)."""
+    import json
+    import threading
+
+    import {{ project_slug }}.interfaces.web as webmod
+    from {{ project_slug }}.harness.config import Config
+    from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
+    from {{ project_slug }}.interfaces.web import _chat_events
+
+    class _Router:
+        def __init__(self, *a, **k):
+            pass
+
+        def client_for(self, role="generation"):
+            return MockLLM(script=[ScriptedCall("get_current_time", {}), "Done"])
+
+    monkeypatch.setattr(webmod, "ClientRouter", _Router)
+
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "get_current_time", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "confirm": "all",  # the dropdown's "always ask" tier
+    })
+    runs, pending, lock = {}, {}, threading.Lock()
+    gen = _chat_events(
+        "hi", config, mock=True, stream=False, runs=runs, pending=pending, lock=lock,
+        confirm_sessions={}, config_path=None,
+    )
+
+    run_id, ask = None, None
+    for frame in gen:
+        if "event: run" in frame and run_id is None:
+            run_id = json.loads(frame.split("data: ", 1)[1])["run_id"]
+        if "event: ask" in frame:
+            ask = json.loads(frame.split("data: ", 1)[1])
+            break
+    assert ask and ask["kind"] == "approval"
+    assert ask["context"]["tool"] == "get_current_time"  # a read-only tool, still gated
+
+    pending[run_id][ask["request_id"]].put({"option_ids": ["allow_once"], "text": None})
+    assert "event: final" in "".join(gen)
+
+
+def test_confirm_none_policy_runs_tools_without_approval(monkeypatch):
+    """The "allow all" tier (config.confirm == "none") never raises an approval —
+    a tool runs straight through with no `event: ask`."""
+    import threading
+
+    import {{ project_slug }}.interfaces.web as webmod
+    from {{ project_slug }}.harness.config import Config
+    from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
+    from {{ project_slug }}.interfaces.web import _chat_events
+
+    class _Router:
+        def __init__(self, *a, **k):
+            pass
+
+        def client_for(self, role="generation"):
+            return MockLLM(script=[ScriptedCall("get_current_time", {}), "Done"])
+
+    monkeypatch.setattr(webmod, "ClientRouter", _Router)
+
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "get_current_time", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "confirm": "none",  # the dropdown's "allow all" tier
+    })
+    runs, pending, lock = {}, {}, threading.Lock()
+    body = "".join(_chat_events(
+        "hi", config, mock=True, stream=False, runs=runs, pending=pending, lock=lock,
+        confirm_sessions={}, config_path=None,
+    ))
+    assert "event: ask" not in body
+    assert "event: tool_result" in body and "event: final" in body
 
 
 def test_index_has_ask_card_ui():

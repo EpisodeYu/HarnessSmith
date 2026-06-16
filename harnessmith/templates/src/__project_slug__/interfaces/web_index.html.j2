@@ -129,6 +129,12 @@
           <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <select id="mode" class="rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_mode_title" title="Loop paradigm"></select>
             <select id="gen-llm" class="rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_gen_title" title="Generator LLM (generation role)"></select>
+            <select id="confirm-policy" class="rounded-lg border px-2 py-1 text-sm" data-i18n-title="chat_confirm_title" title="Tool permission policy">
+              <option value="all" data-i18n="confirm_all">Always ask</option>
+              <option value="high" data-i18n="confirm_high">Ask on risky</option>
+              <option value="none" data-i18n="confirm_none">Allow all</option>
+              <option value="__custom__" data-i18n="confirm_custom" hidden>Custom</option>
+            </select>
             <label class="flex min-w-0 flex-1 items-center gap-1">
               <span class="shrink-0" data-i18n="chat_cwd_label">Folder</span>
               <input id="cwd" class="min-w-0 flex-1 rounded-lg border px-2 py-1 text-sm" data-i18n-ph="chat_cwd_ph" placeholder="Working directory (optional)" autocomplete="off" />
@@ -375,6 +381,9 @@
         nav_chat: "Chat", nav_config: "Config", chat_placeholder: "Type a message…",
         chat_send: "Send", chat_stop: "Stop", chat_mode_title: "Loop paradigm",
         chat_gen_title: "Generator LLM (the generation role; synced with Config → LLM)",
+        chat_confirm_title: "Tool permission policy",
+        confirm_all: "Always ask", confirm_high: "Ask on risky", confirm_none: "Allow all",
+        confirm_custom: "Custom",
         chat_cwd_label: "Folder", chat_cwd_ph: "Working directory (optional)",
         chat_cwd_browse: "Browse", chat_cwd_clear: "Clear",
         fs_title: "Choose a working directory", fs_up: "↑ Up",
@@ -523,6 +532,9 @@
         nav_chat: "对话", nav_config: "配置", chat_placeholder: "输入消息…",
         chat_send: "发送", chat_stop: "停止", chat_mode_title: "循环范式",
         chat_gen_title: "生成器 LLM(generation 角色;与 配置 → LLM 同步)",
+        chat_confirm_title: "工具权限策略",
+        confirm_all: "一律询问", confirm_high: "高危询问", confirm_none: "全部允许",
+        confirm_custom: "自定义",
         chat_cwd_label: "目录", chat_cwd_ph: "工作目录(可选)",
         chat_cwd_browse: "浏览", chat_cwd_clear: "清除",
         fs_title: "选择工作目录", fs_up: "↑ 上级",
@@ -1107,6 +1119,41 @@
           if (!$("view-config").classList.contains("hidden") && !dirty) {
             buildRoles(); markSaved();
           }
+        }
+      } catch (e) { /* keep the previous selection on failure */ }
+    });
+
+    // The permission dropdown mirrors the GLOBAL HITL policy (config.confirm), so
+    // picking a tier is the same as editing it on Config: none = allow every tool,
+    // high = confirm only risky (risk=high) tools, all = confirm every tool. A
+    // tool-name list (e.g. left by an "always allow" decision) can't be one tier, so
+    // it shows a read-only "Custom" placeholder instead of misrepresenting config.
+    function populateConfirmPolicy() {
+      const sel = $("confirm-policy");
+      if (!sel) return;
+      const raw = cfg ? cfg.confirm : undefined;
+      const custom = sel.querySelector('option[value="__custom__"]');
+      if (raw === "all" || raw === "high" || raw === "none") {
+        if (custom) custom.hidden = true;
+        sel.value = raw;
+      } else {
+        if (custom) custom.hidden = false;
+        sel.value = "__custom__";
+      }
+    }
+    // Changing the tier writes config.confirm back globally (POST /config replaces
+    // only the confirm key + persists to config.yaml); the next /chat run reads it.
+    $("confirm-policy").addEventListener("change", async () => {
+      const value = $("confirm-policy").value;
+      if (value === "__custom__") return;  // the placeholder isn't a real choice
+      try {
+        const resp = await fetch("/config", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm: value }),
+        });
+        if (resp.ok) {
+          cfg = await resp.json();
+          populateConfirmPolicy();
         }
       } catch (e) { /* keep the previous selection on failure */ }
     });
@@ -2892,6 +2939,7 @@
 {% endif %}      renderConfig();
       gateChat();
       populateGenerator();  // the chat generator dropdown mirrors roles.generation
+      populateConfirmPolicy();  // the chat permission dropdown mirrors config.confirm
       markSaved();  // the freshly rendered view is, by definition, the saved state
       $("cfg-status").textContent = "";
     }
@@ -3156,7 +3204,7 @@
         // Re-pull /registries so the "Registered in code" mirror reflects any
         // extension module that was just imported by the save.
         try { reg = await (await fetch("/registries")).json(); } catch (e) { /* keep last */ }
-        cfg = data; await loadRules(); await loadEnvStatus();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); populateGenerator(); markSaved();
+        cfg = data; await loadRules(); await loadEnvStatus();{% if spec.memory.enabled %} await loadMemory();{% endif %} renderConfig(); gateChat(); loadParadigms(); populateGenerator(); populateConfirmPolicy(); markSaved();
         $("cfg-status").textContent = ruleErr ? (t("cfg_saved") + ": " + ruleErr) : t("cfg_saved");
       } else { $("cfg-status").textContent = (data.error || t("cfg_invalid")); }
     });

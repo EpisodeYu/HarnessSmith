@@ -68,6 +68,12 @@ _INDEX_HTML = (Path(__file__).parent / "web_index.html").read_text(encoding="utf
 _EDITABLE_FIELDS = (
     "llms", "roles", "prompts", "tools", "context", "paradigms",
     "observability", "max_steps",
+    # HITL tool-confirmation policy (none/high/all, or a tool-name list). Behavioral,
+    # not structural — exposed here so the chat-bar permission dropdown can switch it
+    # live: none = allow every tool, high = confirm only risk=high tools, all = confirm
+    # every tool. The next /chat run reads app.state.config.confirm, so the change
+    # applies without a restart; POST persists it back to config.yaml like any field.
+    "confirm",
     # Runtime extension wiring. Editable here because /config is a LOCAL-TRUST
     # admin surface (same threat model as the MCP page, which can spawn local
     # commands): adding an `extensions` module imports arbitrary local code, so

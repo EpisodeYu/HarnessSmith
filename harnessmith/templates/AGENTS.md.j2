@@ -133,6 +133,10 @@ confirm: high            # none (default) | high | all | [list, of, tool, names]
   of the `confirm` policy in `config.yaml`, so it sticks across restarts).
 - **CLI**: a numbered prompt in the terminal. **Web**: an inline approval card
   (tool + arguments + a risk badge + the four buttons).
+- **Web** also surfaces the policy itself as a permission dropdown in the chat bar
+  (right of the model picker): **Always ask** (`all`) / **Ask on risky** (`high`) /
+  **Allow all** (`none`). Switching a tier writes `confirm` back to `config.yaml` and
+  takes effect on the next turn — the same knob as above, one click away.
 - **Non-interactive** (a pipe / CI / `--mock`) and a stopped or disconnected web run
   **reject by default** (fail-closed).
 

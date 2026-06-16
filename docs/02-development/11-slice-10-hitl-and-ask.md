@@ -42,6 +42,8 @@
 ### 1.4 前端结构化卡片(`web_index.html`,question/approval 共用一个组件)
 监听 `event: ask` → 在对话流里渲染卡片(`prompt` + 选项按钮 + 可选文本框 + 提交)→ `POST /chat/{run_id}/respond`。主题化、内联(不用 `window.confirm/prompt`)。答完坍缩成一行摘要(`❓ 问题 → 选中/自定义` / `🔒 …→ 决定`)随对话流上滚。approval 卡片额外展示工具名 + 参数预览 + 风险 pill。
 
+> **后续增强:Web 对话栏权限下拉(切档,非单次决定)**。在聊天栏模型选择框右侧加 `#confirm-policy` 三档下拉(一律询问 `all` / 高危询问 `high` / 全部允许 `none`),直接映射既有 `config.confirm`,不新增 schema 字段。切档即 `POST /config {confirm}`(`confirm` 已加入 web `_EDITABLE_FIELDS`),写回 `config.yaml` 并对下一轮 `/chat` 生效(`_chat_events` 实时读 `app.state.config.confirm`)。`confirm` 为工具名列表时下拉显示只读「自定义」占位,不强行归档。`populateConfirmPolicy()` 在 `loadConfig()` 与配置保存后同步回填。
+
 ## 2. 计划 A:ask_question 工具
 
 - **新增内置工具 `ask_question`**(`harness/tools.py`,`risk=safe`,始终注册 + 默认进 `config.yaml` allowlist):
