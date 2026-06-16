@@ -10,6 +10,32 @@ it, edit it, delete what you don't need — it's yours.
 
 ```bash
 uv sync                              # uv installs the right Python + an isolated venv
+```
+{% if interfaces.web %}
+**The web UI is the recommended way to use this harness** — token-by-token
+streaming chat plus a live `/config` panel. The CLI works just as well, but the
+web experience is richer. Try it offline first (no API key needed), opened in
+your browser:
+
+```bash
+uv run {{ project_slug }} serve --mock --open
+```
+
+To talk to a real model, add your key and drop `--mock`:
+
+```bash
+cp .env.example .env                 # then edit .env with your real key(s)
+uv run {{ project_slug }} serve --open
+```
+
+Prefer the terminal, or scripting it? The same harness runs from the CLI:
+
+```bash
+uv run {{ project_slug }} run --mock "hello"            # offline, no API key
+uv run {{ project_slug }} run "What time is it in UTC?"  # real model (after the .env step)
+```
+{% else %}
+```bash
 uv run {{ project_slug }} run --mock "hello"   # offline smoke run, no API key needed
 ```
 
@@ -19,6 +45,7 @@ To talk to a real model, add your key and drop `--mock`:
 cp .env.example .env                 # then edit .env with your real key(s)
 uv run {{ project_slug }} run "What time is it in UTC?"
 ```
+{% endif %}
 
 Don't want to edit files (or set Windows env vars)? Store the key with a hidden
 prompt instead — it writes to `.env` (gitignored) and is never printed or
