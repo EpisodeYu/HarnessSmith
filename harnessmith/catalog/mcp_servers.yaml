@@ -190,18 +190,19 @@ servers:
   jina-reader:
     # Remote MCP for reading COMPLEX/JS-rendered pages where the keyless `fetch`
     # (static httpx + readability) falls short: Jina renders the page in a headless
-    # browser and returns clean, LLM-ready markdown. Streamable HTTP at /v1; the
-    # Bearer token (`JINA_API_KEY`, env NAME only) is OPTIONAL for read_url —
-    # without it the harness connects anonymously and read_url still works at a
-    # lower (rate-limited) quota; search_web requires the key. Jina is generally
-    # reachable from mainland China directly (no proxy needed) for read_url. All
-    # tools are read-only network reads -> `safe`. Note: search_web has had
-    # occasional upstream "Unauthorized" regressions (read_url unaffected).
+    # browser and returns clean, LLM-ready markdown. Streamable HTTP at /v1.
+    # The `mcp.jina.ai` gateway REQUIRES the Bearer token (`JINA_API_KEY`, env NAME
+    # only) for EVERY tool: without it ALL calls — read_url INCLUDED — return HTTP
+    # 401 (verified). (The keyless reader is the raw `https://r.jina.ai/<url>`
+    # prefix, which this MCP does NOT use.) Get a free key at https://jina.ai. Jina
+    # is generally reachable from mainland China directly (no proxy needed). All
+    # tools are read-only network reads -> `safe`.
     description: >-
       Jina Reader (remote MCP) — renders JS in a headless browser and returns clean
-      LLM-ready markdown, far stronger than fetch on complex/SPA pages. read_url
-      works keyless (rate-limited); set JINA_API_KEY for higher limits. Also exposes
-      search_web (key required) as a bonus.
+      LLM-ready markdown, far stronger than fetch on complex/SPA pages. The
+      mcp.jina.ai gateway needs JINA_API_KEY for every tool (read_url included;
+      no key = HTTP 401) — get a free key at https://jina.ai. Also exposes
+      search_web and other read tools.
     transport: remote
     url: https://mcp.jina.ai/v1
     auth_env: JINA_API_KEY
