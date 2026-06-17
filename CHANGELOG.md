@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-17
+
 ### Added
 
 - Web chat: a 3-tier tool-permission dropdown in the chat bar.
@@ -42,5 +44,6 @@ Initial public release.
 - Optional modules (opt-in, leave no trace when off): FastAPI web interface with SSE chat and a paged bilingual `/config` panel, MCP client (stdio/HTTP/SSE) with a curated catalog, Agent Skills (`SKILL.md`), and cross-session memory.
 - Runnability: `uv.lock` + `.python-version`, Dockerfile + devcontainer, `requirements.txt` fallback, a mock-LLM test suite, and post-generation smoke verification.
 
-[Unreleased]: https://github.com/EpisodeYu/HarnessSmith/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/EpisodeYu/HarnessSmith/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/EpisodeYu/HarnessSmith/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/EpisodeYu/HarnessSmith/releases/tag/v0.1.0

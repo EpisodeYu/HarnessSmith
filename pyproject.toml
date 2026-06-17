@@ -1,6 +1,6 @@
 [project]
 name = "harnessmith"
-version = "0.1.0"
+version = "0.2.0"
 description = "Forge your own agent harness — a config-to-code generator with no agent-framework lock-in."
 readme = "README.md"
 requires-python = ">=3.11"
