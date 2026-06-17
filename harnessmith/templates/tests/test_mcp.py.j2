@@ -1159,6 +1159,75 @@ def test_auto_heal_respects_total_deadline(monkeypatch):
         mgr.close()
 
 
+def test_is_disconnect_classifies_transport_death_vs_tool_error():
+    """_is_disconnect fires for a dead transport (by type, ExceptionGroup leaf, or
+    message — the MCP SDK surfaces a closed session as a bare 'Connection closed')
+    but NOT for an ordinary error the tool itself raised (which must keep the session
+    alive — it came back as a result, not a transport failure)."""
+    assert mcp_module._is_disconnect(RuntimeError("Connection closed"))
+    assert mcp_module._is_disconnect(ConnectionError("reset by peer"))
+    assert mcp_module._is_disconnect(BrokenPipeError())
+    assert mcp_module._is_disconnect(
+        BaseExceptionGroup("g", [RuntimeError("the connection closed unexpectedly")])
+    )
+
+    class ClosedResourceError(Exception):  # an anyio stream-death type, matched by NAME
+        pass
+
+    assert mcp_module._is_disconnect(ClosedResourceError())
+    assert not mcp_module._is_disconnect(ValueError("bad argument"))
+    assert not mcp_module._is_disconnect(RuntimeError("tool failed: file not found"))
+
+
+def test_dead_session_reconnects_mid_run(monkeypatch):
+    """A tool call that dies with a transport-level error ('Connection closed') tears
+    the dead session down and reconnects on its own, instead of leaving a dead session
+    that fails EVERY later call until a manual reconnect. The failing call still
+    returns its error to the caller; the next call (after the heal) succeeds."""
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_BASE", 0.05)
+    monkeypatch.setattr(mcp_module.McpManager, "_BACKOFF_CAP", 0.05)
+    connects = {"n": 0}
+
+    async def fake_prefetch(self, server, errlog):
+        return None
+
+    class _DeadSession:  # serves one call, which dies with a closed transport
+        async def call_tool(self, name, arguments):
+            raise RuntimeError("Connection closed")
+
+    class _LiveSession:  # the reconnected, healthy session
+        async def call_tool(self, name, arguments):
+            return SimpleNamespace(content=[SimpleNamespace(text=f"ok:{name}")], isError=False)
+
+    async def fake_connect(self, stack, server, errlog=None):
+        connects["n"] += 1
+        # First connect serves a session that dies on use; the reconnect serves a
+        # healthy one — a one-off death that recovers (a killed-then-relaunched server).
+        self._sessions[server.name] = _DeadSession() if connects["n"] == 1 else _LiveSession()
+        self.discovered[server.name] = [SimpleNamespace(name="echo", description="", inputSchema={})]
+
+    monkeypatch.setattr(mcp_module.McpManager, "_prefetch", fake_prefetch)
+    monkeypatch.setattr(mcp_module.McpManager, "_connect", fake_connect)
+    mgr = mcp_module.McpManager(_dummy_cfg(connect_max_retries=5))
+    mgr.start()
+    try:
+        with pytest.raises(Exception) as excinfo:  # the dead call surfaces its error…
+            mgr.call("dummy", "echo", {})
+        assert "Connection closed" in str(excinfo.value)
+
+        def _try_call():  # …and once the manager reconnects, a later call succeeds
+            try:
+                return mgr.call("dummy", "echo", {}) == "ok:echo"
+            except Exception:
+                return False
+
+        assert _wait_until(_try_call), mgr.status()
+        assert connects["n"] >= 2  # it actually reconnected (not the original session)
+        assert mgr.errors.get("dummy") is None
+    finally:
+        mgr.close()
+
+
 def test_connect_error_explains_unreachable_and_cold_start(monkeypatch):
     """A stdio npx connect failure becomes a readable message: unreachable-registry
     advice when no source resolved, else a cold-download / `mcp warm` hint."""

@@ -543,6 +543,27 @@ def _exc_has(exc: BaseException, exc_type: type[BaseException]) -> bool:
     return False
 
 
+def _is_disconnect(exc: BaseException) -> bool:
+    """True when a tool call failed because the server's TRANSPORT died (its child
+    process exited / the stdio or HTTP stream closed), as opposed to the tool itself
+    returning an error (that comes back as an ``isError`` result, never an exception).
+
+    A dead session can't serve any further call, so the owning task tears it down and
+    reconnects rather than routing every later call into it (see
+    :meth:`McpManager._run_server`). Detected by exception type, ExceptionGroup leaf,
+    AND message — so it needs no hard ``anyio`` import and still fires when the SDK
+    wraps the cause in a TaskGroup or only carries the reason in the text (the MCP
+    SDK surfaces a closed session as a bare ``Connection closed``)."""
+    if isinstance(exc, (ConnectionError, EOFError, BrokenPipeError)):
+        return True
+    if isinstance(exc, BaseExceptionGroup):
+        return any(_is_disconnect(inner) for inner in exc.exceptions)
+    if type(exc).__name__ in {"ClosedResourceError", "BrokenResourceError", "EndOfStream"}:
+        return True
+    text = str(exc).lower()
+    return any(s in text for s in ("connection closed", "connection reset", "broken pipe", "peer closed"))
+
+
 class McpManager:
     """Owns one background event loop + the full MCP session lifecycle.
 
@@ -561,6 +582,10 @@ class McpManager:
     (npx/uvx) then a bounded HANDSHAKE; a failed connect auto-heals in the background
     with backoff, and ``on_connected`` (called with ``self`` on every successful
     connect) lets the owner re-sync its tool registry so healed tools reach the model.
+    A session that DIES mid-run (its transport drops — child process exited / stream
+    closed, surfaced as ``Connection closed``) heals through the SAME path: the failing
+    call returns its error, then the dead session is torn down and reconnected, so a
+    server that died once doesn't fail every later call until a manual reconnect.
     """
 
     _BACKOFF_BASE = 5.0  # auto-heal backoff: doubles each attempt …
@@ -738,6 +763,8 @@ class McpManager:
                     self._server_inboxes[name] = inbox
                     self.errors.pop(name, None)  # connected (or healed)
                     attempt = 0  # a clean connection resets the backoff
+                    heal_started = None  # …and the per-streak heal budget (a later
+                    # mid-session death starts a FRESH streak, not the old one's clock)
                     log.debug(
                         "mcp %s: connected in %.1fs (%d tools)",
                         name, time.monotonic() - self._connect_started[name],
@@ -766,6 +793,20 @@ class McpManager:
                             ))
                         except Exception as exc:
                             fut.set_exception(exc)
+                            if _is_disconnect(exc):
+                                # The transport DIED mid-session (child exited / stream
+                                # closed) — this session is unusable, so don't keep
+                                # routing later calls into a dead session (every one
+                                # would fail until a manual reconnect). Re-raise to fall
+                                # into the SAME auto-heal path as a connect failure
+                                # (teardown via the exit stack, then reconnect with
+                                # backoff, bounded by the heal deadline). The caller of
+                                # THIS call already has its error (fut set above).
+                                log.debug(
+                                    "mcp %s: transport died mid-call (%s) — reconnecting",
+                                    name, type(exc).__name__,
+                                )
+                                raise
             except asyncio.CancelledError:
                 raise  # reconnect/shutdown cancelled us — don't auto-heal, just exit
             except Exception as exc:  # connect failure/timeout: isolate, never fatal
