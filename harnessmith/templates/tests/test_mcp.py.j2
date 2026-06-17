@@ -1243,3 +1243,46 @@ def test_connect_error_explains_unreachable_and_cold_start(monkeypatch):
         server, group, {"npm_config_registry": mcp_module._NPM_OFFICIAL}
     )
     assert "mcp warm" in warm_hint
+
+
+@pytest.mark.parametrize(
+    "boom, expected_code",
+    [(RuntimeError("loop blew up"), 1), (KeyboardInterrupt(), 130)],
+)
+def test_cli_run_closes_mcp_manager_on_failure_paths(monkeypatch, boom, expected_code):
+    """`run` must release MCP stdio subprocesses on EVERY exit path: a turn that
+    raises (or is Ctrl-C'd into exit 130) still closes the manager, so a failed /
+    interrupted run never leaves an orphaned server that needs a manual kill.
+    Regression for the close() that used to sit after the try/except (skipped on
+    any error path) instead of in a finally — now it mirrors `chat`."""
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces import cli as cli_module
+
+    closed = {"n": 0}
+
+    class _FakeManager:
+        def close(self):
+            closed["n"] += 1
+
+    cfg = Config.model_validate(
+        {
+            "llms": [{"name": "default", "model": "m"}],
+            "roles": {"generation": "default"},
+            "observability": {"trace": False},
+            "sessions": {"enabled": False},  # keep the test off disk
+        }
+    )
+    monkeypatch.setattr(cli_module, "load_config", lambda path: cfg)
+    monkeypatch.setattr(cli_module, "_start_mcp", lambda config: _FakeManager())
+
+    def _boom(*args, **kwargs):
+        raise boom
+
+    monkeypatch.setattr(cli_module, "run_loop", _boom)
+
+    result = CliRunner().invoke(
+        cli_module.app, ["run", "--config", "ignored.yaml", "--mock", "hi"]
+    )
+    assert result.exit_code == expected_code
+    assert closed["n"] == 1  # closed despite the failure (no orphaned MCP subprocess)

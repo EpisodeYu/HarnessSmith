@@ -480,38 +480,43 @@ def run(
             typer.echo("")  # close any half-streamed line
         typer.secho(f"run failed: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
-    if printed:
-        typer.echo("")  # finish the streamed line
-    elif result.answer:
-        typer.echo(result.answer)  # non-stream, or an llm-budget stop notice
-    if sessions_cfg.enabled and session_id is not None:
-        status = "interrupted" if result.stop_reason == "interrupted" else "complete"
-        session_store.save(
-            session_id,
-            result.messages,
-            sessions_cfg.dir,
-            mode=result.mode,
-            status=status,
-            cwd=working_dir,
-        )
-{% if spec.memory.enabled %}    from ..harness.memory import record_turn
+    else:
+        if printed:
+            typer.echo("")  # finish the streamed line
+        elif result.answer:
+            typer.echo(result.answer)  # non-stream, or an llm-budget stop notice
+        if sessions_cfg.enabled and session_id is not None:
+            status = "interrupted" if result.stop_reason == "interrupted" else "complete"
+            session_store.save(
+                session_id,
+                result.messages,
+                sessions_cfg.dir,
+                mode=result.mode,
+                status=status,
+                cwd=working_dir,
+            )
+{% if spec.memory.enabled %}        from ..harness.memory import record_turn
 
-    record_turn(config, result.messages)
-{% endif %}    summary = (
-        f"[{result.mode}] [{result.stop_reason}] steps={result.steps} "
-        f"tokens={result.trace.total_tokens} cost=${result.trace.cost_usd:.4f}"
-    )
-    if session_id is not None:
-        summary += f" session={session_id}  (resume: run --resume {session_id})"
-    typer.secho(summary, fg=typer.colors.BRIGHT_BLACK)
-    if result.stop_reason == "interrupted":
-        typer.secho(
-            "stopped — send again, or `run --continue` / `--resume <id>`, to pick up "
-            "where you left off (the model sees what was already done).",
-            fg=typer.colors.YELLOW,
+        record_turn(config, result.messages)
+{% endif %}        summary = (
+            f"[{result.mode}] [{result.stop_reason}] steps={result.steps} "
+            f"tokens={result.trace.total_tokens} cost=${result.trace.cost_usd:.4f}"
         )
-{% if spec.mcp.enabled %}    if mcp_manager is not None:
-        mcp_manager.close()
+        if session_id is not None:
+            summary += f" session={session_id}  (resume: run --resume {session_id})"
+        typer.secho(summary, fg=typer.colors.BRIGHT_BLACK)
+        if result.stop_reason == "interrupted":
+            typer.secho(
+                "stopped — send again, or `run --continue` / `--resume <id>`, to pick up "
+                "where you left off (the model sees what was already done).",
+                fg=typer.colors.YELLOW,
+            )
+{% if spec.mcp.enabled %}    finally:
+        # Release MCP stdio subprocesses on EVERY exit path (success, error, or a
+        # Ctrl-C that raises) — mirror of `chat`'s finally — so an interrupted or
+        # failed turn never orphans a server that then needs a manual kill.
+        if mcp_manager is not None:
+            mcp_manager.close()
 {% endif %}
 @app.command()
 def chat(
