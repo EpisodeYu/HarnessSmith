@@ -522,6 +522,18 @@ def test_index_mcp_card_hint_decoupled_from_connection():
     flagged. The dot keeps reflecting only the connection itself."""
     body = _client().get("/").text
     assert "const needsSecret = !isNew && missingSecrets.length > 0;" in body
+
+
+def test_index_tools_page_explains_missing_key_connect_failure():
+    """A keyed stdio server that EXITS without its key fails to connect with an opaque
+    "Connection closed" — the Tools page must show the actionable "needs API key" hint
+    (not just hard-gated remotes) for any unconnected server with an unset declared
+    secret, and replace that raw transport error with the hint."""
+    body = _client().get("/").text
+    # the hint fires for an unconnected server with a missing secret, not only remotes
+    assert "const showKey = blocked || (miss.length > 0 && !connected.has(server))" in body
+    # the opaque transport error is suppressed when a missing key explains the failure
+    assert "err && !showKey" in body
 {% endif %}
 
 

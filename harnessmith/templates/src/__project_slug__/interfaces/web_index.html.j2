@@ -2334,6 +2334,7 @@
       const groups = new Map();  // server -> [{name, short, enabled, listed}]
       const errors = new Map();
       const connecting = new Set();  // servers still connecting (tools may arrive later)
+      const connected = new Set();  // servers currently connected (working)
       const needsAuth = new Set();  // servers withheld pending a key — tools greyed out
       const missingByServer = new Map();  // server -> declared-but-unset secret NAMES
       const seen = new Set();
@@ -2342,6 +2343,7 @@
           if (!groups.has(s.name)) groups.set(s.name, []);
           if (s.error) errors.set(s.name, s.error);
           if (s.connecting) connecting.add(s.name);
+          if (s.connected) connected.add(s.name);
           if (s.needs_auth) needsAuth.add(s.name);
           if (s.missing_secrets && s.missing_secrets.length) missingByServer.set(s.name, s.missing_secrets);
           (s.tools || []).forEach((tl) => {
@@ -2377,13 +2379,17 @@
         const conn = connecting.has(server)
           ? "<span class='text-xs text-amber-600 animate-pulse'>" + t("mcp_connecting") + "</span>"
           : "";
-        // Auth-gated server (a remote one whose required bearer is unset): its tools
-        // are withheld from the model, so grey them out + disable the checkboxes here
-        // and point at where to fix it, instead of letting the user "enable" tools
-        // that would only 401. Setting the key (MCP tab) + a reconnect lifts the gate.
-        const blocked = needsAuth.has(server);
+        const blocked = needsAuth.has(server);  // remote, unset bearer -> tools withheld
         const miss = missingByServer.get(server) || [];
-        const authHint = blocked
+        // Show the friendly "needs key" hint not only for a hard-gated remote, but for
+        // ANY server that isn't connected while a declared secret is unset — a missing
+        // key is the likely cause (e.g. a stdio server like bocha that EXITS at startup
+        // without its key -> raw "Connection closed"). A connected, working server is
+        // never nagged. When a missing key explains the failure, replace the opaque
+        // transport error with the actionable hint; a real, unrelated error resurfaces
+        // once the key is set + reconnected (miss empties).
+        const showKey = blocked || (miss.length > 0 && !connected.has(server));
+        const authHint = showKey
           ? "<span class='text-xs text-amber-600'>\u26a0 " + t("tools_needs_key") +
             (miss.length ? " <span class='font-mono'>" + esc(miss.join(", ")) + "</span>" : "") + "</span>"
           : "";
@@ -2396,7 +2402,7 @@
           "<span class='font-medium" + (blocked ? " opacity-50" : "") + "'>" + esc(server) + "</span> " +
           "<span class='text-xs text-slate-500'>(" + en + "/" + items.length + ")</span>" +
           conn + authHint +
-          (err ? "<span class='text-xs text-red-600'>" + esc(err) + "</span>" : "") +
+          (err && !showKey ? "<span class='text-xs text-red-600'>" + esc(err) + "</span>" : "") +
           "</summary><div class='space-y-1 px-2 pb-2 pl-4'>" + body + "</div></details>");
       }
       // Reflect each group's aggregate on its master checkbox: checked = all on,
@@ -2427,7 +2433,7 @@
         // Rebuild only when the discovered/connecting set changed, so a poll while
         // tools stream in doesn't wipe a checkbox you're mid-toggle on.
         const sig = JSON.stringify((data.servers || []).map(
-          (s) => [s.name, (s.tools || []).length, !!s.connecting, s.error || "", !!s.needs_auth]));
+          (s) => [s.name, (s.tools || []).length, !!s.connecting, !!s.connected, s.error || "", !!s.needs_auth, (s.missing_secrets || []).length]));
         if (sig !== mcpDiscSig) { mcpDiscSig = sig; buildTools(); }
         const n = (data.servers || []).reduce((a, s) => a + (s.tools || []).length, 0);
         status.textContent = data.pending
