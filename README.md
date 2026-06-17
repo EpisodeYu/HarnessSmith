@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/logo.png" alt="HarnessSmith" width="150">
+<img src="docs/assets/social-preview.png" alt="HarnessSmith" width="720">
 
 # HarnessSmith
 
