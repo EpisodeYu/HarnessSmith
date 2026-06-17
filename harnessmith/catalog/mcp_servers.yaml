@@ -97,7 +97,7 @@ servers:
       - {name: fetch_content, risk: safe, default_enabled: true}
 
   git:
-    description: Inspect and operate on local Git repositories (read tools on; write tools off).
+    description: Inspect and operate on local Git repositories (read tools safe; write tools like commit/reset/checkout are high-risk).
     transport: stdio
     command: uvx
     # No --repository pin on purpose: every git tool already takes a required
