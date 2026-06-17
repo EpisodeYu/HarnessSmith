@@ -25,14 +25,21 @@ A config-to-code generator that produces a standalone, framework-free agent harn
 
 ## Quick start
 
-No install required — [uv](https://docs.astral.sh/uv/) runs it on demand and provisions Python for you. Build a harness **from scratch** with the web wizard (recommended) or the interactive CLI wizard — both let you pick exactly the capabilities you want (paradigms, web UI, MCP, skills, memory) and generate a standalone, smoke-verified repo:
+Pick how to launch the setup wizard — either way you build a standalone, framework-free harness **from scratch** (you choose the capabilities: paradigms, web UI, MCP, skills, memory) that is smoke-verified before handover.
+
+**Clone the repo and run the one-click launcher** — cross-platform (Windows, macOS, Linux), nothing to memorize; double-clicking the file works too. It installs [uv](https://docs.astral.sh/uv/) on first use, then asks whether you want the web wizard (recommended) or the terminal wizard:
 
 ```bash
-# recommended: the web wizard — choose capabilities in the browser, it generates the repo for you
-uvx --from "harnessmith[wizard]" harnessmith wizard --open
+git clone https://github.com/EpisodeYu/HarnessSmith.git && cd HarnessSmith
+./HarnessSmith.sh     # macOS / Linux  — or double-click it
+HarnessSmith.bat      # Windows        — or double-click it
+```
 
-# or stay in the terminal: the interactive CLI wizard collects the same choices (great for headless servers)
-uvx harnessmith new
+**Or run it on demand with [uv](https://docs.astral.sh/uv/)** — no clone, nothing installed permanently:
+
+```bash
+uvx --from "harnessmith[wizard]" harnessmith wizard --open   # web wizard (recommended)
+uvx harnessmith new                                          # or the interactive CLI wizard
 ```
 
 Then start the project you just created and chat — set your model and key right in the web interface (recommended), or use the terminal:
@@ -298,14 +305,21 @@ Structural changes (adding or removing an interface or module) require regenerat
 
 ## 快速上手
 
-无需安装——[uv](https://docs.astral.sh/uv/) 会按需运行并自动准备 Python。用 Web 向导(推荐)或终端交互向导**从头**生成一套 harness——两者都让你自由勾选所需能力(范式、Web 界面、MCP、技能、记忆),并生成一个独立、已冒烟自检的仓库:
+选择启动配置向导的方式——两种都从头生成一套独立、无框架锁定的 harness(能力由你勾选:范式、Web 界面、MCP、技能、记忆),并在交付前完成冒烟自检。
+
+**克隆仓库并运行一键启动器**——跨平台(Windows、macOS、Linux),无需记命令,双击文件也能跑。它会在首次使用时安装 [uv](https://docs.astral.sh/uv/),随后询问你要 Web 向导(推荐)还是终端向导:
 
 ```bash
-# 推荐:Web 向导——在浏览器里勾选能力,自动为你生成仓库
-uvx --from "harnessmith[wizard]" harnessmith wizard --open
+git clone https://github.com/EpisodeYu/HarnessSmith.git && cd HarnessSmith
+./HarnessSmith.sh     # macOS / Linux  —— 或直接双击
+HarnessSmith.bat      # Windows        —— 或直接双击
+```
 
-# 或留在终端:终端交互向导采集同一组选择(适合无图形界面的服务器)
-uvx harnessmith new
+**或用 [uv](https://docs.astral.sh/uv/) 按需运行**——无需克隆,不留常驻安装:
+
+```bash
+uvx --from "harnessmith[wizard]" harnessmith wizard --open   # Web 向导(推荐)
+uvx harnessmith new                                          # 或终端交互向导
 ```
 
 随后启动刚生成的项目开始对话——在 Web 界面里直接配置模型与 key 并对话(推荐),或使用终端:
