@@ -6,7 +6,11 @@ network, or Docker. End-to-end runnability lives in ``test_golden.py``.
 
 from __future__ import annotations
 
+import os
 import py_compile
+import signal
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -1286,3 +1290,102 @@ def test_anthropic_profile_generates_client_dep_and_config(tmp_path, spec):
     assert reloaded.llms[-1].provider == "anthropic"
     # the default profile stays implicit (openai is never written out)
     assert "provider: openai" not in snapshot
+
+
+# --- prewarm hardening (#10): warm the uv cache without starting a serve loop ---
+
+
+def test_prewarm_uvx_argv_warms_without_running_the_server_entry():
+    """#10: warm via ``uvx --from <pkg> python -c ""`` — NOT ``<pkg> --help``, which
+    *runs* the entry point (a stdio server that ignores argv would start its serve
+    loop and block on stdin forever instead of printing help and exiting)."""
+    from harnessmith.generator import _prewarm_uvx_argv
+
+    assert _prewarm_uvx_argv("mcp-bocha-search") == [
+        "uvx", "--from", "mcp-bocha-search", "python", "-c", "",
+    ]
+    assert "--help" not in _prewarm_uvx_argv("mcp-server-fetch")
+
+
+def test_run_prewarm_does_not_hang_on_a_stdin_blocking_server():
+    """#10: a server that blocks reading stdin (the FastMCP serve-loop case) must not
+    wedge prewarm — stdin is DEVNULL, so it gets EOF at once and exits cleanly."""
+    from harnessmith.generator import _run_prewarm
+
+    started = time.monotonic()
+    # Would block forever on a real stdin pipe; DEVNULL makes read() return "" -> exit 0.
+    ok = _run_prewarm([sys.executable, "-c", "import sys; sys.stdin.read()"], timeout=30)
+    elapsed = time.monotonic() - started
+    assert ok is True
+    assert elapsed < 25  # returned promptly, nowhere near the timeout
+
+
+def test_run_prewarm_timeout_actually_bounds_a_blocking_call():
+    """#10: a server that blocks regardless of stdin is killed at the timeout. The old
+    ``subprocess.run(timeout=...)`` left it running and blocked in ``communicate()``."""
+    from harnessmith.generator import _run_prewarm
+
+    started = time.monotonic()
+    ok = _run_prewarm([sys.executable, "-c", "import time; time.sleep(60)"], timeout=1.0)
+    elapsed = time.monotonic() - started
+    assert ok is False
+    assert elapsed < 15  # the timeout fired and the call returned, not hung
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process-group kill is POSIX-only")
+def test_run_prewarm_kills_orphaned_grandchild_on_timeout(tmp_path):
+    """#10 root cause: ``uvx`` runs the warm command as a grandchild; killing only the
+    direct child orphaned it (and it kept the captured pipe open, wedging the parent).
+    The whole process group must die on timeout."""
+    from harnessmith.generator import _run_prewarm
+
+    pidfile = tmp_path / "grandchild.pid"
+    dummy = (
+        "import sys, subprocess, time\n"
+        "gc = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"open({str(pidfile)!r}, 'w').write(str(gc.pid))\n"
+        "time.sleep(60)\n"
+    )
+    assert _run_prewarm([sys.executable, "-c", dummy], timeout=2.0) is False
+
+    for _ in range(20):  # the grandchild pid is written almost immediately
+        if pidfile.exists():
+            break
+        time.sleep(0.1)
+    gc_pid = int(pidfile.read_text())
+    for _ in range(50):  # the grandchild must have died with its group, not survived
+        try:
+            os.kill(gc_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        try:
+            os.kill(gc_pid, signal.SIGKILL)  # don't leak a 60s sleeper if we fail
+        except ProcessLookupError:
+            pass
+        pytest.fail("orphaned grandchild survived the prewarm timeout")
+
+
+def test_prewarm_mcp_servers_warms_only_uvx_servers(monkeypatch):
+    """``prewarm_mcp_servers`` warms uvx-backed servers (returning their names) with
+    the safe argv and skips non-uvx ones, never raising."""
+    from harnessmith import generator
+    from harnessmith.catalog import CatalogServer
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, timeout):
+        calls.append(argv)
+        return True
+
+    monkeypatch.setattr(generator, "_run_prewarm", fake_run)
+
+    servers = [
+        CatalogServer(name="fetch", command="uvx", args=["mcp-server-fetch"]),
+        CatalogServer(name="node-thing", command="npx", args=["-y", "some-pkg"]),
+        CatalogServer(name="remote", transport="remote", url="https://x"),
+    ]
+    warmed = generator.prewarm_mcp_servers(servers)
+    assert warmed == ["fetch"]  # only the uvx server warmed
+    assert calls == [["uvx", "--from", "mcp-server-fetch", "python", "-c", ""]]

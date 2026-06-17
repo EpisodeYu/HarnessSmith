@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import socket
 import subprocess
 import time
@@ -445,33 +446,85 @@ def lock_dependencies(repo: str | Path) -> None:
 PREWARM_TIMEOUT_SECONDS = 120
 
 
+def _prewarm_uvx_argv(pkg: str) -> list[str]:
+    """Cache-warm command for a uvx package: build its ephemeral env, then exit via
+    a no-op ``python`` — deliberately NOT ``<pkg> --help``.
+
+    ``uvx <pkg> --help`` *runs the package entry point*; a stdio MCP server that
+    ignores argv (e.g. a FastMCP server that just calls ``server.run()``) launches
+    its serve loop and blocks on stdin forever instead of printing help and
+    exiting. ``--from <pkg> python -c ""`` downloads/builds the same env the
+    generated repo reuses at runtime but never touches the server entry (#10)."""
+    return ["uvx", "--from", pkg, "python", "-c", ""]
+
+
+def _terminate_process_group(proc: subprocess.Popen) -> None:
+    """Kill ``proc`` and any grandchildren it spawned. ``uvx`` runs the warm command
+    as a grandchild; killing only the direct child would orphan it (and on POSIX an
+    orphan holding a captured pipe wedges the parent), so kill the whole process
+    group started by ``start_new_session=True``."""
+    try:
+        if os.name != "nt":
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        else:
+            proc.kill()
+    except OSError:
+        proc.kill()  # already gone / no group — best effort
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _run_prewarm(argv: list[str], timeout: float) -> bool:
+    """Run a cache-warm ``argv`` hard-bounded by ``timeout``; True on a clean exit(0).
+
+    Robust against a misbehaving stdio server (#10): stdin/stdout/stderr all go to
+    DEVNULL so a stray serve loop gets EOF immediately (never blocks on stdin) and
+    can't hold a captured pipe open past the timeout; the child runs in its own
+    process group so a timeout kills the whole tree, not just the direct ``uvx``
+    child. ``subprocess.run(timeout=...)`` SIGKILLs only the direct child and then
+    blocks in ``communicate()`` reading the orphaned grandchild's pipes — which is
+    exactly the original indefinite hang."""
+    new_session: dict[str, bool] = {"start_new_session": True} if os.name != "nt" else {}
+    proc = subprocess.Popen(
+        argv,
+        cwd=Path.cwd(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=_clean_env(),
+        **new_session,
+    )
+    try:
+        return proc.wait(timeout=timeout) == 0
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(proc)
+        return False
+
+
 def prewarm_mcp_servers(servers: list[CatalogServer]) -> list[str]:
     """Warm the uv cache for uvx-based MCP servers so the first run is fast/offline.
 
-    Best-effort: ``uvx <pkg> --help`` downloads + builds the ephemeral environment
-    that the generated repo reuses at runtime (the same cache an offline ``uvx``
-    falls back to). Failures (no network, a server without ``--help``) are
-    swallowed — only successfully warmed names are returned — so scaffolding never
-    fails here. Node-based servers are skipped (need Node; warmed on first use).
-    """
+    Best-effort: ``uvx --from <pkg> python -c ""`` downloads + builds the ephemeral
+    environment that the generated repo reuses at runtime (the same cache an offline
+    ``uvx`` falls back to) without ever starting the server's serve loop. Failures
+    (no network, a timeout) are swallowed — only successfully warmed names are
+    returned — so scaffolding never fails here. Node-based servers are skipped (need
+    Node; warmed on first use)."""
     warmed: list[str] = []
     for server in servers:
         pkg = server.uvx_package
         if not pkg:
             continue
         try:
-            subprocess.run(
-                ["uvx", pkg, "--help"],
-                cwd=Path.cwd(),
-                check=True,
-                capture_output=True,
-                env=_clean_env(),
-                timeout=PREWARM_TIMEOUT_SECONDS,
-            )
-            warmed.append(server.name)
-        except (OSError, subprocess.SubprocessError) as exc:
+            if _run_prewarm(_prewarm_uvx_argv(pkg), PREWARM_TIMEOUT_SECONDS):
+                warmed.append(server.name)
+            else:
+                log.debug("prewarm: %s (%s) did not warm cleanly (timeout/non-zero)", server.name, pkg)
+        except OSError as exc:
             log.debug("prewarm: %s (%s) skipped: %s", server.name, pkg, type(exc).__name__)
-            continue  # offline / unavailable — non-fatal (first run still works online)
+            continue  # offline / launcher missing — non-fatal (first run still works online)
     log.debug("prewarm: warmed %s", warmed)
     return warmed
 
