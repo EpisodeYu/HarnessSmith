@@ -35,15 +35,12 @@ uvx --from "harnessmith[wizard]" harnessmith wizard --open
 uvx harnessmith new
 ```
 
-Then, from the project you just created, try one turn offline, then add a key and chat — in the browser (the recommended interface) or the terminal:
+Then start the project you just created and chat — set your model and key right in the web interface (recommended), or use the terminal:
 
 ```bash
-cd my-agent                                                                   # the name you chose
-uv run my-agent run "List the files here, then summarize the README" --mock   # offline, no key
-
-uv run my-agent set-key OPENAI_API_KEY   # add a real key (OpenAI-compatible or Anthropic)
-uv run my-agent serve --open             # recommended: web chat + /config panel in the browser
-uv run my-agent chat                     # optional: chat in the terminal
+cd my-agent                    # the name you chose
+uv run my-agent serve --open   # recommended: configure your model and chat, all in the browser
+uv run my-agent chat           # optional: chat in the terminal
 ```
 
 See [Getting started](#getting-started) for every option, including non-interactive generation from a hand-written spec.
@@ -311,15 +308,12 @@ uvx --from "harnessmith[wizard]" harnessmith wizard --open
 uvx harnessmith new
 ```
 
-随后进入刚生成的项目,先离线试跑一轮,再填入 key 开始对话——在浏览器里(推荐)或终端中:
+随后启动刚生成的项目开始对话——在 Web 界面里直接配置模型与 key 并对话(推荐),或使用终端:
 
 ```bash
-cd my-agent                                                  # 你填写的项目名
-uv run my-agent run "列出当前目录文件,然后总结 README" --mock   # 离线,无需 key
-
-uv run my-agent set-key OPENAI_API_KEY   # 接入真实 key(OpenAI 兼容或 Anthropic)
-uv run my-agent serve --open             # 推荐:在浏览器里 Web 聊天 + /config 面板
-uv run my-agent chat                     # 可选:在终端对话
+cd my-agent                    # 你填写的项目名
+uv run my-agent serve --open   # 推荐:在浏览器里配置模型与 key 并对话
+uv run my-agent chat           # 可选:在终端对话
 ```
 
 见[使用指南](#使用指南)了解全部方式,包括用手写 spec 非交互生成。
