@@ -1,14 +1,60 @@
+<div align="center">
+
+<img src="docs/assets/logo.png" alt="HarnessSmith" width="150">
+
 # HarnessSmith
 
-> **Forge your own agent harness.** A config-to-code generator that produces a standalone, framework-free agent harness you fully own — no LangChain, no LangGraph, no ADK, and no dependency on HarnessSmith after generation.
+**Forge your own agent harness.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
+A config-to-code generator that produces a standalone, framework-free agent harness you fully own — no LangChain, no LangGraph, no ADK, and no dependency on HarnessSmith after generation.
+
 [![PyPI version](https://img.shields.io/pypi/v/harnessmith.svg)](https://pypi.org/project/harnessmith/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/harnessmith.svg)](https://pypi.org/project/harnessmith/)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/EpisodeYu/HarnessSmith?style=flat&logo=github)](https://github.com/EpisodeYu/HarnessSmith/stargazers)
 
 **English** | [中文](#中文)
 
+</div>
+
 ---
+
+<!-- Demo: record the web chat (token streaming + tool-call panel) or a CLI run and drop a GIF here. -->
+<!-- <p align="center"><img src="docs/assets/demo.gif" alt="HarnessSmith demo" width="820"></p> -->
+
+## Quick start (60 seconds)
+
+No install required — [uv](https://docs.astral.sh/uv/) runs it on demand and provisions Python for you:
+
+```bash
+# 1. generate a complete, framework-free agent harness from a bundled preset
+uvx harnessmith new my-agent --preset coding-assistant
+cd my-agent
+
+# 2. try it offline with a mock LLM — no API key needed
+uv run my-agent run "List the files here, then summarize the README" --mock
+
+# 3. point it at a real model and chat (OpenAI-compatible or Anthropic)
+uv run my-agent set-key OPENAI_API_KEY
+uv run my-agent chat
+```
+
+Prefer a guided setup? Launch the web wizard with `uvx --from "harnessmith[wizard]" harnessmith wizard --open`, or see [Getting started](#getting-started) for every option.
+
+## Why HarnessSmith?
+
+Most "agent starters" hand you an app wired to a framework you cannot remove. HarnessSmith generates a repository that is **yours** — readable, editable, and free of any agent-orchestration framework.
+
+| | HarnessSmith | LangGraph scaffolds | ADK / static templates |
+|---|---|---|---|
+| Agent-framework lock-in | **None** — a plain Python loop you own | LangGraph runtime | ADK / mixed frameworks |
+| Edit or delete any line | **Yes** — self-contained repo | Limited — app sits on the framework | Limited |
+| Config-to-code (only selected capabilities are generated) | **Yes** | No — fixed template | No |
+| Core loop size | **~150–300 lines** | Abstracted by the framework | Abstracted by the framework |
+| Runtime dependency on the generator | **None** | Framework runtime | Framework runtime |
+| Tests + lockfile + Dockerfile, smoke-verified on generation | **Yes** | Varies | Varies |
+| Dual LLM protocol, switchable at runtime (OpenAI + Anthropic) | **Yes** | Varies | Varies |
 
 ## Overview
 
@@ -22,6 +68,11 @@ HarnessSmith is a generator for the agent harness, in the spirit of `create-next
 - **Thin by default.** The default product is a minimal, fully runnable harness whose core loop stays in the low hundreds of lines. Heavier capabilities (MCP, web interface, skills, memory) are opt-in spec toggles.
 
 ## Highlights
+
+<details>
+<summary><b>Full capability list</b> — click to expand</summary>
+
+<br>
 
 - **Native function calling** — the loop drives the model through the API's `tool_calls` (TAO/ReAct semantics), not through text parsing.
 - **Dual LLM protocol, runtime-switchable** — every product ships both an OpenAI Chat Completions client (provider-agnostic via `base_url`: vLLM, Together, Groq, LiteLLM, any compatible endpoint) and a native Anthropic Messages client. Each LLM profile selects its `provider` in runtime configuration; no regeneration required.
@@ -40,6 +91,8 @@ HarnessSmith is a generator for the agent harness, in the spirit of `create-next
 - **Always-applied project rules** — markdown rule files (`AGENTS.md` / `CLAUDE.md` / `.cursor/rules` conventions) injected into every system prompt.
 - **Full observability** — a JSONL trace per run with token/cost accounting, and an opt-in, local-only debug log that records lifecycle events (names, counts, durations) and never message content, tool arguments, or secrets.
 - **Verified runnable before handover** — the generator locks dependencies and smoke-tests every new repository (`uv sync`, import check, a mock function-calling turn, `pytest`) before declaring it ready.
+
+</details>
 
 ## What gets generated
 
@@ -217,11 +270,60 @@ Structural changes (adding or removing an interface or module) require regenerat
 
 ---
 
+<div align="center">
+
+<img src="docs/assets/logo.png" alt="HarnessSmith" width="150">
+
 # 中文
 
-> **锻造你自己的 agent harness。** 一个"配置即生成"的代码生成器,产出一套你完全拥有的独立 agent harness 代码仓库——不绑定任何 agent 编排框架(无 LangChain、LangGraph、ADK),生成后不再依赖 HarnessSmith。
+**锻造你自己的 agent harness。**
+
+一个"配置即生成"的代码生成器,产出一套你完全拥有的独立 agent harness 代码仓库——不绑定任何 agent 编排框架(无 LangChain、LangGraph、ADK),生成后不再依赖 HarnessSmith。
+
+[![PyPI version](https://img.shields.io/pypi/v/harnessmith.svg)](https://pypi.org/project/harnessmith/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/harnessmith.svg)](https://pypi.org/project/harnessmith/)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/EpisodeYu/HarnessSmith?style=flat&logo=github)](https://github.com/EpisodeYu/HarnessSmith/stargazers)
 
 [English](#harnessmith) | **中文**
+
+</div>
+
+---
+
+## 快速上手(60 秒)
+
+无需安装——[uv](https://docs.astral.sh/uv/) 会按需运行并自动准备 Python:
+
+```bash
+# 1. 用内置 preset 生成一个完整、无框架锁定的 agent harness
+uvx harnessmith new my-agent --preset coding-assistant
+cd my-agent
+
+# 2. 用 mock LLM 离线试跑——无需任何 API key
+uv run my-agent run "列出当前目录文件,然后总结 README" --mock
+
+# 3. 接入真实模型并对话(OpenAI 兼容或 Anthropic)
+uv run my-agent set-key OPENAI_API_KEY
+uv run my-agent chat
+```
+
+想要图形化引导?运行 `uvx --from "harnessmith[wizard]" harnessmith wizard --open` 启动 Web 向导,或见[使用指南](#使用指南)了解全部方式。
+
+## 为什么选 HarnessSmith?
+
+多数"agent 脚手架"给你的是一个绑死在某框架上、无法移除的应用。HarnessSmith 生成的是一个**属于你**的仓库——可读、可改、且不含任何 agent 编排框架。
+
+| | HarnessSmith | LangGraph 脚手架 | ADK / 静态模板 |
+|---|---|---|---|
+| agent 框架锁定 | **无**——属于你的纯 Python 循环 | LangGraph 运行时 | ADK / 多框架 |
+| 每一行都可改可删 | **可以**——自包含仓库 | 受限——应用建在框架之上 | 受限 |
+| 配置即生成(只生成选中的能力) | **是** | 否——固定模板 | 否 |
+| 核心循环体量 | **约 150–300 行** | 被框架抽象 | 被框架抽象 |
+| 生成后对生成器的运行期依赖 | **无** | 框架运行时 | 框架运行时 |
+| 自带测试 + 锁文件 + Dockerfile + 冒烟自检 | **是** | 视情况 | 视情况 |
+| 双 LLM 协议、运行期可切(OpenAI + Anthropic) | **是** | 视情况 | 视情况 |
 
 ## 概述
 
@@ -235,6 +337,11 @@ HarnessSmith 是 agent harness 的生成器,定位类似 `create-next-app`。通
 - **默认极薄。** 默认产物是最小但完整可跑的 harness,核心循环维持在数百行以内;较重的能力(MCP、Web 界面、技能、记忆)均为 spec 开关式可选项。
 
 ## 亮点
+
+<details>
+<summary><b>完整能力清单</b> —— 点击展开</summary>
+
+<br>
 
 - **原生 function calling** —— 循环通过 API 的 `tool_calls`(TAO/ReAct 语义)驱动模型,而非文本解析。
 - **双 LLM 协议,运行期可切** —— 每个产物同时内置 OpenAI Chat Completions 客户端(经 `base_url` 对接 vLLM、Together、Groq、LiteLLM 等任意兼容端点)与原生 Anthropic Messages 客户端;每个 LLM profile 在运行期配置中选择 `provider`,无需重新生成。
@@ -253,6 +360,8 @@ HarnessSmith 是 agent harness 的生成器,定位类似 `create-next-app`。通
 - **全局规则常驻注入** —— markdown 规则文件(`AGENTS.md` / `CLAUDE.md` / `.cursor/rules` 惯例)注入每轮系统提示。
 - **完整可观测性** —— 每次运行产出 JSONL trace 与 token/成本计数;可选的仅本地 debug 日志记录生命周期事件(名称、计数、耗时),绝不记录消息内容、工具参数或密钥。
 - **交付前验证可运行** —— 生成器锁定依赖并对每个新仓库执行冒烟验证(`uv sync`、import 检查、一次 mock function-calling、`pytest`),全绿才视为就绪。
+
+</details>
 
 ## 生成内容
 
