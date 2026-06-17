@@ -1078,7 +1078,16 @@ def create_app(
             return JSONResponse({"error": str(exc)}, status_code=400)
         config = app.state.config
         existed = any(s.name == server.name for s in config.mcp.servers)
-        config.mcp.servers = [s for s in config.mcp.servers if s.name != server.name] + [server]
+        # Editing an existing server replaces it IN PLACE; only a genuinely new one
+        # is appended. Re-appending on every edit would jump its card to the bottom
+        # of the management page on each save+reconnect — jarring once the user has
+        # arranged the servers in a stable reading order.
+        if existed:
+            config.mcp.servers = [
+                server if s.name == server.name else s for s in config.mcp.servers
+            ]
+        else:
+            config.mcp.servers = [*config.mcp.servers, server]
         persist = ["mcp"]
         # A newly added server defaults to its WHOLE toolset enabled — a
         # `<server>__*` wildcard, exactly like preset-prefilled servers — so its

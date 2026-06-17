@@ -107,6 +107,14 @@
 - **密钥红线不破**:`/mcp/*` 仍只回 env 名 + 布尔,值经 write-only `/env` 入 `.env`,门禁判定只用 `resolve_env` 的存在性,不回显真值。
 - **测试**:`test_mcp.py`(`test_auth_blocked_only_gates_remote_with_unset_bearer` / `test_register_withholds_auth_blocked_remote_tools`)、`test_web.py`(`test_mcp_status_decouples_auth_and_gates_only_remote` / `test_index_tools_page_greys_out_auth_gated_server` / `test_index_mcp_card_hint_decoupled_from_connection`)。大改动回归(动 mcp.py/web.py/cli.py/web_index.html + catalog,跨 ≥3 文件):生成器快测 218 + 全量 golden 13 + Docker 2 + `uvx` 冒烟全绿;产物 `uv sync` → 全量 `pytest` 317 全绿、mock 一步跑通、JS 语法校验 OK、pyproject 无 langchain/langgraph/adk、`ReadLints` clean。
 
+### 后续修复 · 编辑 MCP server 不再跳到列表末尾(本次)
+
+> 现象(实测,bug):在 MCP 管理页改某个 server 的配置后点保存(save + 热重连),该 server 的卡片会跳到列表**最下方**;一旦用户排好顺序,每次编辑都打乱阅读位置。
+
+- **根因**(`interfaces/web.py` · `upsert_mcp_server`):upsert 用「先按名过滤掉同名、再 `+ [server]` 追加」更新 `config.mcp.servers`,对**已存在**的 server 等于把它移到末尾;`/mcp/status` 按该顺序返回,前端 `buildMcp()` 照序渲染 → 卡片落到底部。
+- **修复**:已存在则**原位替换**(`server if s.name == server.name else s`),仅**新增**才追加末尾(`existed` 已算好直接复用)。卡片阅读顺序稳定,回写的 `config.yaml` 顺序也不再漂。
+- **测试**:`test_web.py::test_mcp_edit_server_keeps_its_position`(三个 server 改中间一个,断言返回顺序仍 `alpha/beta/gamma`)。生成 web+mcp 产物 → `uv sync` → 全量 `pytest` 321 全绿;生成器快测 218 全绿;`ReadLints` clean。
+
 ## 2. 跨平台运行期健壮性(收敛在 `mcp.py` + 启动脚本)
 
 stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健壮性:
@@ -127,6 +135,7 @@ stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健
 - SSE 传输:`transport` 校验 + `sse_client` 选择 + header 注入(无外网)。
 - 常驻 manager 唯一真相源:web 进程 manager 存 `app.state`、连全部 server、注册 allowlist 工具;`/mcp/status`/`/mcp/discover` 读它;`serve` 端口秒开(`_ensure_mcp_manager` 在 daemon 线程、早于 `uvicorn.run`)。
 - 热重连:`/mcp/servers`(增/删)→ 回写 `config.yaml`(注释保留)+ manager 重连 + registry 重同步;重连失败 server 标红不崩。单 server `reconnect_server` 只重连一个 + connecting 三态。
+- 编辑保位:`upsert_mcp_server` 对已存在 server **原位替换**(仅新增才追加末尾),管理页卡片顺序稳定、`config.yaml` 顺序不漂。测试 `test_mcp_edit_server_keeps_its_position`。
 - LLM == 页面:启用先前未注册的 MCP 工具 → 该工具进 registry/`active_names`。
 - 状态一致:Tools 页 / 管理页状态读 `/mcp/status`(同一常驻 manager);server 掉线即红。
 - 大复选框:server 主复选框全开/全关/部分三态 + 联动小框 + 回写 allowlist。

@@ -348,6 +348,32 @@ def test_mcp_edit_server_keeps_narrowed_allowlist():
     assert "dummy__*" not in names and "dummy__echo" in names  # narrowing preserved
 
 
+def test_mcp_edit_server_keeps_its_position():
+    """Editing an existing server replaces it IN PLACE — its card must keep its slot
+    in the management list instead of jumping to the bottom on every save+reconnect,
+    so the reading order stays stable once arranged."""
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [],
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "mcp": {"servers": [
+            {"name": "alpha", "command": sys.executable, "args": [_DUMMY]},
+            {"name": "beta", "command": sys.executable, "args": [_DUMMY]},
+            {"name": "gamma", "command": sys.executable, "args": [_DUMMY]},
+        ]},
+    })
+    client = TestClient(create_app(config, mock=True))
+    # Edit the MIDDLE server (change its args); order must be unchanged afterwards.
+    resp = client.post(
+        "/mcp/servers",
+        json={"name": "beta", "command": sys.executable, "args": [_DUMMY, "--noop"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert [s["name"] for s in resp.json()["servers"]] == ["alpha", "beta", "gamma"]
+
+
 def test_mcp_add_server_rejects_invalid_config():
     """A server with neither command nor url (or a bad transport) is a 400."""
     client = TestClient(create_app(_mcp_config(), mock=True))
