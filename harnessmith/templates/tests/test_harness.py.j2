@@ -723,6 +723,108 @@ def test_openai_complete_captures_reasoning_content():
     assert client.complete([], None).reasoning == "alt"  # falls back to `reasoning`
 
 
+# --- malformed (non Chat-Completions) response handling (#11) ----------------
+
+
+def _ok_completion():
+    """A minimal valid Chat-Completions response (``content`` only, no tool calls)."""
+    import types
+
+    msg = types.SimpleNamespace(content="ok", tool_calls=None)
+    return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)], usage=None)
+
+
+def test_complete_retries_then_raises_typed_error_on_list_response():
+    """#11: a top-level list (some OpenAI-compatible providers emit it intermittently)
+    is retried within ``max_retries`` and then surfaced as a clear typed error naming
+    the shape — never a raw ``'list' object has no attribute 'choices'``."""
+    import types
+
+    from {{ project_slug }}.harness.config import LLMProfileConfig
+    from {{ project_slug }}.harness.llm import MalformedLLMResponse, OpenAIClient
+
+    client = OpenAIClient(LLMProfileConfig(name="d", model="m", max_retries=2))
+    calls = {"n": 0}
+
+    def _create(**kw):
+        calls["n"] += 1
+        return ["not", "a", "completion"]  # a list has no .choices
+
+    client._client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=_create))
+    )
+    with pytest.raises(MalformedLLMResponse) as exc:
+        client.complete([], None)
+    assert calls["n"] == 3  # initial call + 2 retries (max_retries=2)
+    assert exc.value.shape == "list" and "list" in str(exc.value)
+
+
+def test_complete_recovers_when_a_retry_returns_a_valid_response():
+    """#11: an intermittent malformed response does not abort the run — the next
+    attempt's valid response is used (retried within ``max_retries``)."""
+    import types
+
+    from {{ project_slug }}.harness.config import LLMProfileConfig
+    from {{ project_slug }}.harness.llm import OpenAIClient
+
+    client = OpenAIClient(LLMProfileConfig(name="d", model="m", max_retries=2))
+    responses = iter([["malformed"], _ok_completion()])
+
+    client._client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=lambda **kw: next(responses))
+        )
+    )
+    assert client.complete([], None).content == "ok"  # recovered on the retry
+
+
+def test_complete_treats_empty_choices_as_malformed():
+    """#11: ``choices`` present but empty (no message) is malformed too, not a crash
+    on ``choices[0]``."""
+    import types
+
+    from {{ project_slug }}.harness.config import LLMProfileConfig
+    from {{ project_slug }}.harness.llm import MalformedLLMResponse, OpenAIClient
+
+    client = OpenAIClient(LLMProfileConfig(name="d", model="m", max_retries=0))
+    client._client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(
+                create=lambda **kw: types.SimpleNamespace(choices=[], usage=None)
+            )
+        )
+    )
+    with pytest.raises(MalformedLLMResponse):
+        client.complete([], None)
+
+
+def test_stream_raises_typed_error_and_closes_on_malformed_chunk():
+    """#11: a non-conformant stream chunk (e.g. a list) raises the typed error and
+    closes the HTTP stream instead of crashing on ``chunk.choices``."""
+    import types
+
+    from {{ project_slug }}.harness.config import LLMProfileConfig
+    from {{ project_slug }}.harness.llm import MalformedLLMResponse, OpenAIClient
+
+    closed = {"v": False}
+
+    class _Stream:
+        def __iter__(self):
+            return iter([["bad", "chunk"]])  # a list chunk has no .choices
+
+        def close(self):
+            closed["v"] = True
+
+    client = OpenAIClient(LLMProfileConfig(name="d", model="m"))
+    client._client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=lambda **kw: _Stream()))
+    )
+    with pytest.raises(MalformedLLMResponse) as exc:
+        client.stream([], None, on_delta=lambda _t: None)
+    assert closed["v"] is True  # the stream was closed, not left dangling
+    assert exc.value.shape == "list"
+
+
 def test_assistant_message_carries_reasoning_only_with_tool_calls():
     """The reasoning carrier rides a tool-calling assistant message (where reasoning
     endpoints require it); a plain answer message carries nothing extra."""

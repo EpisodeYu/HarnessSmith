@@ -40,6 +40,10 @@ API 报 `context_length_exceeded`（400）时，共享 `paradigms.generate()` �
 ### B4 usage 细分与计费精度
 `Usage` 加 `cached_prompt_tokens`/`reasoning_tokens`（OpenAI `prompt_tokens_details.cached_tokens`/`completion_tokens_details.reasoning_tokens`；Anthropic `cache_read_input_tokens`）+ `LLMProfileConfig.cached_input_cost_per_million`；`compute_cost` 缓存命中按缓存价计、**未设缓存价则按全价（不误降）**；trace 累计 cached 并在 `llm_response` 事件暴露。长会话 + 重复前缀正是 agent loop 常态，精度值得补。
 
+### B5 非 Chat-Completions 响应形状护栏（issue #11）
+- **问题（会真实 crash 的故障）**：部分 OpenAI 兼容端点**偶发**返回顶层 JSON 数组（`list`）而非 `{ "choices": [...] }`（实测 `mimo-v2.5-pro`，时而 step 0、时而 6 步后才现）。`OpenAIClient.complete`/`stream` 直接读 `resp.choices` / `chunk.choices`，对 `list` 抛裸 `AttributeError: 'list' object has no attribute 'choices'` 整轮中止——绕过了 B3 的 SDK `max_retries`（它只认在途 API 错误，而这条 HTTP 已成功返回）。
+- **实现**：`harness/llm.py` 加类型化异常 `MalformedLLMResponse(model, shape)`（携带实际形状名，信息可操作）。`complete()` 校验 `getattr(resp, "choices", None)`：非空才用，否则在本地按 `max_retries` 内重试（单次非流式调用无半输出，重发安全），耗尽再抛 `MalformedLLMResponse`；`stream()` 在 chunk 循环用 `hasattr(chunk, "choices")` 守卫，非法 chunk 关流并抛同一异常——尚未吐 delta 时由 B3 fallback 接管（流中途不重试，半输出语义）。薄守卫、无 provider 分支、零新增依赖。`choices` 存在但为空也按非法处理（不在 `choices[0]` 上崩）。
+
 ## 2.5 P0 · reasoning_content 多轮回传（思考模式 + 工具调用，默认能力）
 
 - **问题（会真实 400 的故障）**：产物把推理仅当作一次性「思考中」UX 提示——流式 `reasoning_content` 只喂 `on_thinking` 后丢弃、非流式不读，于是**带工具调用的 assistant 历史消息回传时缺 `reasoning_content`**。多家思考模型要求：思考模式下历史含工具调用时，后续回传的带 tool_calls 的 assistant **必须**完整带 `reasoning_content`，否则 **400**。Anthropic 原生同源：带 `tool_use` 的 assistant 必须以带 `signature` 的 thinking block 开头。单轮多步与跨轮 resume 都会踩中。

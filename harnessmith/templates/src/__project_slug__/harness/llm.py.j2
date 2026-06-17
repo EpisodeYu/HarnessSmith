@@ -77,6 +77,27 @@ def _usage_from_openai(raw: Any) -> Usage:
     )
 
 
+class MalformedLLMResponse(Exception):
+    """An OpenAI-compatible endpoint returned a payload that is not a
+    Chat-Completions object with usable ``choices``.
+
+    Some compatible providers intermittently emit a non-conformant top-level shape
+    (e.g. a JSON ``list``) where ``{ "choices": [...] }`` is expected; reading
+    ``.choices`` on it would raise an opaque ``AttributeError`` that aborts the run.
+    This carries the model and the actual shape so the surfaced error is actionable,
+    and is retried within ``max_retries`` (``complete``) / can fail over (``stream``)
+    before it is raised."""
+
+    def __init__(self, model: str, shape: str) -> None:
+        super().__init__(
+            f"LLM {model!r} returned a non Chat-Completions response "
+            f"(got {shape}, expected an object with .choices) — likely a transient "
+            "malformed provider response."
+        )
+        self.model = model
+        self.shape = shape
+
+
 class LLMClient(Protocol):
     """Anything that can turn messages (+tool schemas) into an LLMResponse.
 
@@ -136,6 +157,11 @@ class OpenAIClient:
         if profile.max_retries is not None:
             client_kwargs["max_retries"] = profile.max_retries
         self._client = OpenAI(**client_kwargs)
+        # Same bound the SDK applies to in-flight errors, reused for our own guard
+        # against a malformed (non Chat-Completions) response — the SDK can't retry
+        # that one because the HTTP call already succeeded (see ``complete``). The
+        # OpenAI SDK's own default is 2 when unset.
+        self._max_retries = profile.max_retries if profile.max_retries is not None else 2
         # Resolved env at a glance (booleans only, NEVER values): an UNSET key with no
         # base_url is the usual cause of a later opaque 401 — surface it at build time.
         log.debug(
@@ -231,16 +257,34 @@ class OpenAIClient:
             self.model, len(messages), len(tools or []),
         )
         started = time.monotonic()
-        try:
-            resp = self._client.chat.completions.create(**self._request_kwargs(messages, tools))
-        except Exception as exc:
+        kwargs = self._request_kwargs(messages, tools)
+        attempts = self._max_retries + 1
+        for attempt in range(attempts):
+            try:
+                resp = self._client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                log.debug(
+                    "llm complete FAILED after %.1fs: %s: %s",
+                    time.monotonic() - started, type(exc).__name__, exc,
+                )
+                raise
+            # A non-conformant payload (e.g. a top-level list some compatible
+            # providers intermittently return) has no usable ``.choices`` — reading
+            # ``resp.choices[0]`` would raise an opaque AttributeError. Retry within
+            # ``max_retries`` first: the SDK's own retry can't see this because the
+            # HTTP call already succeeded. A single non-streaming call carries no
+            # partial output, so re-issuing it is safe.
+            choices = getattr(resp, "choices", None)
+            if choices:
+                break
             log.debug(
-                "llm complete FAILED after %.1fs: %s: %s",
-                time.monotonic() - started, type(exc).__name__, exc,
+                "llm complete: non-conformant response shape=%s (attempt %d/%d)",
+                type(resp).__name__, attempt + 1, attempts,
             )
-            raise
+        else:
+            raise MalformedLLMResponse(self.model, type(resp).__name__)
         log.debug("llm complete: response in %.1fs", time.monotonic() - started)
-        message = resp.choices[0].message
+        message = choices[0].message
         calls = [
             ToolCall(id=tc.id, name=tc.function.name, arguments=tc.function.arguments)
             for tc in (message.tool_calls or [])
@@ -302,6 +346,14 @@ class OpenAIClient:
             if cancel is not None and cancel():
                 stream_obj.close()  # stop the model: close the HTTP stream and bail
                 break
+            # A non-conformant chunk (e.g. a top-level list some compatible providers
+            # intermittently emit) has neither ``.usage`` nor ``.choices`` — reading
+            # them would raise an opaque AttributeError. Surface a clear typed error
+            # instead; if nothing has streamed yet the reliability path can fail over
+            # (a mid-stream break is never retried — its partial output already showed).
+            if not hasattr(chunk, "choices"):
+                stream_obj.close()
+                raise MalformedLLMResponse(self.model, type(chunk).__name__)
             if chunk.usage is not None:
                 usage = _usage_from_openai(chunk.usage)
             if not chunk.choices:
