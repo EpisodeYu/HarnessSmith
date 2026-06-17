@@ -45,6 +45,34 @@ def _bearer_headers(server: McpServerConfig) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
+def missing_secrets(server: McpServerConfig) -> list[str]:
+    """The secret env-var NAMES a server declares (``auth_env`` + stdio ``env``) that
+    resolve to NO value in the process env / ``.env`` — i.e. the auth it says it needs
+    but doesn't have. NAMES only (they already live in config.yaml); never the values,
+    so this is safe to surface in a status payload or the CLI."""
+    from .config import resolve_env
+
+    names = ([server.auth_env] if server.auth_env else []) + list(server.env)
+    return [name for name in names if not resolve_env(name)]
+
+
+def auth_blocked(server: McpServerConfig) -> bool:
+    """True when a REMOTE server's required bearer (``auth_env``) is unset.
+
+    Such a gateway typically lets the client handshake ANONYMOUSLY (so the server
+    looks "connected") yet returns 401 on every actual tool call — so offering its
+    tools to the model is pointless and confusing. We therefore withhold them until
+    the key is set (see :func:`register_mcp_tools`). stdio servers are deliberately
+    NOT gated here: a child process that started is proof it runs without the key, and
+    any single tool that still needs one can surface its own error (the agent falls
+    back). So this gate is high-confidence — it fires only where a declared remote
+    ``auth_env`` is essentially always required.
+    """
+    from .config import resolve_env
+
+    return server.kind != "stdio" and bool(server.auth_env) and not resolve_env(server.auth_env)
+
+
 _WINDOWS_CMD_SHIMS = {"npx", "npm", "yarn", "pnpm"}
 _PYPI_OFFICIAL = "https://pypi.org/simple"
 _PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
@@ -1224,8 +1252,15 @@ def register_mcp_tools(
     registry = registry or default_registry
     allowed = config.enabled_tool_names()
     safe_by_server = {s.name: set(s.safe_tools) for s in config.mcp.servers}
+    # A remote server whose required bearer (`auth_env`) is unset connects but 401s
+    # every call — don't register its tools (the model would only get failing tools,
+    # and the Tools page greys them out to match). stdio is never gated: a running
+    # process proves it works without the key. See `auth_blocked`.
+    blocked = {s.name for s in config.mcp.servers if auth_blocked(s)}
     registered: list[str] = []
     for server, tools in manager.discovered.items():
+        if server in blocked:
+            continue
         safe = safe_by_server.get(server, set())
         for tool in tools:
             name = f"{server}__{tool.name}"

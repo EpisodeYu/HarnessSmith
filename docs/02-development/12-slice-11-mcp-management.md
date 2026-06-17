@@ -92,6 +92,21 @@
 - **密钥红线不破**:仍只读 `/env-status` 布尔、值经既有 write-only `/env` 入 `.env`,提示与展开均不碰真值。
 - **测试**:`test_web.py::test_index_flags_missing_mcp_key_and_keeps_auth_box_fillable`(提示 + 自动展开 + 轮询跳过编辑)。生成 web+mcp 产物 → `uv sync` → 全量 `pytest` 全绿、mock 一步跑通、pyproject 无 langchain/langgraph/adk。
 
+### 后续修复 · auth 状态与连接状态解耦(红绿只表 server 自身、未 auth 显式提示且工具门禁)(本次)
+
+> 现象(墙内实测,bug):带 auth 的 server 缺 key 时有两种割裂表现 ——(1)**bocha**(stdio `uvx mcp-bocha-search` + `env:[BOCHA_API_KEY]`)缺 key 时进程**启动即退出**,stdio 握手前被关 → 整 server **标红** `unhandled errors in a TaskGroup (1 sub-exception) (McpError: Connection closed)`,错误串完全不提「缺 key」;(2)**jina-reader**(remote `url` + `auth_env:JINA_API_KEY`)缺 key 时 `_bearer_headers` 返回空头**匿名连上**,网关允许 `initialize`/`list_tools`(握手成功)但每次 `call_tool` 回 401 → server **标绿**却一个工具都用不了。根因:红绿点完全由连接状态驱动,而「缺 key」提示当初被硬绑在 `!s.connected` 上(只覆盖 bocha 那种连不上),漏掉「连上但没 auth」;且后端/ Tools 页对 auth 全无概念,jina-reader 的工具经通配照常注册给 LLM → 调用即 401,把目标 ③「LLM == 页面」在这条路径打穿。
+
+口径修正:**红绿点 = MCP server 自身连接状态(可达/连上 vs 连不上),不代表能否使用**;**auth 是独立一条轴**,显式提示 + 对「未 auth 即不可用」的 server 做工具门禁。判定信号无需新增 schema/config 字段 —— 复用既有约定「密钥走 `auth_env`/`env`(名,解析自 `.env`),字面量非密钥走 `env_const`」,故「声明了 `auth_env`/`env` 名但 `.env` 未设值」即「缺 auth」。在当前 catalog 上 9/9 精确(命中 bocha/jina-reader/github,零误伤六个免 key)。
+
+- **`harness/mcp.py` 两个公共助手 + 注册门禁**:`missing_secrets(server)`(声明但未设的密钥名,**仅名**,两种传输/任何状态,纯提示用)、`auth_blocked(server)`(**硬门禁**,仅 `server.kind != "stdio"` 即 remote/`url` 且 `auth_env` 未设时为真)。`register_mcp_tools`/`sync_mcp_tools` **跳过 `auth_blocked` 的 server**——其工具不注册、不发给 LLM。**stdio 一律不硬扣**:进程能起来就是「无 key 也能跑」的证据,个别工具自己报错即可(与 bocha「回退 web-search」语义一致),避免误伤「可选 key」的自建 stdio server;remote 网关「匿名握手、调用必 401」决定了握手成功说明不了能用,而声明了 `auth_env` 基本即必需,故 remote 硬门禁高置信。
+- **`interfaces/web.py`**:`/mcp/status` 与 `/mcp/discover` 每 server 增 `missing_secrets`(名列表)+ `needs_auth`(= `auth_blocked`);**仅名不回值**,密钥红线不破。
+- **`interfaces/web_index.html` — 管理页提示解耦**:`mcpServerCard` 的 `needsSecret` 去掉 `!s.connected` 条件(`const needsSecret = !isNew && missingSecrets.length > 0`)——绿点的 jina-reader 也照样标黄「⚠ needs API key / auth — set: `<NAME>`」并自动展开 Auth 区;红绿点仍只反映连接本身。
+- **`interfaces/web_index.html` — Tools 页门禁**:`buildTools()` 据 `/mcp/discover` 的 `needs_auth` 把该 server 的**大复选框 + 工具复选框置灰禁用**(`toolRow(..., disabled)` + master `disabled`),并标「⚠ needs API key — set it in the MCP tab: `<NAME>`」(i18n `tools_needs_key`);`discoverMcp` 轮询签名纳入 `needs_auth`,设 key 重连后门禁自动解除。禁用的复选框仍保留真实 allowlist 态 → `collectConfig()` 原样回写,**不冲掉 `<server>__*` 通配**(设 key 后即自动可用)。
+- **`interfaces/cli.py` · `mcp status`**:红绿点不变(连接轴);`auth_blocked` 的 server 补黄字「needs auth — set: X (tools withheld until set)」,其余「声明未设」补软提示「note: secret(s) not set: X」。
+- **`catalog/mcp_servers.yaml`**:修 `bocha` 过时注释(实测缺 key 是**进程退出 / Connection closed 标红**,而非「仍连上、工具返回错误串」)。
+- **密钥红线不破**:`/mcp/*` 仍只回 env 名 + 布尔,值经 write-only `/env` 入 `.env`,门禁判定只用 `resolve_env` 的存在性,不回显真值。
+- **测试**:`test_mcp.py`(`test_auth_blocked_only_gates_remote_with_unset_bearer` / `test_register_withholds_auth_blocked_remote_tools`)、`test_web.py`(`test_mcp_status_decouples_auth_and_gates_only_remote` / `test_index_tools_page_greys_out_auth_gated_server` / `test_index_mcp_card_hint_decoupled_from_connection`)。大改动回归(动 mcp.py/web.py/cli.py/web_index.html + catalog,跨 ≥3 文件):生成器快测 218 + 全量 golden 13 + Docker 2 + `uvx` 冒烟全绿;产物 `uv sync` → 全量 `pytest` 317 全绿、mock 一步跑通、JS 语法校验 OK、pyproject 无 langchain/langgraph/adk、`ReadLints` clean。
+
 ## 2. 跨平台运行期健壮性(收敛在 `mcp.py` + 启动脚本)
 
 stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健壮性:
@@ -121,6 +136,7 @@ stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健
 - 两阶段 + 自愈:prefetch 先于 handshake;失败按 `connect_max_retries` 后台退避重试(amber→耗尽 red),成功经 `on_connected` 重同步 registry;`connect_max_retries=0` 快速失败不重试。
 - wizard DC 默认 + HITL:wizard 产物默认 DC 勾选 + `confirm: high`。
 - Web 访问增强:catalog 有 `bocha`(uvx + `env: [BOCHA_API_KEY]`,工具 safe)/ `jina-reader`(remote `url` + `auth_env: JINA_API_KEY`);向导二者末位 + 默认不勾;选中升级件→种子 `prompts.system` 含软偏好段、未选→字节一致;`--mcp-server bocha jina-reader` 落 config.yaml(两 server + 通配)+ `.env.example`(两 key 名,无值)。
+- auth 与连接解耦:红绿点只表 server 自身连接;`missing_secrets`/`needs_auth` 进 `/mcp/status`+`/mcp/discover`;管理页缺 key 提示不再要求 `!connected`(绿点的 jina-reader 也标黄);`auth_blocked`(仅 remote+未设 `auth_env`)的 server 工具**不注册给 LLM** + Tools 页置灰禁用;stdio 不硬扣;设 key 重连即解除。
 - 不泄密:`/mcp/status` 仅回 env 名;server 增删改只收 env 名;trace/日志不回显。
 - 关 MCP 零痕迹:`spec.mcp.enabled=false` 产物不含 `mcp.py`/MCP 标签/`/mcp/*`/`mcp` CLI 段。
 - 薄:`mcp.py` 仍单文件聚合、无新抽象层;`loop.py`/`active_names`/`call` 语义不变;`Registry` 仅加 `unregister`/`remove_where`。

@@ -176,9 +176,11 @@ servers:
     # multi-engine `web-search`, for in-GFW use. uvx-based (rides uv, no Node), so
     # it can be prewarmed + baked into the Docker image for offline connect. Both
     # tools are read-only network reads -> `safe` (plan/ask can search too). The
-    # key (`BOCHA_API_KEY`, env NAME only) is REQUIRED: without it the tools return
-    # an "API key is not configured" error rather than crashing, so the harness
-    # still connects and the agent falls back to the keyless `web-search`.
+    # key (`BOCHA_API_KEY`, env NAME only) is REQUIRED at STARTUP: without it the
+    # server process exits immediately and the stdio connection closes (the panel
+    # shows it RED with a "Connection closed" error) — the management page / `mcp
+    # status` additionally name BOCHA_API_KEY as the missing secret so the cause is
+    # obvious, and the agent falls back to the keyless `web-search`.
     description: >-
       China-compliant web search (Bocha) — key-based (needs BOCHA_API_KEY).
       Strong domestic coverage with LLM-ready summaries; data stays in-country.

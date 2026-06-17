@@ -497,6 +497,7 @@
         tools_scan: "Scan MCP", tools_scanning: "scanning servers…", tools_scanned: "discovered", tools_none: "no tools",
         tools_extend_hint: "Custom tools: register with @registry.tool in harness/tools.py and list the name under tools: in config.yaml. MCP tools are discovered from your servers (Scan); tick one to add it to the allowlist. Toggling applies live. See AGENTS.md.",
         tools_group_mcp_all: "all tools",
+        tools_needs_key: "needs API key — set it in the MCP tab:",
 {% if spec.mcp.enabled %}        mcp_reconnect: "Reconnect", mcp_add: "+ Add server", mcp_remove: "Remove", mcp_save: "Save",
         mcp_name: "name", mcp_transport: "transport", mcp_transport_auto: "auto",
         mcp_command: "command", mcp_args: "args (space-separated)", mcp_env: "env var names (comma-separated)",
@@ -649,6 +650,7 @@
         tools_scan: "扫描 MCP", tools_scanning: "正在连接服务器…", tools_scanned: "已发现", tools_none: "无工具",
         tools_extend_hint: "自定义工具:在 harness/tools.py 用 @registry.tool 注册,并在 config.yaml 的 tools 中列出名称。MCP 工具经扫描从服务器发现,勾选即加入 allowlist 并实时生效。详见 AGENTS.md。",
         tools_group_mcp_all: "全部工具",
+        tools_needs_key: "需要 API key,请在 MCP 页填写:",
 {% if spec.mcp.enabled %}        mcp_reconnect: "重新连接", mcp_add: "+ 添加服务器", mcp_remove: "删除", mcp_save: "保存",
         mcp_name: "名称", mcp_transport: "传输", mcp_transport_auto: "自动",
         mcp_command: "command", mcp_args: "args(空格分隔)", mcp_env: "env 变量名(逗号分隔)",
@@ -2294,10 +2296,10 @@
     // One tool checkbox. data-name + data-listed drive the save: a listed tool
     // round-trips (unchecking just disables it), a discovered-but-unlisted tool is
     // written only when you tick it (so config isn't bloated with every MCP tool).
-    function toolRow(name, short, enabled, listed) {
-      return "<label class='flex items-center gap-2 text-sm'>" +
+    function toolRow(name, short, enabled, listed, disabled) {
+      return "<label class='flex items-center gap-2 text-sm" + (disabled ? " opacity-50" : "") + "'>" +
         "<input type='checkbox' class='tool-en' data-name='" + esc(name) + "' data-listed='" + (listed ? "1" : "0") + "' " +
-        (enabled ? "checked" : "") + "/> <span class='font-mono'>" + short + "</span></label>";
+        (enabled ? "checked " : "") + (disabled ? "disabled " : "") + "/> <span class='font-mono'>" + short + "</span></label>";
     }
 
     // Tools is a flat allowlist in config, grouped here for legibility: tools you
@@ -2332,12 +2334,16 @@
       const groups = new Map();  // server -> [{name, short, enabled, listed}]
       const errors = new Map();
       const connecting = new Set();  // servers still connecting (tools may arrive later)
+      const needsAuth = new Set();  // servers withheld pending a key — tools greyed out
+      const missingByServer = new Map();  // server -> declared-but-unset secret NAMES
       const seen = new Set();
       if (mcpDiscovered) {
         (mcpDiscovered.servers || []).forEach((s) => {
           if (!groups.has(s.name)) groups.set(s.name, []);
           if (s.error) errors.set(s.name, s.error);
           if (s.connecting) connecting.add(s.name);
+          if (s.needs_auth) needsAuth.add(s.name);
+          if (s.missing_secrets && s.missing_secrets.length) missingByServer.set(s.name, s.missing_secrets);
           (s.tools || []).forEach((tl) => {
             groups.get(s.name).push({
               name: tl.name, short: tl.short,
@@ -2371,15 +2377,25 @@
         const conn = connecting.has(server)
           ? "<span class='text-xs text-amber-600 animate-pulse'>" + t("mcp_connecting") + "</span>"
           : "";
+        // Auth-gated server (a remote one whose required bearer is unset): its tools
+        // are withheld from the model, so grey them out + disable the checkboxes here
+        // and point at where to fix it, instead of letting the user "enable" tools
+        // that would only 401. Setting the key (MCP tab) + a reconnect lifts the gate.
+        const blocked = needsAuth.has(server);
+        const miss = missingByServer.get(server) || [];
+        const authHint = blocked
+          ? "<span class='text-xs text-amber-600'>\u26a0 " + t("tools_needs_key") +
+            (miss.length ? " <span class='font-mono'>" + esc(miss.join(", ")) + "</span>" : "") + "</span>"
+          : "";
         const body = items.length
-          ? items.map((e) => toolRow(e.name, e.short, e.enabled, e.listed)).join("")
+          ? items.map((e) => toolRow(e.name, e.short, e.enabled, e.listed, blocked)).join("")
           : "<p class='text-xs text-slate-400'>" + (connecting.has(server) ? t("mcp_connecting") : t("tools_none")) + "</p>";
         box.insertAdjacentHTML("beforeend",
           "<details class='rounded border'><summary class='flex cursor-pointer items-center gap-2 px-2 py-1 text-sm'>" +
-          "<input type='checkbox' class='mcp-master' data-server='" + esc(server) + "' title='" + t("tools_group_mcp_all") + "' onclick='event.stopPropagation()'/>" +
-          "<span class='font-medium'>" + esc(server) + "</span> " +
+          "<input type='checkbox' class='mcp-master' data-server='" + esc(server) + "'" + (blocked ? " disabled" : "") + " title='" + t("tools_group_mcp_all") + "' onclick='event.stopPropagation()'/>" +
+          "<span class='font-medium" + (blocked ? " opacity-50" : "") + "'>" + esc(server) + "</span> " +
           "<span class='text-xs text-slate-500'>(" + en + "/" + items.length + ")</span>" +
-          conn +
+          conn + authHint +
           (err ? "<span class='text-xs text-red-600'>" + esc(err) + "</span>" : "") +
           "</summary><div class='space-y-1 px-2 pb-2 pl-4'>" + body + "</div></details>");
       }
@@ -2411,7 +2427,7 @@
         // Rebuild only when the discovered/connecting set changed, so a poll while
         // tools stream in doesn't wipe a checkbox you're mid-toggle on.
         const sig = JSON.stringify((data.servers || []).map(
-          (s) => [s.name, (s.tools || []).length, !!s.connecting, s.error || ""]));
+          (s) => [s.name, (s.tools || []).length, !!s.connecting, s.error || "", !!s.needs_auth]));
         if (sig !== mcpDiscSig) { mcpDiscSig = sig; buildTools(); }
         const n = (data.servers || []).reduce((a, s) => a + (s.tools || []).length, 0);
         status.textContent = data.pending
@@ -2488,15 +2504,17 @@
       const connMeta = "<span class='text-xs text-amber-600'>" + t("mcp_connecting") + elapsed + "</span>" +
         (s.log_tail ? " <span class='text-xs font-mono text-slate-400' title='" + esc(s.log_tail) + "'>" + esc(s.log_tail.slice(-72)) + "</span>" : "");
       const idleMeta = "<span class='text-xs text-slate-500'>[" + esc(s.transport) + "] " + s.enabled_count + "/" + s.tool_count + " " + t("mcp_tools_word") + "</span>";
-      // A server that won't connect while it declares an auth token / env-var whose
-      // value isn't set in .env is almost certainly failing FOR that reason — and the
-      // raw transport error (or the silent amber retry loop) never says so. Name the
-      // missing var(s) explicitly and spring the auth box open so the fix is obvious.
+      // Auth is its OWN axis, separate from the red/green connection dot: a server
+      // can be connected (green) yet unusable because a declared auth token / env-var
+      // has no value in .env (e.g. a remote gateway that handshakes anonymously but
+      // 401s every call). So flag a missing secret whether the server is connected or
+      // not — name the var(s) explicitly and spring the auth box open so the fix is
+      // obvious (the dot still reflects only the connection itself).
       const missingSecrets = (
         (c.auth_env && !envSet(c.auth_env) ? [c.auth_env] : [])
           .concat((c.env || []).filter((n) => !envSet(n)))
       );
-      const needsSecret = !isNew && !s.connected && missingSecrets.length > 0;
+      const needsSecret = !isNew && missingSecrets.length > 0;
       const needHint = needsSecret
         ? " <span class='text-xs text-amber-600'>⚠ " + t("mcp_needs_key") + " <span class='font-mono'>" + esc(missingSecrets.join(", ")) + "</span></span>"
         : "";

@@ -685,6 +685,17 @@ Each server card has a collapsed **Auth** section: it names the remote bearer to
 to `.env` (write-only, never echoed — the same field as the LLM key box), so a keyed
 server (e.g. a remote SaaS MCP) is set up entirely from the panel without hand-editing
 `.env`. `/env-status` only reports whether each name is set (a boolean), never a value.
+
+The connection dot (green/red) reflects only whether the server itself **connects** —
+*not* whether it's usable. Auth is a separate axis: a server that declares a secret
+(`auth_env`/`env`) with no value in `.env` is flagged "⚠ needs API key / auth"
+regardless of the dot. A **remote** server whose required bearer is unset usually still
+handshakes anonymously (green) but 401s every call, so its tools are **withheld from
+the model** and greyed out on the Tools tab until you set the key (then reconnect) — you
+won't be offered tools that can only fail. A **stdio** server is never gated this way:
+if its process started, it runs, so its tools stay available (any one that truly needs
+the key surfaces its own error). A keyed stdio server that exits at startup without its
+key simply shows red ("Connection closed") with the missing var named.
 {% endif %}
 On the CLI, `{{ project_slug }} mcp status` health-checks every configured server
 (connectivity + tool counts; an unreachable server is shown with its error).

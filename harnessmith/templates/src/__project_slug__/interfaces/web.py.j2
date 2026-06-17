@@ -959,6 +959,8 @@ def create_app(
         NAMES only, never secret values). A server that won't connect is reported
         (not fatal). This is also the data the page polls to "refresh promptly".
         """
+        from ..harness.mcp import auth_blocked, missing_secrets
+
         config = app.state.config
         if not config.mcp.servers:
             return {"servers": []}
@@ -984,6 +986,13 @@ def create_app(
                 "error": st.get("error"),
                 "tool_count": tool_count,
                 "enabled_count": enabled_count,
+                # Auth is a SEPARATE axis from the connection dot: `missing_secrets`
+                # are declared env/auth NAMES with no value (advisory, both transports);
+                # `needs_auth` is the hard gate (a remote server whose required bearer
+                # is unset — its tools are withheld and greyed out). NAMES only, no
+                # values, so the secret red line holds.
+                "missing_secrets": missing_secrets(server),
+                "needs_auth": auth_blocked(server),
                 "config": server.model_dump(mode="json", exclude_none=True),
             })
         return {"servers": servers}
@@ -999,6 +1008,8 @@ def create_app(
         while any server is still connecting. Read-only; enabling a tool still goes
         through POST /config. Per-server connect failures surface in ``error``.
         """
+        from ..harness.mcp import auth_blocked, missing_secrets
+
         config = app.state.config
         if not config.mcp.servers:
             return {"servers": [], "pending": False}
@@ -1031,6 +1042,11 @@ def create_app(
                 "connected": bool(st.get("connected")),
                 "connecting_seconds": st.get("connecting_seconds"),
                 "log_tail": st.get("log_tail") or "",
+                # `needs_auth` greys out this server's tools on the Tools page (a
+                # remote server with an unset required bearer — they're withheld from
+                # the model too); `missing_secrets` names what to set (NAMES only).
+                "needs_auth": auth_blocked(server),
+                "missing_secrets": missing_secrets(server),
                 "tools": tools,
             })
         # `pending` lets the Tools page know to poll again until every server settles.

@@ -287,6 +287,56 @@ def test_remote_server_injects_bearer_header(monkeypatch):
     assert _bearer_headers(server) == {"Authorization": "Bearer secret-123"}
 
 
+def test_auth_blocked_only_gates_remote_with_unset_bearer(tmp_path, monkeypatch):
+    """Auth is its OWN axis. `missing_secrets` names declared env/auth vars with no
+    value (advisory, either transport). `auth_blocked` (the hard gate) fires ONLY for
+    a REMOTE server whose required bearer is unset — such a gateway handshakes
+    anonymously but 401s every call. A stdio server is never hard-gated: a process
+    that starts is proof it runs without the key."""
+    from {{ project_slug }}.harness.mcp import auth_blocked, missing_secrets
+
+    monkeypatch.chdir(tmp_path)  # no stray .env in cwd
+    monkeypatch.delenv("JINA_API_KEY", raising=False)
+    monkeypatch.delenv("BOCHA_API_KEY", raising=False)
+    remote = McpServerConfig(name="jina", url="https://mcp.example/v1", auth_env="JINA_API_KEY")
+    assert auth_blocked(remote) is True
+    assert missing_secrets(remote) == ["JINA_API_KEY"]
+    monkeypatch.setenv("JINA_API_KEY", "k")
+    assert auth_blocked(remote) is False and missing_secrets(remote) == []
+    # stdio: surfaced as missing, but NEVER hard-gated.
+    stdio = McpServerConfig(name="bocha", command="uvx", args=["mcp-bocha-search"], env=["BOCHA_API_KEY"])
+    assert auth_blocked(stdio) is False
+    assert missing_secrets(stdio) == ["BOCHA_API_KEY"]
+
+
+def test_register_withholds_auth_blocked_remote_tools(tmp_path, monkeypatch):
+    """An auth-blocked remote server's tools are NOT registered (the model would only
+    get failing tools); a stdio server's tools register normally. Setting the bearer
+    lifts the gate on the next sync."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("REMOTE_TOKEN", raising=False)
+    servers = [
+        {"name": "remote", "url": "https://mcp.example/v1", "auth_env": "REMOTE_TOKEN"},
+        {"name": "local", "command": "x"},
+    ]
+    config = _config(
+        [{"name": "remote__*", "enabled": True}, {"name": "local__*", "enabled": True}],
+        servers=servers,
+    )
+    fake = SimpleNamespace(discovered={
+        "remote": [SimpleNamespace(name="read_url", description="", inputSchema=None)],
+        "local": [SimpleNamespace(name="echo", description="", inputSchema=None)],
+    })
+    registry = Registry()
+    registered = register_mcp_tools(config, fake, registry)
+    assert "local__echo" in registered
+    assert not any(n.startswith("remote__") for n in registered)  # bearer unset -> withheld
+    monkeypatch.setenv("REMOTE_TOKEN", "tok")
+    registry2 = Registry()
+    registered2 = register_mcp_tools(config, fake, registry2)
+    assert "remote__read_url" in registered2  # key set -> gate lifts
+
+
 def test_server_requires_exactly_one_transport():
     with pytest.raises(Exception):
         McpServerConfig(name="bad")  # neither command nor url

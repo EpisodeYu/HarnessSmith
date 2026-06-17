@@ -445,6 +445,57 @@ def test_env_status_includes_mcp_auth_and_env_names(tmp_path, monkeypatch):
     resp = client.get("/env-status")
     assert resp.json()["EXAMPLE_MCP_TOKEN"] is True
     assert "tok-secret-xyz" not in resp.text  # booleans only — never the value
+
+
+def test_mcp_status_decouples_auth_and_gates_only_remote(tmp_path, monkeypatch):
+    """Auth rides ALONGSIDE the red/green connection state, not folded into it. Both
+    /mcp/status and /mcp/discover carry `missing_secrets` (declared env/auth NAMES with
+    no value — either transport) and `needs_auth` (the hard gate: a REMOTE server whose
+    required bearer is unset -> tools withheld + greyed out). A stdio server is never
+    hard-gated even with an unset declared env-var. NAMES only, never values."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("REMOTE_TOKEN", raising=False)
+    monkeypatch.delenv("DUMMY_SECRET", raising=False)
+    config = Config.model_validate({
+        "llms": [{"name": "default", "model": "mock-model"}],
+        "roles": {"generation": "default"},
+        "tools": [{"name": "dummy__*", "enabled": True}, {"name": "remote__*", "enabled": True}],
+        "observability": {"trace": False},
+        "sessions": {"enabled": False},
+        "mcp": {"connect_max_retries": 0, "servers": [
+            {"name": "dummy", "command": sys.executable, "args": [_DUMMY], "env": ["DUMMY_SECRET"]},
+            {"name": "remote", "url": "https://mcp.invalid/v1", "auth_env": "REMOTE_TOKEN"},
+        ]},
+    })
+    app = create_app(config, mock=True)
+    client = TestClient(app)
+    for path in ("/mcp/status", "/mcp/discover"):
+        servers = {x["name"]: x for x in client.get(path).json()["servers"]}
+        # remote: hard-gated (tools withheld from the model)
+        assert servers["remote"]["needs_auth"] is True, path
+        assert servers["remote"]["missing_secrets"] == ["REMOTE_TOKEN"], path
+        # stdio: missing secret named, but NEVER hard-gated (a running process is proof)
+        assert servers["dummy"]["needs_auth"] is False, path
+        assert servers["dummy"]["missing_secrets"] == ["DUMMY_SECRET"], path
+
+
+def test_index_tools_page_greys_out_auth_gated_server():
+    """The Tools page disables (greys out) an auth-gated server's master + tool
+    checkboxes and names the missing key, instead of letting the user "enable" tools
+    that would only 401 — matching the model-side withholding."""
+    body = _client().get("/").text
+    assert "tools_needs_key" in body
+    assert "s.needs_auth" in body and "needsAuth" in body and "missingByServer" in body
+    # both the tool rows and the master checkbox carry a disabled state
+    assert "function toolRow(name, short, enabled, listed, disabled)" in body
+
+
+def test_index_mcp_card_hint_decoupled_from_connection():
+    """The management card's "needs key" hint no longer requires the server to be
+    DISCONNECTED — a connected-but-unauthed remote (green dot, 401s) must still be
+    flagged. The dot keeps reflecting only the connection itself."""
+    body = _client().get("/").text
+    assert "const needsSecret = !isNew && missingSecrets.length > 0;" in body
 {% endif %}
 
 

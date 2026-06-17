@@ -999,7 +999,7 @@ def mcp_status(
     in red with its error (e.g. a uvx/npx server needs uv/Node on PATH). Read-only
     — it changes nothing. This is the CLI view of the web MCP management page.
     """
-    from ..harness.mcp import McpManager
+    from ..harness.mcp import McpManager, auth_blocked, missing_secrets
 
     config = load_config(config_path)
     if not config.mcp.servers:
@@ -1009,6 +1009,7 @@ def mcp_status(
         )
         return
     enabled = config.enabled_tool_names()
+    server_by_name = {s.name: s for s in config.mcp.servers}
     manager = McpManager(config.mcp)
     try:
         manager.start()  # connects every server (failures isolated into .status())
@@ -1019,6 +1020,9 @@ def mcp_status(
     hint_runtime = False
     for row in rows:
         name = row["name"]
+        server = server_by_name.get(name)
+        miss = missing_secrets(server) if server else []
+        blocked = auth_blocked(server) if server else False
         # A `<server>__*` wildcard enables every discovered tool.
         if f"{name}__*" in enabled:
             en = row["tool_count"]
@@ -1036,6 +1040,20 @@ def mcp_status(
             typer.echo(f"{name}  [{row['transport']}]  unreachable: {err}")
             if any(tok in err.lower() for tok in ("npx", "node", "uvx", "no such file")):
                 hint_runtime = True
+        # Auth is a SEPARATE axis from the dot. A remote server with an unset required
+        # bearer is "connected" (green) but 401s every call, so its tools are WITHHELD
+        # from the model — name the var to set. Other declared-but-unset secrets are
+        # surfaced as a softer note (the server may still work without them).
+        if blocked:
+            typer.secho(
+                f"      needs auth — set: {', '.join(miss)} (tools withheld until set)",
+                fg=typer.colors.YELLOW,
+            )
+        elif miss:
+            typer.secho(
+                f"      note: secret(s) not set: {', '.join(miss)}",
+                fg=typer.colors.YELLOW,
+            )
     if hint_runtime:
         typer.secho(
             "  hint: a server's launcher isn't on PATH — install Node.js (npx) / uv "
