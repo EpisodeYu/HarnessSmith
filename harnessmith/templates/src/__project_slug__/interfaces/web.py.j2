@@ -128,8 +128,15 @@ class _StreamHooks(Hooks):
         return rewritten
 
     def on_error(self, where: str, error: Exception) -> None:
+        # Observer ONLY — must never terminate the SSE stream. `run_tool` calls this
+        # for a tool error it has ALREADY recovered (the loop keeps running and the
+        # failure is surfaced to the UI as that tool's ERROR result, via `after_tool`
+        # -> `tool_result`); a genuinely fatal run error is surfaced once, terminally,
+        # by the worker's `except` below ({"where": "run"}). Emitting an `error` SSE
+        # event here too made the frontend tear the stream down (finishStream ->
+        # EventSource.close -> the worker's run is cancelled) on a tool failure the
+        # loop had already absorbed — the chat appeared to crash mid-run for nothing.
         self._inner.on_error(where, error)
-        self._q.put(("error", {"where": where, "error": str(error)}))
 
 
 class _HookLog:

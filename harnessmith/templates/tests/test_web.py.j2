@@ -511,6 +511,44 @@ def test_chat_streams_tool_call_and_final_over_sse():
     assert "answer" in body  # the final event carries the answer
 
 
+def test_chat_recoverable_tool_error_does_not_end_stream():
+    """A tool that RAISES is recovered by the loop (its exception becomes that tool's
+    ERROR result observation and the loop keeps going). The web stream must NOT be
+    torn down: the failure surfaces as the tool's `tool_result` (shown red in its
+    block), and the run still reaches a clean `final` — no spurious terminal `error`
+    event. Regression for a per-tool `on_error` being mis-sent as a stream-ending
+    `error` SSE event, which made the chat 'crash' mid-run (e.g. an MCP server's
+    'Connection closed') on a tool failure the loop had already absorbed."""
+    from {{ project_slug }}.harness.tools import HIGH, Tool, registry
+
+    def _boom(**kwargs):
+        raise RuntimeError("Connection closed")
+
+    registry.register(Tool(
+        name="boom", description="always fails",
+        parameters={"type": "object", "properties": {}}, func=_boom, risk=HIGH,
+    ))
+    try:
+        config = Config.model_validate({
+            "llms": [{"name": "default", "model": "mock-model"}],
+            "roles": {"generation": "default"},
+            "prompts": {"system": "You are a test agent."},
+            "tools": [{"name": "boom", "enabled": True}],  # the only offered tool -> mock calls it
+            "observability": {"trace": False},
+            "sessions": {"enabled": False},
+        })
+        body = TestClient(create_app(config, mock=True)).get(
+            "/chat", params={"message": "go", "stream": "false"}
+        ).text
+    finally:
+        registry.remove_where(lambda n: n == "boom")
+    result = _sse_event_data(body, "tool_result")
+    assert result is not None and result["name"] == "boom"
+    assert result["result"].startswith("ERROR") and "Connection closed" in result["result"]
+    assert "event: final" in body  # the loop kept going to a clean end…
+    assert "event: error" not in body  # …and the recovered error did NOT terminate the stream
+
+
 def test_chat_streams_answer_tokens_by_default():
     body = _client().get("/chat", params={"message": "hi"}).text
     assert "event: token" in body  # token-level streaming is on by default
