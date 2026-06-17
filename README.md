@@ -14,7 +14,7 @@ A config-to-code generator that produces a standalone, framework-free agent harn
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/EpisodeYu/HarnessSmith?style=flat&logo=github)](https://github.com/EpisodeYu/HarnessSmith/stargazers)
 
-**English** | [中文](#中文)
+**English** | [中文](#harnessmith-1)
 
 </div>
 
@@ -272,9 +272,9 @@ Structural changes (adding or removing an interface or module) require regenerat
 
 <div align="center">
 
-<img src="docs/assets/logo.png" alt="HarnessSmith" width="150">
+<img src="docs/assets/social-preview.png" alt="HarnessSmith" width="720">
 
-# 中文
+# HarnessSmith
 
 **锻造你自己的 agent harness。**
 
