@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a problem with the generator or with generated output
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please fill in the details below so the issue can be reproduced.
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Which layer is affected?
+      description: The generator itself, or the code it generated?
+      options:
+        - Generator (harnessmith CLI / wizard / rendering)
+        - Generated product (the rendered agent harness)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact command(s) and the preset or spec used.
+      placeholder: |
+        1. uvx harnessmith new my-agent --preset coding-assistant
+        2. cd my-agent
+        3. uv run my-agent run "..." --mock
+        4. ...
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Paste any error output or traceback. Do not include secrets or API keys.
+      render: shell
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, uv version, and HarnessSmith version.
+      placeholder: |
+        - OS:
+        - Python (uv python list):
+        - uv --version:
+        - harnessmith version:
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this has not been reported yet.
+          required: true
+        - label: My logs do not contain any secrets or API keys.
+          required: true

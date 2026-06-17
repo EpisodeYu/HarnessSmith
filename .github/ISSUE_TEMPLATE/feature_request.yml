@@ -1,0 +1,48 @@
+name: Feature request
+description: Suggest an idea or improvement for HarnessSmith
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Note the project's identity: the default product stays thin, and generated output must never depend on an agent-orchestration framework (no LangChain/LangGraph/ADK).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case or pain point, not just the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen?
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Where would this live?
+      options:
+        - Generator (CLI / wizard / rendering)
+        - Product template (rendered into generated output)
+        - HarnessSpec (a new structural option)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about, if any.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this has not been requested yet.
+          required: true
+        - label: If this adds a capability to generated output, it can be an opt-in spec toggle that leaves no trace when disabled.
+          required: false

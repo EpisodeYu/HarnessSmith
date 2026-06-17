@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation and usage
+    url: https://github.com/EpisodeYu/HarnessSmith#readme
+    about: Read the README for installation, quick start, and the CLI reference.
+  - name: PyPI package
+    url: https://pypi.org/project/harnessmith/
+    about: Install or check released versions of HarnessSmith.
