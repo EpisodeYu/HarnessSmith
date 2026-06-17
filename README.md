@@ -23,24 +23,28 @@ A config-to-code generator that produces a standalone, framework-free agent harn
 <!-- Demo: record the web chat (token streaming + tool-call panel) or a CLI run and drop a GIF here. -->
 <!-- <p align="center"><img src="docs/assets/demo.gif" alt="HarnessSmith demo" width="820"></p> -->
 
-## Quick start (60 seconds)
+## Quick start
 
-No install required — [uv](https://docs.astral.sh/uv/) runs it on demand and provisions Python for you:
+No install required — [uv](https://docs.astral.sh/uv/) runs it on demand and provisions Python for you. Build a harness **from scratch** with the web wizard (recommended) or the interactive CLI wizard — both let you pick exactly the capabilities you want (paradigms, web UI, MCP, skills, memory) and generate a standalone, smoke-verified repo:
 
 ```bash
-# 1. generate a complete, framework-free agent harness from a bundled preset
-uvx harnessmith new my-agent --preset coding-assistant
-cd my-agent
+# recommended: the web wizard — choose capabilities in the browser, it generates the repo for you
+uvx --from "harnessmith[wizard]" harnessmith wizard --open
 
-# 2. try it offline with a mock LLM — no API key needed
-uv run my-agent run "List the files here, then summarize the README" --mock
+# or stay in the terminal: the interactive CLI wizard collects the same choices (great for headless servers)
+uvx harnessmith new
+```
 
-# 3. point it at a real model and chat (OpenAI-compatible or Anthropic)
-uv run my-agent set-key OPENAI_API_KEY
+Then, from the project you just created, try it offline with a mock LLM — no API key — and point it at a real model:
+
+```bash
+cd my-agent                                                                   # the name you chose
+uv run my-agent run "List the files here, then summarize the README" --mock   # offline, no key
+uv run my-agent set-key OPENAI_API_KEY                                        # add a real key (OpenAI-compatible or Anthropic)
 uv run my-agent chat
 ```
 
-Prefer a guided setup? Launch the web wizard with `uvx --from "harnessmith[wizard]" harnessmith wizard --open`, or see [Getting started](#getting-started) for every option.
+See [Getting started](#getting-started) for every option, including non-interactive generation from a hand-written spec.
 
 ## Why HarnessSmith?
 
@@ -181,8 +185,8 @@ The generated `pyproject.toml` contains no agent-orchestration framework, and th
 HarnessSmith is published on [PyPI](https://pypi.org/project/harnessmith/). With [uv](https://docs.astral.sh/uv/) you can run it without installing anything:
 
 ```bash
-uvx harnessmith new my-agent --preset coding-assistant         # generate on demand
-uvx --from "harnessmith[wizard]" harnessmith wizard --open      # or launch the web wizard
+uvx --from "harnessmith[wizard]" harnessmith wizard --open      # launch the web wizard (recommended)
+uvx harnessmith new                                             # or the interactive CLI wizard
 ```
 
 Prefer a persistent install? Any of these work:
@@ -211,6 +215,7 @@ uv run harnessmith doctor                                   # preflight check of
 - The **web wizard** (`wizard`) and the **terminal wizard** (`new` with no `--spec` / `--preset`) collect the same structural choices — display name, paradigms, web interface, MCP, skills, memory — and apply identical defaults; the web wizard suits desktops, the terminal wizard suits headless servers.
 - After rendering, the generator locks dependencies and runs a smoke verification (`uv sync`, import check, one mock function-calling turn, `pytest`). Pass `--no-verify` to skip it, for example when offline.
 - Secrets are never collected by any wizard and never enter the spec, the generated `config.yaml`, or git.
+- The `--preset` shortcut is for scripted or CI generation, not the recommended start: the bundled `coding-assistant` preset enables MCP with **every tool allowlisted — shell and file writes included — and no confirmation gate** (`confirm: none`). Prefer a wizard, or review `config.yaml` (tighten the tool allowlist, set `confirm: high`) before pointing it at a real model.
 
 ### Running the generated harness
 
@@ -292,24 +297,28 @@ Structural changes (adding or removing an interface or module) require regenerat
 
 ---
 
-## 快速上手(60 秒)
+## 快速上手
 
-无需安装——[uv](https://docs.astral.sh/uv/) 会按需运行并自动准备 Python:
+无需安装——[uv](https://docs.astral.sh/uv/) 会按需运行并自动准备 Python。用 Web 向导(推荐)或终端交互向导**从头**生成一套 harness——两者都让你自由勾选所需能力(范式、Web 界面、MCP、技能、记忆),并生成一个独立、已冒烟自检的仓库:
 
 ```bash
-# 1. 用内置 preset 生成一个完整、无框架锁定的 agent harness
-uvx harnessmith new my-agent --preset coding-assistant
-cd my-agent
+# 推荐:Web 向导——在浏览器里勾选能力,自动为你生成仓库
+uvx --from "harnessmith[wizard]" harnessmith wizard --open
 
-# 2. 用 mock LLM 离线试跑——无需任何 API key
-uv run my-agent run "列出当前目录文件,然后总结 README" --mock
+# 或留在终端:终端交互向导采集同一组选择(适合无图形界面的服务器)
+uvx harnessmith new
+```
 
-# 3. 接入真实模型并对话(OpenAI 兼容或 Anthropic)
-uv run my-agent set-key OPENAI_API_KEY
+随后进入刚生成的项目,先用 mock LLM 离线试跑(无需 API key),再接入真实模型:
+
+```bash
+cd my-agent                                                  # 你填写的项目名
+uv run my-agent run "列出当前目录文件,然后总结 README" --mock   # 离线,无需 key
+uv run my-agent set-key OPENAI_API_KEY                       # 接入真实 key(OpenAI 兼容或 Anthropic)
 uv run my-agent chat
 ```
 
-想要图形化引导?运行 `uvx --from "harnessmith[wizard]" harnessmith wizard --open` 启动 Web 向导,或见[使用指南](#使用指南)了解全部方式。
+见[使用指南](#使用指南)了解全部方式,包括用手写 spec 非交互生成。
 
 ## 为什么选 HarnessSmith?
 
@@ -427,8 +436,8 @@ HarnessSmith 是 agent harness 的生成器,定位类似 `create-next-app`。通
 HarnessSmith 已发布到 [PyPI](https://pypi.org/project/harnessmith/)。配合 [uv](https://docs.astral.sh/uv/) 可免安装直接运行:
 
 ```bash
-uvx harnessmith new my-agent --preset coding-assistant         # 按需生成
-uvx --from "harnessmith[wizard]" harnessmith wizard --open      # 或启动 Web 向导
+uvx --from "harnessmith[wizard]" harnessmith wizard --open      # 启动 Web 向导(推荐)
+uvx harnessmith new                                             # 或终端交互向导
 ```
 
 想要常驻安装,以下任选其一:
@@ -457,6 +466,7 @@ uv run harnessmith doctor                                   # 本机工具链预
 - **Web 向导**(`wizard`)与 **终端向导**(`new` 不带 `--spec` / `--preset`)采集同一组结构选项——显示名、范式、Web 界面、MCP、技能、记忆——并应用一致的默认值;Web 向导适合桌面环境,终端向导适合无图形界面的服务器。
 - 渲染完成后,生成器锁定依赖并执行冒烟验证(`uv sync`、import 检查、一次 mock function-calling、`pytest`);离线等场景可用 `--no-verify` 跳过。
 - 任何向导都不采集密钥;密钥不会进入 spec、生成的 `config.yaml` 或 git。
+- `--preset` 是面向脚本 / CI 生成的捷径,并非推荐起点:内置的 `coding-assistant` preset 会开启 MCP 并**把每个工具都加入 allowlist(含 shell 与写文件),且不设确认门禁**(`confirm: none`)。请优先用向导,或在接入真实模型前先检查 `config.yaml`(收窄 allowlist、把 `confirm` 设为 `high`)。
 
 ### 运行生成的 harness
 
