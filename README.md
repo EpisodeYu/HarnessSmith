@@ -42,7 +42,7 @@ uvx --from "harnessmith[wizard]" harnessmith wizard --open   # web wizard (recom
 uvx harnessmith new                                          # or the interactive CLI wizard
 ```
 
-Then start the project you just created and chat — set your model and key right in the web interface (recommended), or use the terminal:
+Then start it. The generated repo ships its **own** one-click launcher too, named after your project (e.g. `My-Agent.sh` on macOS / Linux, `My-Agent.bat` on Windows): double-click or run it and it auto-syncs and opens the web chat — set your model and key right there in the `/config` panel. Or drive it with `uv`:
 
 ```bash
 cd my-agent                    # the name you chose
@@ -322,7 +322,7 @@ uvx --from "harnessmith[wizard]" harnessmith wizard --open   # Web 向导(推荐
 uvx harnessmith new                                          # 或终端交互向导
 ```
 
-随后启动刚生成的项目开始对话——在 Web 界面里直接配置模型与 key 并对话(推荐),或使用终端:
+随后启动它。生成的仓库**自己**也带一个一键启动器,以项目名命名(如 macOS / Linux 的 `My-Agent.sh`、Windows 的 `My-Agent.bat`):双击或直接运行,它会自动同步依赖并打开 Web 聊天——模型与 key 直接在 `/config` 面板里配置。或用 `uv` 启动:
 
 ```bash
 cd my-agent                    # 你填写的项目名
