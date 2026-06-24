@@ -52,7 +52,8 @@ def test_wizard_ui_is_structural_only(client):
     the generated product's config page)."""
     html = client.get("/").text
     for needed in ('id="display_name"', 'id="iface_web"', 'id="mcp_enabled"',
-                   'id="skills_enabled"', 'id="memory_enabled"', "paradigms-list"):
+                   'id="skills_enabled"', 'id="memory_enabled"',
+                   'id="subagents_enabled"', "paradigms-list"):
         assert needed in html, needed
     for absent in ("add-profile", "b_max_steps", "ctx_strategy", "rules_files", "llm_language"):
         assert absent not in html, absent
@@ -224,6 +225,24 @@ def test_memory_toggle_flows_through_to_spec_and_repo(client, tmp_path):
     spec_off = {**_valid_spec(), "memory": {"enabled": False}}
     client.post("/generate", json={"spec": spec_off, "target_dir": str(out2)})
     assert not (out2 / "src" / "my_ca" / "harness" / "memory.py").exists()
+
+
+def test_subagents_toggle_flows_through_to_spec_and_repo(client, tmp_path):
+    """The wizard's subagents switch threads into the spec + generates subagents.py."""
+    spec = {**_valid_spec(), "subagents": {"enabled": True}}
+    y = client.post("/spec", json={"spec": spec}).json()["yaml"]
+    assert "subagents:" in y and "enabled: true" in y
+
+    out = tmp_path / "sub"
+    r = client.post("/generate", json={"spec": spec, "target_dir": str(out)})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert (out / "src" / "my_ca" / "harness" / "subagents.py").is_file()
+
+    # Off (or omitted) leaves zero subagents footprint.
+    out2 = tmp_path / "nosub"
+    spec_off = {**_valid_spec(), "subagents": {"enabled": False}}
+    client.post("/generate", json={"spec": spec_off, "target_dir": str(out2)})
+    assert not (out2 / "src" / "my_ca" / "harness" / "subagents.py").exists()
 
 
 def test_skills_selection_copies_bundled_skill_into_product(client, tmp_path):

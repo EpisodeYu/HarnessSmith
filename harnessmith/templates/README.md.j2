@@ -267,6 +267,21 @@ it (manually above, or set `auto_consolidate: true` to do it at chat-session end
 Tune it under `memory:` in `config.yaml`{% if interfaces.web %} or the web **Memory** config tab (backend,
 capacity, read-only, a memory *policy*, and the note itself){% endif %}, or plug in your own
 backend (vector DB, mem0, …) with `@register_memory` — see [`AGENTS.md`](./AGENTS.md).
+{% endif %}{% if spec.subagents.enabled %}
+## Multi-agent (subagents)
+
+This agent can **delegate** independent subtasks to specialized worker subagents —
+the orchestrator-worker / agent-as-tool pattern. There's no new mode to pick: the
+agent itself calls a `dispatch` tool when it judges delegation is worth it, and
+lists **several** subtasks in one call to run them in **parallel**. Each worker
+runs in its own fresh context with its own tools and model, then returns a result
+the main agent synthesizes.
+
+Configure the roster under `subagents:` in `config.yaml` (each worker's name,
+prompt, `role` = which LLM profile, its own `tools` allowlist, and `max_steps`).
+Workers never get the `dispatch` tool, so the topology is fixed at depth 1 (no
+runaway recursion). It's plain code over a thread pool — no agent framework. See
+[`AGENTS.md`](./AGENTS.md).
 {% endif %}
 ## Layout
 
@@ -295,6 +310,7 @@ src/{{ project_slug }}/
 {% if spec.mcp.enabled %}    mcp.py                  # optional MCP tool bridge (stdio + remote)
 {% endif %}{% if spec.skills.enabled %}    skills.py               # standard Agent Skills (SKILL.md discovery + read_skill)
 {% endif %}{% if spec.memory.enabled %}    memory.py               # cross-session long-term memory (@register_memory + file backend)
+{% endif %}{% if spec.subagents.enabled %}    subagents.py            # multi-agent: dispatch tool delegates to scoped worker subagents (parallel)
 {% endif %}  interfaces/
     cli.py                  # `run` (one turn, resumable) + `chat` (multi-turn REPL)
 {% if interfaces.web %}    web.py                  # `serve` — FastAPI SSE chat + live /config panel

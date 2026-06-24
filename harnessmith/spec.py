@@ -106,6 +106,34 @@ class Memory(BaseModel):
     enabled: bool = False
 
 
+class Subagents(BaseModel):
+    """Opt-in multi-agent via subagents (agent-as-tool; the orchestrator-worker
+    pattern, the one mature harnesses use — Claude Code's ``Task`` / Anthropic
+    Sub-agents / OpenAI agent-as-tool).
+
+    Like :class:`Mcp` / :class:`Skills` / :class:`Memory`, generation-time decides
+    ONLY whether the capability exists: ``enabled`` renders ``harness/subagents.py``
+    (a single ``dispatch`` tool that fans work out to scoped worker agents, in
+    parallel, each with its own fresh context, tool allowlist, and model profile),
+    seeds an example ``subagents`` block in ``config.yaml``, and injects a short
+    "you can delegate" note into the supervisor's system prompt. The roster
+    (which workers exist, their prompts / tools / profiles) is a RUNTIME knob in
+    ``config.yaml`` — not a spec field. Disabled leaves the generated repo with
+    zero subagents footprint.
+
+    The supervisor is just the normal ``agent`` paradigm (it autonomously decides
+    when to delegate by calling ``dispatch``) — there is NO new paradigm and NO
+    change to the core loop. Topology is fixed at depth 1: a worker never gets the
+    ``dispatch`` tool, so workers cannot spawn further subagents. This stays well
+    inside the project's red line (no orchestration framework / DSL / dynamic
+    graph): it is plain generated code over a stdlib thread pool.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+
+
 class Observability(BaseModel):
     """Tracing / cost-accounting settings."""
 
@@ -173,6 +201,7 @@ class HarnessSpec(BaseModel):
     mcp: Mcp = Field(default_factory=Mcp)
     skills: Skills = Field(default_factory=Skills)
     memory: Memory = Field(default_factory=Memory)
+    subagents: Subagents = Field(default_factory=Subagents)
     observability: Observability = Field(default_factory=Observability)
     # Per-LLM cost accounting and limits are runtime-only knobs on each profile in
     # config.yaml (``input/output/cached_input_cost_per_million`` + ``cost_limit``),

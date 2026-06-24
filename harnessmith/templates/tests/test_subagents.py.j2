@@ -1,0 +1,194 @@
+"""Multi-agent subagents tests (agent-as-tool). Generated only when
+``subagents.enabled`` — no network, no API key.
+
+Covers: the ``dispatch`` tool registers (and is removed for an empty roster),
+context isolation + scoped tools + depth-1 (a worker never gets ``dispatch``),
+parallel fan-out, a worker using its own tool, unknown-agent handling, cost
+accrual to the shared ledger, system-prompt injection, and an end-to-end turn
+where the supervisor delegates then synthesizes."""
+
+from __future__ import annotations
+
+import json
+
+from {{ project_slug }}.harness.config import Config
+from {{ project_slug }}.harness.llm import LLMResponse, Usage
+from {{ project_slug }}.harness.loop import run
+from {{ project_slug }}.harness.mock import MockLLM, ScriptedCall
+from {{ project_slug }}.harness.prompts import build_system_prompt
+from {{ project_slug }}.harness.subagents import (
+    DISPATCH_TOOL,
+    _run_subagent,
+    register_subagent_tools,
+    subagents_section,
+)
+from {{ project_slug }}.harness.tools import SAFE, Registry, Tool
+from {{ project_slug }}.harness.usage import UsageLedger
+
+
+def _config(agents=None, **sub_overrides):
+    if agents is None:
+        agents = [
+            {"name": "researcher", "description": "Researches.", "prompt": "You are R.", "tools": [], "max_steps": 4},
+            {"name": "writer", "description": "Writes.", "prompt": "You are W.", "tools": [], "max_steps": 4},
+        ]
+    sub = {"max_parallel": 4, "agents": agents}
+    sub.update(sub_overrides)
+    return Config.model_validate(
+        {
+            "llms": [{"name": "default", "model": "mock-model"}],
+            "roles": {"generation": "default"},
+            "prompts": {"system": "You are the supervisor."},
+            "tools": [
+                {"name": "get_current_time", "enabled": True},
+                {"name": "dispatch", "enabled": True},
+            ],
+            "observability": {"trace": False},
+            "subagents": sub,
+        }
+    )
+
+
+class RecordingClient:
+    """A fake client that records the messages + tools it was handed."""
+
+    def __init__(self, answer: str = "worker done") -> None:
+        self.answer = answer
+        self.seen_messages = None
+        self.seen_tools = None
+
+    def complete(self, messages, tools=None, *, cancel=None):
+        self.seen_messages = messages
+        self.seen_tools = tools
+        return LLMResponse(
+            content=self.answer, usage=Usage(prompt_tokens=3, completion_tokens=2, total_tokens=5)
+        )
+
+    def stream(self, messages, tools=None, *, on_delta=None, on_thinking=None, cancel=None):
+        return self.complete(messages, tools)
+
+
+def test_dispatch_registers_and_is_safe():
+    reg = Registry()
+    names = register_subagent_tools(_config(), reg, mock=True)
+    assert names == [DISPATCH_TOOL]
+    assert reg.get(DISPATCH_TOOL).risk == SAFE
+    # the roster is surfaced to the model in the tool description
+    desc = reg.get(DISPATCH_TOOL).description
+    assert "researcher" in desc and "writer" in desc
+
+
+def test_empty_roster_removes_dispatch():
+    reg = Registry()
+    reg.register(Tool(DISPATCH_TOOL, "stale", {"type": "object", "properties": {}}, lambda **k: "x", SAFE))
+    names = register_subagent_tools(_config(agents=[]), reg, mock=True)
+    assert names == []
+    assert DISPATCH_TOOL not in reg.names()  # a stale dispatch is cleaned up
+
+
+def test_subagent_isolated_context_scoped_tools_depth1():
+    """A worker runs in a fresh context, is offered only its own tools, and is
+    NEVER offered dispatch even if its roster mistakenly lists it (depth 1)."""
+    config = _config(
+        agents=[{"name": "w", "prompt": "You are W.", "tools": ["safe_tool", "dispatch"], "max_steps": 3}]
+    )
+    reg = Registry()
+    reg.register(Tool("safe_tool", "a safe tool", {"type": "object", "properties": {}}, lambda: "ok", SAFE))
+    register_subagent_tools(config, reg, mock=True)  # registers dispatch into reg
+
+    client = RecordingClient()
+    answer, steps = _run_subagent(
+        config.subagents.agents[0], "do X",
+        config=config, client=client, ledger=UsageLedger(path=None), registry=reg,
+    )
+    assert answer == "worker done" and steps == 0
+    # Fresh, isolated history: the worker's own prompt as system, then the task.
+    assert client.seen_messages[0] == {"role": "system", "content": "You are W."}
+    assert client.seen_messages[1] == {"role": "user", "content": "do X"}
+    assert "supervisor" not in client.seen_messages[0]["content"].lower()
+    # Scoped + depth 1: only safe_tool offered; dispatch is filtered out.
+    offered = {t["function"]["name"] for t in (client.seen_tools or [])}
+    assert offered == {"safe_tool"}
+    assert DISPATCH_TOOL not in offered
+
+
+def test_dispatch_parallel_fan_out_returns_all_results():
+    reg = Registry()
+    led = UsageLedger(path=None)
+    register_subagent_tools(_config(), reg, mock=True, ledger=led)
+    result = reg.call(
+        DISPATCH_TOOL,
+        json.dumps({"tasks": [
+            {"agent": "researcher", "task": "find X"},
+            {"agent": "writer", "task": "write Y"},
+        ]}),
+    )
+    assert "Dispatched 2 subagent task(s)." in result
+    assert "[researcher]" in result and "[writer]" in result
+
+
+def test_worker_uses_its_own_tool():
+    """A delegated worker actually executes a tool from its scoped allowlist."""
+    calls: list[str] = []
+    reg = Registry()
+    reg.register(
+        Tool("echo", "echo something", {"type": "object", "properties": {}},
+             lambda: calls.append("ran") or "echoed", SAFE)
+    )
+    config = _config(agents=[{"name": "doer", "prompt": "You are D.", "tools": ["echo"], "max_steps": 3}])
+    register_subagent_tools(config, reg, mock=True)
+    # The fresh mock client calls the first offered tool (echo) once, then answers.
+    result = reg.call(DISPATCH_TOOL, json.dumps({"tasks": [{"agent": "doer", "task": "go"}]}))
+    assert "[doer]" in result
+    assert calls == ["ran"]
+
+
+def test_unknown_agent_is_reported_not_raised():
+    reg = Registry()
+    register_subagent_tools(_config(), reg, mock=True)
+    result = reg.call(DISPATCH_TOOL, json.dumps({"tasks": [{"agent": "nope", "task": "x"}]}))
+    assert "unknown subagent" in result
+
+
+def test_empty_tasks_returns_error():
+    reg = Registry()
+    register_subagent_tools(_config(), reg, mock=True)
+    assert "ERROR" in reg.call(DISPATCH_TOOL, json.dumps({"tasks": []}))
+
+
+def test_cost_accrues_to_shared_ledger():
+    reg = Registry()
+    led = UsageLedger(path=None)
+    register_subagent_tools(_config(), reg, mock=True, ledger=led)
+    reg.call(DISPATCH_TOOL, json.dumps({"tasks": [{"agent": "writer", "task": "hi"}]}))
+    assert led.usage_for("default").total_tokens > 0  # worker spend rolled into the ledger
+
+
+def test_subagents_section_and_system_prompt_injection():
+    config = _config()
+    section = subagents_section(config)
+    assert "researcher" in section and "writer" in section
+    assert DISPATCH_TOOL in section
+    prompt = build_system_prompt(config)
+    assert "researcher" in prompt
+    assert "You are the supervisor." in prompt  # base system still present
+    # No subagents -> no section, byte-clean.
+    assert subagents_section(_config(agents=[])) == ""
+
+
+def test_supervisor_delegates_then_synthesizes_end_to_end():
+    """A full turn: the supervisor calls dispatch (a real tool round) and then
+    produces a final answer, while the worker runs offline via the mock."""
+    config = _config()
+    reg = Registry()
+    register_subagent_tools(config, reg, mock=True, ledger=UsageLedger(path=None))
+
+    client = MockLLM(
+        script=[
+            ScriptedCall("dispatch", {"tasks": [{"agent": "researcher", "task": "find X"}]}),
+            "Synthesized final answer.",
+        ]
+    )
+    result = run("do a big task", client=client, config=config, registry=reg)
+    assert result.stop_reason == "final"
+    assert result.answer == "Synthesized final answer."

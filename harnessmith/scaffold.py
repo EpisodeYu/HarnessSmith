@@ -1,7 +1,7 @@
 """Shared, FastAPI-free scaffolding helpers for the structural-only wizards.
 
 Both wizards collect only *what to generate* (display name -> slug, language,
-paradigms, web/MCP/skills/memory, catalog servers):
+paradigms, web/MCP/skills/memory/subagents, catalog servers):
 
 - the web form (``harnessmith/wizard/app.py``, ``[wizard]`` extra), and
 - the interactive CLI wizard (``harnessmith new`` with no ``--spec``/``--preset``).

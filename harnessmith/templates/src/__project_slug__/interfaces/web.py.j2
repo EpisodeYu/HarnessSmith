@@ -758,6 +758,9 @@ def create_app(
 {% if spec.memory.enabled %}    from ..harness.memory import register_memory_tools
 
     register_memory_tools(app.state.config)
+{% endif %}{% if spec.subagents.enabled %}    from ..harness.subagents import register_subagent_tools
+
+    register_subagent_tools(app.state.config, mock=app.state.mock)
 {% endif %}
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
@@ -1277,7 +1280,13 @@ def create_app(
         # immediately (no restart). Section NAMES only — values never logged here.
         obs = app.state.config.observability
         setup_debug_log(obs.debug, obs.debug_dir)
-        log.debug("web /config: updated sections %s", sorted(k for k in _EDITABLE_FIELDS if k in patch))
+{% if spec.subagents.enabled %}        # Re-bind the dispatch tool to the new config so workers use the latest LLM
+        # profiles (the closure captures config at registration time; the Budget page
+        # can change a worker's model/prices).
+        from ..harness.subagents import register_subagent_tools
+
+        register_subagent_tools(app.state.config, mock=app.state.mock)
+{% endif %}        log.debug("web /config: updated sections %s", sorted(k for k in _EDITABLE_FIELDS if k in patch))
 {% if spec.mcp.enabled %}        # Keep the registry's MCP tools in lock-step with the new allowlist so what
         # the model is offered always matches the Tools page: a newly-enabled MCP
         # tool gets registered, a disabled one dropped. No reconnect needed — just
@@ -1364,6 +1373,9 @@ def create_app(
 {% if spec.memory.enabled %}        from ..harness.memory import register_memory_tools
 
         register_memory_tools(new_config)  # re-bind the long-term memory tools
+{% endif %}{% if spec.subagents.enabled %}        from ..harness.subagents import register_subagent_tools
+
+        register_subagent_tools(new_config, mock=app.state.mock)  # re-bind the dispatch tool to the new roster
 {% endif %}{% if spec.mcp.enabled %}        # Rebuild the MCP manager so connected servers + offered tools match the import.
         if app.state.mcp_manager is not None:
             await run_in_threadpool(lambda: _rebuild_mcp_manager(app))

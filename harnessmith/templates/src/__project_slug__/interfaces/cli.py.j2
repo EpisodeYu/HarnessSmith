@@ -320,6 +320,12 @@ def _setup_memory(config) -> None:
     from ..harness.memory import register_memory_tools
 
     register_memory_tools(config)
+{% endif %}{% if spec.subagents.enabled %}
+def _setup_subagents(config, mock: bool) -> None:
+    """Register the `dispatch` tool so the supervisor can delegate to subagents."""
+    from ..harness.subagents import register_subagent_tools
+
+    register_subagent_tools(config, mock=mock)
 {% endif %}
 
 @app.command()
@@ -383,6 +389,7 @@ def run(
 {% if spec.skills.enabled %}    prompt = _expand_skill(config, prompt)
 {% endif %}{% if spec.mcp.enabled %}    mcp_manager = _start_mcp(config)
 {% endif %}{% if spec.memory.enabled %}    _setup_memory(config)
+{% endif %}{% if spec.subagents.enabled %}    _setup_subagents(config, mock)
 {% endif %}    # Resolve the session to resume (or mint a new one) and load its history.
     sessions_cfg = config.sessions
     session_id, history = (
@@ -582,6 +589,7 @@ def chat(
     warm_once(config.mcp, log=_warm_sys.stderr)
     mcp_manager = _start_mcp(config)
 {% endif %}{% if spec.memory.enabled %}    _setup_memory(config)
+{% endif %}{% if spec.subagents.enabled %}    _setup_subagents(config, mock)
 {% endif %}    router = ClientRouter(config, mock=mock)
     asker = _cli_asker(mock)
     # One confirmer for the whole REPL so an "allow for session" sticks across turns.
@@ -885,6 +893,11 @@ def info(
     from ..harness.memory import register_memory_tools
 
     register_memory_tools(config)
+{% endif %}{% if spec.subagents.enabled %}    # The subagents `dispatch` tool also registers at runtime; register it here so
+    # `info` reports it as enabled rather than as an unloaded allowlist entry.
+    from ..harness.subagents import register_subagent_tools
+
+    register_subagent_tools(config)
 {% endif %}
     enabled = config.enabled_tool_names()
     typer.secho("tools (registered):", fg=typer.colors.CYAN)
@@ -1240,6 +1253,7 @@ def serve(
     # before binding the port. create_app re-imports (idempotent) and mounts hooks.
     _prepare_runtime(config)
 {% if spec.memory.enabled %}    _setup_memory(config)
+{% endif %}{% if spec.subagents.enabled %}    _setup_subagents(config, mock)
 {% endif %}    # Pass config_path so a /config panel Save persists back to this file.
     application = create_app(config, mock=mock, config_path=config_path)
 {% if spec.mcp.enabled %}    # First run only: pre-fetch the stdio MCP packages (npx/uvx) HERE, with live

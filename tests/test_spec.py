@@ -31,6 +31,7 @@ def test_defaults_fill_in_minimal_spec():
     assert spec.observability.trace_dir == "traces"
     assert spec.prompts.system is None
     assert spec.mcp.enabled is False  # MCP capability is opt-in (Slice 4)
+    assert spec.subagents.enabled is False  # multi-agent subagents are opt-in
     assert spec.paradigms == ["agent"]  # only the agent loop by default (Slice 5)
     assert spec.context is None and spec.rag is None and spec.secrets is None
 
@@ -38,6 +39,16 @@ def test_defaults_fill_in_minimal_spec():
 def test_mcp_enabled_is_accepted():
     spec = HarnessSpec.model_validate({"mcp": {"enabled": True}})
     assert spec.mcp.enabled is True
+
+
+def test_subagents_enabled_is_accepted():
+    spec = HarnessSpec.model_validate({"subagents": {"enabled": True}})
+    assert spec.subagents.enabled is True
+
+
+def test_subagents_unknown_field_is_rejected():
+    with pytest.raises(ValidationError):
+        HarnessSpec.model_validate({"subagents": {"enabled": True, "agents": []}})
 
 
 def test_display_name_defaults_to_none():

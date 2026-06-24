@@ -2,7 +2,7 @@
 
 The CLI twin of the web form (``harnessmith/wizard/app.py``): it asks the same
 *structural* questions (display name -> slug, language, paradigms, web/MCP/skills/
-memory, catalog servers), then bakes the behavioral defaults and validates a
+memory/subagents, catalog servers), then bakes the behavioral defaults and validates a
 :class:`~harnessmith.spec.HarnessSpec` — reusing the very same baking + catalog
 helpers as the web form (``harnessmith.scaffold``), so both wizards yield
 identical products.
@@ -74,6 +74,7 @@ def build_spec(
         "mcp": {"enabled": bool(answers.get("mcp"))},
         "skills": {"enabled": bool(answers.get("skills"))},
         "memory": {"enabled": bool(answers.get("memory"))},
+        "subagents": {"enabled": bool(answers.get("subagents"))},
     }
     if display:
         spec_data["display_name"] = display
@@ -172,6 +173,12 @@ def run_wizard(*, default_target_dir: str | None = None) -> WizardResult:
         )
     answers["memory"] = _need(
         questionary.confirm("Enable cross-session long-term memory?", default=True).ask()
+    )
+    answers["subagents"] = _need(
+        questionary.confirm(
+            "Enable multi-agent subagents (delegate subtasks via a dispatch tool)?",
+            default=False,
+        ).ask()
     )
     answers["mcp"] = _need(
         questionary.confirm("Enable MCP tools?", default=True).ask()

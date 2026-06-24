@@ -385,7 +385,44 @@ has an anchor. It is a **prompt hint only**: never a `chdir` and never a path
 fence (the CLI passes `--cwd` / `/cwd`, the web passes per-session `?cwd=`; both
 persist it on the session via `session.cwd_of`). Unset ⇒ the prompt is unchanged.
 Real isolation is Docker, not this hint.
+{% if spec.subagents.enabled %}
+## Multi-agent (subagents)
 
+This product can **delegate** work to specialized worker subagents — the
+orchestrator-worker / agent-as-tool pattern (the same shape as Claude Code's
+`Task` tool or Anthropic Sub-agents). There is no new paradigm: the supervisor is
+just the normal `agent` loop, which autonomously calls one extra tool, `dispatch`,
+when it judges a subtask worth delegating. List **several** tasks in one
+`dispatch` call and they run in **parallel**; each worker runs in its own fresh
+context with its own tools and model, then returns a result the supervisor
+synthesizes. The implementation is `src/{{ project_slug }}/harness/subagents.py`
+(plain code over a stdlib thread pool — no orchestration framework).
+
+The roster is a runtime knob in `config.yaml` under `subagents:` — edit it freely:
+
+```yaml
+subagents:
+  max_parallel: 4            # how many delegated tasks run at once
+  agents:
+    - name: researcher
+      description: "Gathers facts with read-only tools."
+      role: generation       # which LLM profile (use a cheaper model to save cost)
+      prompt: |-
+        You are a focused research subagent. ...
+      tools: [get_current_time, calculator]   # the worker's OWN allowlist
+      allow_high_risk: false
+      max_steps: 12
+```
+
+Each worker's `tools` is its own allowlist (a subset of the tools registered in
+this product). **Topology is fixed at depth 1**: a worker never gets the `dispatch`
+tool, so workers cannot spawn further subagents. Workers run **non-interactive**
+(no HITL prompts), so keep `allow_high_risk: false` unless you mean it. An empty
+roster removes the `dispatch` tool entirely. Each worker's spend still counts
+toward the per-LLM cost limits (`harness/usage.py`); its own steps are bounded by
+`max_steps`. Delegate only **independent** subtasks — for one long chain of
+reasoning, don't decompose.
+{% endif %}
 ## Stop / continue / re-ask
 
 A turn can be **stopped** mid-flight — Ctrl-C in the CLI, the Stop button in the

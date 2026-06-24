@@ -67,6 +67,13 @@
       </div>
       <div>
         <label class="flex items-center gap-2 text-sm font-medium">
+          <input id="subagents_enabled" type="checkbox" />
+          <span data-i18n="subagents_enable_label">启用多 agent 子代理</span>
+        </label>
+        <p class="mt-1 text-xs text-slate-500" data-i18n="subagents_hint">关闭则不含子代理,启用后主 agent 可用 dispatch 工具把子任务并行委派给隔离的 worker(可在 config.yaml 配置 roster)。</p>
+      </div>
+      <div>
+        <label class="flex items-center gap-2 text-sm font-medium">
           <input id="mcp_enabled" type="checkbox" checked />
           <span data-i18n="mcp_enable_label">启用 MCP 工具</span>
         </label>
@@ -157,6 +164,8 @@
         skills_catalog_label: "预选内置 skill(勾选后拷入产物 skills/)",
         memory_enable_label: "启用跨会话长期记忆",
         memory_hint: "关闭则不含记忆,启用后提供跨会话文件笔记,可通过 @register_memory 更换后端。",
+        subagents_enable_label: "启用多 agent 子代理",
+        subagents_hint: "关闭则不含子代理,启用后主 agent 可用 dispatch 工具把子任务并行委派给隔离的 worker(可在 config.yaml 配置 roster)。",
         generate_heading: "生成产物",
         oneclick_heading: "一键生成",
         target_label: "目标目录",
@@ -190,6 +199,8 @@
         skills_catalog_label: "Preselect bundled skills (copied into the product's skills/)",
         memory_enable_label: "Enable cross-session long-term memory",
         memory_hint: "Off omits memory; on provides a cross-session file note, with backends swappable via @register_memory.",
+        subagents_enable_label: "Enable multi-agent subagents",
+        subagents_hint: "Off omits subagents; on lets the main agent delegate subtasks in parallel to isolated workers via a dispatch tool (roster configured in config.yaml).",
         generate_heading: "Generate the product",
         oneclick_heading: "One-click generate",
         target_label: "Target directory",
@@ -295,6 +306,7 @@
       spec.mcp = { enabled: $("mcp_enabled").checked };
       spec.skills = { enabled: $("skills_enabled").checked };
       spec.memory = { enabled: $("memory_enabled").checked };
+      spec.subagents = { enabled: $("subagents_enabled").checked };
       return spec;
     }
 

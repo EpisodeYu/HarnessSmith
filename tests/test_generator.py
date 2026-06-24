@@ -950,6 +950,81 @@ def test_memory_web_footprint_absent_when_disabled(tmp_path, spec):
     assert "/memory" not in web_py and "memory" not in web_py.lower()
 
 
+# --- Multi-agent subagents (opt-in, subagents.enabled) ----------------------
+
+
+def test_subagents_disabled_omits_footprint(tmp_path, preset_spec):
+    """Default (subagents.enabled=false) repo has zero subagents footprint."""
+    out = tmp_path / "nosub"
+    generate(preset_spec, out, git_init=False)
+    pkg = out / "src" / "coding_assistant"
+    assert not (pkg / "harness" / "subagents.py").exists()
+    assert not (out / "tests" / "test_subagents.py").exists()
+
+    config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
+    assert "SubagentsConfig" not in config_py and "SubagentDef" not in config_py
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "subagents:" not in config_yaml
+    assert "dispatch" not in config_yaml
+
+    prompts_py = (pkg / "harness" / "prompts.py").read_text(encoding="utf-8")
+    assert "subagents" not in prompts_py.lower()
+
+    cli_py = (pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    assert "_setup_subagents" not in cli_py and "register_subagent_tools" not in cli_py
+
+
+def test_subagents_enabled_generates_support(tmp_path, spec):
+    spec.subagents.enabled = True
+    out = tmp_path / "sub"
+    generate(spec, out, git_init=False)
+    pkg = out / "src" / "agent_harness"
+
+    assert (pkg / "harness" / "subagents.py").is_file()
+    assert (out / "tests" / "test_subagents.py").is_file()
+
+    config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
+    assert "class SubagentsConfig" in config_py and "subagents: SubagentsConfig" in config_py
+    assert "class SubagentDef" in config_py
+
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "subagents:" in config_yaml and "max_parallel:" in config_yaml
+    assert "- name: dispatch" in config_yaml  # the delegate tool is allowlisted
+
+    prompts_py = (pkg / "harness" / "prompts.py").read_text(encoding="utf-8")
+    assert "subagents_section" in prompts_py
+
+    cli_py = (pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
+    assert "_setup_subagents" in cli_py
+
+    # subagents.py is valid Python; the snapshot only records the enable flag
+    py_compile.compile(str(pkg / "harness" / "subagents.py"), doraise=True)
+    snapshot = (out / "harness.spec.yaml").read_text(encoding="utf-8")
+    assert "subagents" in snapshot and "enabled: true" in snapshot
+
+    # red line: still no agent-orchestration framework, even with multi-agent on
+    pyproject = (out / "pyproject.toml").read_text(encoding="utf-8")
+    for banned in ("langchain", "langgraph", "adk"):
+        assert banned not in pyproject
+
+
+def test_subagents_supervisor_is_not_a_new_paradigm(tmp_path, spec):
+    """Multi-agent is agent-as-tool: no new paradigm, no core-loop change."""
+    spec.subagents.enabled = True
+    out = tmp_path / "sub2"
+    generate(spec, out, git_init=False)
+    pkg = out / "src" / "agent_harness"
+    # paradigms roster is unchanged (just the default agent); supervisor == agent
+    config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
+    assert "enabled: [agent]" in config_yaml
+    # the core loop / agent paradigm never import subagents (delegation is a tool)
+    agent_py = (pkg / "harness" / "paradigms" / "agent.py").read_text(encoding="utf-8")
+    assert "subagent" not in agent_py.lower()
+    loop_py = (pkg / "harness" / "loop.py").read_text(encoding="utf-8")
+    assert "subagent" not in loop_py.lower()
+
+
 # --- One-click launch scripts (HarnessSmith / <display name>) ---------------
 
 

@@ -46,6 +46,7 @@ def test_build_spec_bakes_behavioral_defaults_from_structural_answers():
             "mcp": False,
             "skills": True,
             "memory": True,
+            "subagents": True,
         }
     )
     assert spec.project_slug == "my_coding_assistant"
@@ -54,6 +55,7 @@ def test_build_spec_bakes_behavioral_defaults_from_structural_answers():
     assert spec.paradigms == ["agent", "plan"]
     assert spec.interfaces.web is True and spec.interfaces.cli is True
     assert spec.skills.enabled is True and spec.memory.enabled is True
+    assert spec.subagents.enabled is True
     # baked behavioral defaults (env-var NAMES only, no guessed model)
     assert spec.llms and spec.llms[0].name == "default" and spec.llms[0].model == ""
     assert spec.llms[0].api_key_env == "OPENAI_API_KEY"
@@ -163,13 +165,14 @@ def test_run_wizard_builds_result_from_answers(monkeypatch):
         # right after the "enable skills?" confirm.
         checkboxes=[["agent", "plan"], ["web-reading"], ["fetch", "git"]],
         select="zh",
-        confirms=[True, True, True, True],  # web, skills, memory, mcp
+        confirms=[True, True, True, True, True],  # web, skills, memory, subagents, mcp
     )
     result = run_wizard()
     assert result.spec.project_slug == "my_coding_assistant"
     assert result.spec.language == "zh"
     assert result.spec.interfaces.web is True
     assert result.spec.mcp.enabled is True
+    assert result.spec.subagents.enabled is True
     assert [s.name for s in result.mcp_servers] == ["fetch", "git"]
     assert [s.name for s in result.skills] == ["web-reading"]
     assert result.target_dir == Path("./out")
@@ -183,10 +186,11 @@ def test_run_wizard_skips_server_prompt_when_mcp_off(monkeypatch):
         texts=["Plain", "plain", "./plain"],
         select="en",
         checkboxes=[["agent"]],  # only the paradigms checkbox is consumed (skills+mcp off)
-        confirms=[False, False, False, False],  # web, skills, memory, mcp all off
+        confirms=[False, False, False, False, False],  # web, skills, memory, subagents, mcp all off
     )
     result = run_wizard()
     assert result.spec.mcp.enabled is False
+    assert result.spec.subagents.enabled is False
     assert result.mcp_servers == []
     assert result.skills == []
 

@@ -96,6 +96,10 @@ CONDITIONAL_TEMPLATES: dict[str, Callable[[HarnessSpec], bool]] = {
     # rendered only when opted in; disabled leaves zero memory footprint.
     "src/__project_slug__/harness/memory.py.j2": lambda spec: spec.memory.enabled,
     "tests/test_memory.py.j2": lambda spec: spec.memory.enabled,
+    # Subagents / multi-agent (agent-as-tool): the subagents module + its test are
+    # rendered only when opted in; disabled leaves zero subagents footprint.
+    "src/__project_slug__/harness/subagents.py.j2": lambda spec: spec.subagents.enabled,
+    "tests/test_subagents.py.j2": lambda spec: spec.subagents.enabled,
     # Paradigms (Slice 5): the registry + agent are always rendered; the other
     # built-in paradigm files appear only when selected in spec.paradigms.
     "src/__project_slug__/harness/paradigms/plan.py.j2": lambda spec: "plan" in spec.paradigms,

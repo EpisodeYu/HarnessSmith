@@ -1,0 +1,272 @@
+"""Multi-agent via subagents (agent-as-tool) — the orchestrator-worker pattern.
+
+Generated only when ``subagents.enabled`` (opt-in). This is the same shape mature
+harnesses use (Claude Code's ``Task`` tool, Anthropic Sub-agents, OpenAI
+agent-as-tool): a single ``dispatch`` tool the SUPERVISOR (the normal ``agent``
+paradigm) calls when it judges a subtask is worth delegating. There is no new
+paradigm and no change to the core loop — delegation is just a tool.
+
+Each worker runs in its OWN fresh context (strong context isolation — the win
+that motivates the pattern), with its own scoped tool allowlist and its own LLM
+profile. Several tasks in one ``dispatch`` call fan out in PARALLEL over a stdlib
+thread pool; results come back in input order for the supervisor to synthesize.
+
+Fixed topology, depth 1: a worker is never offered the ``dispatch`` tool, so
+workers cannot spawn further subagents (no runaway recursion). This stays inside
+the project's red line — plain generated code over ``concurrent.futures``, NOT an
+orchestration framework / DSL / dynamic graph.
+
+The roster (which workers exist, their prompts / tools / profiles) lives in
+``config.yaml`` under ``subagents:`` (a runtime knob — edit without regenerating).
+Add or change a worker there; ``register_subagent_tools`` re-reads it.
+"""
+
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+
+from .config import Config, SubagentDef
+from .tools import SAFE, Registry, Tool
+from .tools import registry as default_registry
+
+# The one tool the supervisor calls to delegate. A worker never gets it (depth 1).
+DISPATCH_TOOL = "dispatch"
+
+_DISPATCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "tasks": {
+            "type": "array",
+            "description": (
+                "The subtasks to delegate. List SEVERAL to run them in parallel "
+                "(fan out independent work); list one to delegate a single task."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "agent": {
+                        "type": "string",
+                        "description": "Which subagent to use (see the names listed above).",
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": (
+                            "The self-contained task for that subagent. It runs in a "
+                            "fresh context, so include everything it needs to know."
+                        ),
+                    },
+                },
+                "required": ["agent", "task"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["tasks"],
+    "additionalProperties": False,
+}
+
+
+def _dispatch_description(agent_defs: list[SubagentDef]) -> str:
+    roster = "; ".join(
+        f"{a.name} ({a.description})" if a.description else a.name for a in agent_defs
+    )
+    return (
+        "Delegate one or more independent subtasks to specialized worker subagents "
+        "and get their results back. Pass `tasks` as a list of {agent, task}: list "
+        "SEVERAL at once and they run in PARALLEL — use this to fan out independent "
+        "work (research, analysis, drafting) and keep your own context clean. Each "
+        "worker runs in its OWN fresh context with its OWN tools, so give it a "
+        "self-contained task with all the context it needs. You stay responsible "
+        f"for synthesizing the results into the final answer. Subagents: {roster}."
+    )
+
+
+def _run_subagent(
+    agent_def: SubagentDef,
+    task: str,
+    *,
+    config: Config,
+    client,
+    ledger,
+    registry: Registry,
+) -> tuple[str, int]:
+    """Run ONE worker turn in isolation; return ``(answer, steps)``.
+
+    Fresh history (context isolation), a scoped tool allowlist (never including
+    ``dispatch`` — depth 1), and the worker's own profile. Reuses the same shared
+    loop plumbing the built-in paradigms use (``generate`` / ``run_tool``), so a
+    worker behaves like a small self-contained agent without touching the core
+    loop. Its spend still accrues to the shared cost ledger; its trace is isolated
+    (never written to the supervisor's JSONL)."""
+    from .hooks import Hooks
+    from .paradigms import assistant_message, generate, run_tool
+    from .trace import Trace
+    from .usage import LLMBudgetExceeded
+
+    profile = config.profile_for(agent_def.role)
+    active = [
+        name
+        for name in registry.active_names(
+            set(agent_def.tools), allow_high_risk=agent_def.allow_high_risk
+        )
+        if name != DISPATCH_TOOL
+    ]
+    allowed = set(active)
+    schemas = registry.schemas(active)
+
+    # Isolated trace: workers never write the parent run's JSONL (no interleaving),
+    # but their token usage still accrues to the shared per-LLM cost ledger.
+    trace = Trace(enabled=False)
+    trace.ledger = ledger
+
+    messages: list[dict] = [
+        {"role": "system", "content": agent_def.prompt},
+        {"role": "user", "content": task},
+    ]
+    hooks = Hooks()
+    steps = 0
+    answer = ""
+    while True:
+        if agent_def.max_steps and steps >= agent_def.max_steps:
+            answer = answer or f"(subagent stopped after {agent_def.max_steps} steps)"
+            break
+        try:
+            if ledger is not None:
+                ledger.ensure_within(profile)
+        except LLMBudgetExceeded as exc:
+            answer = exc.message()
+            break
+        response, messages = generate(
+            client, messages, schemas or None, config=config, fallback_name=profile.fallback
+        )
+        trace.add_usage(response.usage, profile)
+        if not response.tool_calls:
+            answer = response.content or ""
+            break
+        messages.append(assistant_message(response))
+        for call in response.tool_calls:
+            result = run_tool(
+                registry,
+                call,
+                hooks,
+                trace,
+                allowed=allowed,
+                max_result_chars=config.context.max_tool_result_chars,
+                result_strategy=config.context.tool_result_strategy,
+            )
+            messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
+        steps += 1
+    return answer, steps
+
+
+def _format_results(results: list[tuple[str, str, int]]) -> str:
+    blocks = [f"Dispatched {len(results)} subagent task(s)."]
+    for name, answer, steps in results:
+        plural = "s" if steps != 1 else ""
+        blocks.append(f"\n--- [{name}] ({steps} step{plural}) ---\n{answer}".rstrip())
+    return "\n".join(blocks)
+
+
+def register_subagent_tools(
+    config: Config,
+    registry: Registry = default_registry,
+    *,
+    mock: bool = False,
+    ledger=None,
+) -> list[str]:
+    """Register the ``dispatch`` tool so the supervisor can delegate; return its
+    name (``["dispatch"]``) or ``[]`` when no subagents are configured.
+
+    Reads the roster from ``config.subagents`` each call, so a config reload picks
+    up roster edits. With no workers configured the ``dispatch`` tool is removed
+    (so an empty roster offers nothing). ``mock`` routes workers through the
+    offline mock LLM (tests / ``--mock`` smoke); ``ledger`` shares the caller's
+    cost ledger (default: the persistent ``.harness/usage.json`` one). Call once at
+    startup next to the other runtime tool registrations (CLI run/chat/serve, web
+    create_app)."""
+    sub = getattr(config, "subagents", None)
+    if sub is None or not sub.agents:
+        registry.unregister(DISPATCH_TOOL)
+        return []
+
+    agents = {a.name: a for a in sub.agents}
+    max_parallel = max(1, int(sub.max_parallel))
+    shared_ledger = ledger if ledger is not None else _default_ledger()
+
+    def _client(role: str):
+        if mock:
+            from .mock import MockLLM
+
+            return MockLLM()
+        # A fresh client per worker so parallel workers never share mutable client
+        # state; real provider clients are safe to use concurrently.
+        from .llm import client_for_profile_name
+
+        return client_for_profile_name(config, config.profile_for(role).name)
+
+    def _run_one(item: dict) -> tuple[str, str, int]:
+        name = str(item.get("agent", "")).strip()
+        task = str(item.get("task", "")).strip()
+        agent_def = agents.get(name)
+        if agent_def is None:
+            return name or "?", f"ERROR: unknown subagent {name!r}; available: {sorted(agents)}", 0
+        if not task:
+            return name, f"ERROR: empty task for subagent {name!r}", 0
+        try:
+            client = _client(agent_def.role)
+            answer, steps = _run_subagent(
+                agent_def, task, config=config, client=client,
+                ledger=shared_ledger, registry=registry,
+            )
+            return name, answer, steps
+        except Exception as exc:  # a worker failure is reported, never crashes the supervisor
+            return name, f"ERROR: subagent {name!r} failed: {type(exc).__name__}: {exc}", 0
+
+    def dispatch(tasks: list | None = None) -> str:
+        items = [t for t in (tasks or []) if isinstance(t, dict)]
+        if not items:
+            return "ERROR: dispatch needs a non-empty `tasks` list of {agent, task} objects."
+        # Parallel fan-out over a bounded stdlib thread pool; results stay in input
+        # order (not completion order). A single task skips the pool entirely.
+        if len(items) == 1:
+            results = [_run_one(items[0])]
+        else:
+            with ThreadPoolExecutor(max_workers=min(max_parallel, len(items))) as pool:
+                results = list(pool.map(_run_one, items))
+        return _format_results(results)
+
+    registry.register(
+        Tool(
+            name=DISPATCH_TOOL,
+            description=_dispatch_description(sub.agents),
+            parameters=_DISPATCH_SCHEMA,
+            func=dispatch,
+            risk=SAFE,
+        )
+    )
+    return [DISPATCH_TOOL]
+
+
+def subagents_section(config: Config) -> str:
+    """The system-prompt block telling the supervisor it can delegate (``""`` when
+    no subagents are configured). Injected by ``build_system_prompt``."""
+    sub = getattr(config, "subagents", None)
+    if sub is None or not sub.agents:
+        return ""
+    roster = "\n".join(
+        f"- {a.name}: {a.description}" if a.description else f"- {a.name}"
+        for a in sub.agents
+    )
+    return (
+        "You can delegate work to specialized subagents with the `dispatch` tool. "
+        "Each runs in its own isolated context with its own tools and returns a "
+        "result for you to synthesize. Delegate INDEPENDENT subtasks together in a "
+        "single dispatch call so they run in parallel; do simple steps yourself "
+        "rather than over-delegating. Available subagents:\n" + roster
+    )
+
+
+def _default_ledger():
+    from .usage import UsageLedger
+
+    return UsageLedger()
