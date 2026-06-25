@@ -457,6 +457,7 @@
         role_generation: "generation (main loop)", role_compaction: "compaction (summarize)",
         role_title: "title (session naming)",
 {% if spec.memory.enabled %}        role_memory: "memory (long-term memory manager)",
+{% endif %}{% if spec.subagents.enabled %}        role_subagents: "subagents (subagent workers)",
 {% endif %}        profile_name: "name", profile_model: "model", profile_provider: "provider",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "env var name",
@@ -610,6 +611,7 @@
         role_generation: "generation(主循环)", role_compaction: "compaction(压缩)",
         role_title: "title(会话命名)",
 {% if spec.memory.enabled %}        role_memory: "memory(长期记忆管理)",
+{% endif %}{% if spec.subagents.enabled %}        role_subagents: "subagents(子代理 worker)",
 {% endif %}        profile_name: "名称", profile_model: "model", profile_provider: "provider",
         profile_key_section: "API key", profile_url_section: "Base URL",
         profile_varname: "环境变量名",
@@ -2082,7 +2084,7 @@
       rc.innerHTML = "";
       const roles = cfg.roles || {};
       const first = firstProfileName();
-      const names = ["generation", "compaction", "title"{% if spec.memory.enabled %}, "memory"{% endif %}];
+      const names = ["generation", "compaction", "title"{% if spec.memory.enabled %}, "memory"{% endif %}{% if spec.subagents.enabled %}, "subagents"{% endif %}];
       Object.keys(roles).forEach((r) => { if (!names.includes(r)) names.push(r); });
       names.forEach((role) => {
         const selected = (role in prev) ? prev[role] : (roles[role] || first);

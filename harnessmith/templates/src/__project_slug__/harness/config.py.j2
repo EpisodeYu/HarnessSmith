@@ -404,8 +404,11 @@ class McpConfig(BaseModel):
     Each worker the supervisor can delegate to via the ``subagents`` tool. ``prompt``
     is the worker's system prompt (its persona/instructions; it runs in a fresh,
     isolated context — no global rules/memory are injected). ``role`` picks its LLM
-    profile (falls back to the first profile when unset — point workers at a cheaper
-    model to save cost). ``tools`` is the worker's OWN allowlist (a subset of the
+    profile and defaults to the ``subagents`` role, so the model all workers use is
+    a single knob in ``roles`` (Config -> LLM -> Roles on the web) — point it at a
+    cheaper model to save cost; it falls back to the first profile when unset. Set
+    a different ``role`` here to give one worker its own model. ``tools`` is the
+    worker's OWN allowlist (a subset of the
     registered tools); leave it EMPTY to give the worker every read-only (SAFE)
     tool by default (the same set the plan/ask paradigms offer), so a worker can
     do something out of the box. ``subagents`` is always excluded so workers can't
@@ -419,7 +422,7 @@ class McpConfig(BaseModel):
     name: str
     description: str = ""
     prompt: str
-    role: str = "generation"
+    role: str = "subagents"
     tools: list[str] = Field(default_factory=list)
     allow_high_risk: bool = False
     max_steps: int = Field(default=12, ge=1)

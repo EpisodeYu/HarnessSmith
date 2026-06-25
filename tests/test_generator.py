@@ -977,6 +977,7 @@ def test_subagents_disabled_omits_footprint(tmp_path, preset_spec):
 
 def test_subagents_enabled_generates_support(tmp_path, spec):
     spec.subagents.enabled = True
+    spec.interfaces.web = True  # also exercise the web Roles UI wiring
     out = tmp_path / "sub"
     generate(spec, out, git_init=False)
     pkg = out / "src" / "agent_harness"
@@ -987,16 +988,24 @@ def test_subagents_enabled_generates_support(tmp_path, spec):
     config_py = (pkg / "harness" / "config.py").read_text(encoding="utf-8")
     assert "class SubagentsConfig" in config_py and "subagents: SubagentsConfig" in config_py
     assert "class SubagentDef" in config_py
+    assert 'role: str = "subagents"' in config_py  # workers default to the dedicated role
 
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
     assert "subagents:" in config_yaml and "max_parallel:" in config_yaml
     assert "- name: subagents" in config_yaml  # the delegate tool is allowlisted
+    assert "role: subagents" in config_yaml  # the seeded roster uses the subagents role
+    assert "# subagents:" in config_yaml  # the optional roles->profile mapping hint
 
     prompts_py = (pkg / "harness" / "prompts.py").read_text(encoding="utf-8")
     assert "subagents_section" in prompts_py
 
     cli_py = (pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
     assert "_setup_subagents" in cli_py
+
+    # The web Roles section exposes `subagents` as an explicitly configurable role.
+    web_index = (pkg / "interfaces" / "web_index.html").read_text(encoding="utf-8")
+    assert "role_subagents" in web_index
+    assert '"subagents"' in web_index  # added to the buildRoles names list
 
     # subagents.py is valid Python; the snapshot only records the enable flag
     py_compile.compile(str(pkg / "harness" / "subagents.py"), doraise=True)

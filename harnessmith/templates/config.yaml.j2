@@ -65,12 +65,13 @@ llms:
 # Map roles to profile names above. `generation` is the main loop; `compaction`
 # (optional) is used by context summarize; `title` (optional) names sessions in
 # the web sidebar{% if spec.memory.enabled %}; `memory` (optional) is the memory manager that consolidates
-# long-term memory{% endif %}. All optional roles fall back to the first profile if unset.
+# long-term memory{% endif %}{% if spec.subagents.enabled %}; `subagents` (optional) is the model the subagent workers use{% endif %}. All optional roles fall back to the first profile if unset.
 roles:
 {% for role, target in roles.items() %}  {{ role }}: {{ target }}
 {% endfor %}{% if "compaction" not in roles %}  # compaction: {{ (llms[0].name if llms else "default") }}
 {% endif %}{% if "title" not in roles %}  # title: {{ (llms[0].name if llms else "default") }}        # web session-title model (a small/cheap model is ideal)
 {% endif %}{% if spec.memory.enabled and "memory" not in roles %}  # memory: {{ (llms[0].name if llms else "default") }}       # long-term memory manager (used by `memory consolidate`)
+{% endif %}{% if spec.subagents.enabled and "subagents" not in roles %}  # subagents: {{ (llms[0].name if llms else "default") }}    # model the subagent workers use (a cheaper model is ideal; editable under Config -> LLM -> Roles)
 {% endif %}
 prompts:
 {% if spec.prompts.system %}  # The base system prompt (a runtime knob — edit it freely). Rendered as a YAML
@@ -287,7 +288,7 @@ subagents:
   agents:
     - name: researcher
       description: "Gathers facts and investigates with read-only tools."
-      role: generation        # falls back to the first profile if unset
+      role: subagents         # the shared `subagents` role above (edit it under Config -> LLM -> Roles); falls back to the first profile if unset
       prompt: |-
         You are a focused research subagent. Investigate the given task using your
         tools, then report concise, well-organized findings the supervisor can use.
@@ -297,7 +298,7 @@ subagents:
       max_steps: 12
     - name: writer
       description: "Drafts and edits prose from provided material."
-      role: generation
+      role: subagents
       prompt: |-
         You are a writing subagent. Produce a clear, well-structured draft for the
         given task using only the material in the task. Be concise and accurate.

@@ -406,7 +406,7 @@ subagents:
   agents:
     - name: researcher
       description: "Gathers facts with read-only tools."
-      role: generation       # which LLM profile (use a cheaper model to save cost)
+      role: subagents        # the shared `subagents` role -> set its model under Config -> LLM -> Roles (a cheaper model saves cost)
       prompt: |-
         You are a focused research subagent. ...
       tools: [get_current_time, calculator]   # the worker's OWN allowlist
