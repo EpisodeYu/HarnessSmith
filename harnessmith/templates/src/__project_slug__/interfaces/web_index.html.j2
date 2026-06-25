@@ -1814,6 +1814,7 @@
         closeThinking();
         if (ev.data) line(view, "error: " + ev.data, "text-red-600");
         finishStream();
+        loadSessions();  // a failed turn still persisted the opening message — show it in the picker
       });
       es.addEventListener("stopped", (ev) => {
         closeThinking();

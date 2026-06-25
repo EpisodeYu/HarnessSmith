@@ -620,6 +620,37 @@ def test_chat_persists_session_and_lists_it(tmp_path):
     )
 
 
+def test_chat_first_turn_failure_still_persists_session(tmp_path, monkeypatch):
+    """A first-turn web chat that fails at the model call still leaves the opening
+    message on disk (the loop's pre-call checkpoint), so /sessions lists it — only a
+    turn the user never sent stays unsaved. Guards the 'failed chat vanished from the
+    sidebar' regression."""
+    import {{ project_slug }}.interfaces.web as webmod
+
+    class _BoomClient:
+        def complete(self, *a, **k):
+            raise RuntimeError("boom: bad model")
+
+        def stream(self, *a, **k):
+            raise RuntimeError("boom: bad model")
+
+    class _BoomRouter:
+        def __init__(self, *a, **k):
+            pass
+
+        def client_for(self, role="generation"):
+            return _BoomClient()
+
+    # Force the (real, non-mock) client path to fail at the first model call.
+    monkeypatch.setattr(webmod, "ClientRouter", _BoomRouter)
+    client = _session_client(tmp_path, auto_title=False)
+    body = client.get("/chat", params={"message": "remember me", "stream": "false"}).text
+    assert "event: error" in body  # the run failed
+
+    listing = client.get("/sessions").json()["sessions"]
+    assert [s["preview"] for s in listing] == ["remember me"]  # but it was persisted
+
+
 def test_chat_resumes_prior_session(tmp_path):
     """?session=<id> resumes: the second turn's saved body includes the first."""
     client = _session_client(tmp_path)
