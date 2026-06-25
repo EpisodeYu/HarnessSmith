@@ -192,6 +192,10 @@
         <label class="block text-sm"><span data-i18n="ctx_maxsteps_label">max_steps</span>
           <input id="cfg-ctx-maxsteps" type="number" min="0" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
           <span class="block text-xs text-gray-500" data-i18n="ctx_maxsteps_hint">Hard ceiling on tool-call steps per turn (0 = unlimited).</span></label>
+{% if spec.subagents.enabled %}        <label class="block text-sm"><span data-i18n="ctx_sub_maxsteps_label">subagents max_steps</span>
+          <input id="cfg-ctx-sub-maxsteps" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
+          <span class="block text-xs text-gray-500" data-i18n="ctx_sub_maxsteps_hint">Roster-wide cap on a worker's tool-call rounds (a worker may override its own).</span></label>
+{% endif %}
         <div>
           <p class="text-sm" data-i18n="ctx_triggers_label">Triggers (threshold; blank = off)</p>
           <p class="text-xs text-gray-500" data-i18n="ctx_triggers_hint">Blank = off. window_pct compacts at a fraction of a profile's context_window.</p>
@@ -483,6 +487,9 @@
         ctx_trunc_hint: "How an oversized result is capped: middle keeps the head and tail; head/tail keep one end.",
         ctx_maxsteps_label: "max_steps (agent loop ceiling)",
         ctx_maxsteps_hint: "Hard ceiling on tool-call steps within one turn (0 = unlimited; continue the session to run past it).",
+{% if spec.subagents.enabled %}        ctx_sub_maxsteps_label: "subagents max_steps (per-worker ceiling)",
+        ctx_sub_maxsteps_hint: "Roster-wide cap on a worker's tool-call rounds. A worker is always finitely bounded; a worker may set its own max_steps to override this.",
+{% endif %}
         ctx_triggers_label: "Trigger thresholds",
         ctx_triggers_hint: "Blank = off. window_pct compacts at a fraction of a profile's context_window.",
         ctx_extend_hint: "Register @register_strategy / @register_condition / @register_truncator in harness/context.py; they appear here once imported. See AGENTS.md.",
@@ -637,6 +644,9 @@
         ctx_trunc_hint: "超限后如何截断:middle 保留头尾、丢中间;head/tail 只保留一端。",
         ctx_maxsteps_label: "max_steps(单轮循环上限)",
         ctx_maxsteps_hint: "单轮内工具调用步数的硬上限(0=不限;继续会话可越过它)。",
+{% if spec.subagents.enabled %}        ctx_sub_maxsteps_label: "子代理 max_steps(每个 worker 的上限)",
+        ctx_sub_maxsteps_hint: "对所有 worker 生效的工具调用轮数上限。worker 始终有限受控;某个 worker 可设自己的 max_steps 覆盖此值。",
+{% endif %}
         ctx_triggers_label: "触发阈值",
         ctx_triggers_hint: "留空不启用。window_pct 按 profile 的 context_window 的比例触发压缩。",
         ctx_extend_hint: "在 harness/context.py 用 @register_strategy / @register_condition / @register_truncator 注册自定义项,import 后在此出现。详见 AGENTS.md。",
@@ -2145,6 +2155,9 @@
       tsel.value = ctx.tool_result_strategy || "middle";
       // max_steps is a top-level config field (loop safety valve), surfaced here.
       $("cfg-ctx-maxsteps").value = cfg.max_steps ?? 50;
+{% if spec.subagents.enabled %}      // subagents.max_steps is the roster-wide per-worker cap, surfaced alongside.
+      $("cfg-ctx-sub-maxsteps").value = (cfg.subagents && cfg.subagents.max_steps) ?? 20;
+{% endif %}
       const trig = ctx.triggers || {};
       const names = reg.conditions.slice();
       Object.keys(trig).forEach((n) => { if (!names.includes(n)) names.push(n); });
@@ -2871,6 +2884,14 @@
       };
       // max_steps is a top-level field (not under context), saved alongside.
       patch.max_steps = Number($("cfg-ctx-maxsteps").value || 0);
+{% if spec.subagents.enabled %}      // subagents.max_steps (roster-wide per-worker cap). A POST replaces the whole
+      // `subagents` key, so send it intact (roster + max_parallel) with only the cap
+      // changed; blank/0 falls back to 20 (the field is >= 1, no "unlimited").
+      patch.subagents = {
+        ...(cfg.subagents || {}),
+        max_steps: Number($("cfg-ctx-sub-maxsteps").value) || 20,
+      };
+{% endif %}
       const triggers = {};
       document.querySelectorAll("#cfg-ctx-triggers .cfg-trigger").forEach((el) => {
         const v = numOrNull(el.value); if (v != null) triggers[el.dataset.cond] = v;

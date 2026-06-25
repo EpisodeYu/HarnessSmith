@@ -281,10 +281,11 @@ memory:
 # worker at an LLM profile above (use a cheaper model for workers); `tools` is the
 # worker's OWN allowlist (a subset of the tools registered above) — leave it EMPTY
 # to give the worker every read-only (SAFE) tool by default (high-risk tools stay
-# opt-in: list them explicitly + set allow_high_risk); `max_steps` caps its tool
-# rounds. See harness/subagents.py.
+# opt-in: list them explicitly + set allow_high_risk); per-worker `max_steps` caps
+# its tool rounds (omit to inherit `subagents.max_steps` below). See harness/subagents.py.
 subagents:
   max_parallel: 4   # how many delegated tasks may run at once (thread-pool bound)
+  max_steps: 20     # roster-wide cap on a worker's tool rounds; a worker may override with its own max_steps
   agents:
     - name: researcher
       description: "Gathers facts and investigates with read-only tools."
@@ -295,5 +296,5 @@ subagents:
         Do not ask the user questions; work with what you are given.
       tools: []   # empty = every read-only (SAFE) tool by default (built-ins + MCP tools you marked read-only); list names explicitly to narrow it
       allow_high_risk: false   # true lets this worker use risk=high tools it lists (workers run non-interactive)
-      max_steps: 12
+      # max_steps: 30   # optional per-worker override; omitted = inherit subagents.max_steps (20) above
 {% endif %}

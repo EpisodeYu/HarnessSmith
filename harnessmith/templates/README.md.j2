@@ -280,8 +280,9 @@ the main agent synthesizes.
 Configure the roster under `subagents:` in `config.yaml` (each worker's name,
 prompt, `role` = which LLM profile — defaults to the shared `subagents` role, so
 the workers' model is one knob under `roles:` (Config → LLM → Roles on the web) —
-its own `tools` allowlist — empty = every read-only tool by default — and
-`max_steps`).
+its own `tools` allowlist — empty = every read-only tool by default — and an
+optional per-worker `max_steps`). The roster-wide `subagents.max_steps` (default
+20) caps a worker that doesn't set its own — surfaced on the web Context page.
 Workers never get the `subagents` tool, so the topology is fixed at depth 1 (no
 runaway recursion). It's plain code over a thread pool — no agent framework. See
 [`AGENTS.md`](./AGENTS.md).

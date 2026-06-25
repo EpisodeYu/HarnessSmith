@@ -130,6 +130,42 @@ def test_worker_empty_tools_defaults_to_all_readonly():
     assert offered == {"safe_read"}  # SAFE only: danger (HIGH) and subagents excluded
 
 
+def test_worker_step_cap_inherits_roster_default_and_can_override():
+    """A worker with no `max_steps` inherits the roster-wide `subagents.max_steps`;
+    a worker with its own `max_steps` overrides it. The 'stopped after N steps'
+    message names the effective cap."""
+    reg = Registry()
+    reg.register(Tool("echo", "echo", {"type": "object", "properties": {}}, lambda: "ok", SAFE))
+
+    # Roster default = 2; the worker sets no max_steps -> inherits it.
+    config = _config(agents=[{"name": "w", "prompt": "You are W.", "tools": ["echo"]}], max_steps=2)
+    assert config.subagents.max_steps == 2
+    assert config.subagents.agents[0].max_steps is None  # unset -> inherit
+    answer, steps = _run_subagent(
+        config.subagents.agents[0], "go", config=config,
+        client=MockLLM(script=[ScriptedCall("echo", {})] * 10),
+        ledger=UsageLedger(path=None), registry=reg,
+    )
+    assert steps == 2 and "stopped after 2 steps" in answer
+
+    # An explicit per-worker max_steps overrides the roster default.
+    config2 = _config(
+        agents=[{"name": "w", "prompt": "You are W.", "tools": ["echo"], "max_steps": 1}],
+        max_steps=2,
+    )
+    answer2, steps2 = _run_subagent(
+        config2.subagents.agents[0], "go", config=config2,
+        client=MockLLM(script=[ScriptedCall("echo", {})] * 10),
+        ledger=UsageLedger(path=None), registry=reg,
+    )
+    assert steps2 == 1 and "stopped after 1 steps" in answer2
+
+
+def test_subagents_roster_max_steps_defaults_to_twenty():
+    """The roster-wide subagent step cap defaults to 20 when unset."""
+    assert _config().subagents.max_steps == 20
+
+
 def test_subagents_parallel_fan_out_returns_all_results():
     reg = Registry()
     led = UsageLedger(path=None)

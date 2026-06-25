@@ -87,7 +87,9 @@ def test_index_has_context_max_steps_and_truncation_controls():
     assert 'id="cfg-ctx-trunc"' in body  # tool-result truncation strategy dropdown
     assert "ctx_maxsteps_label" in body and "ctx_trunc_label" in body
     assert "patch.max_steps" in body  # saved on the config patch
-    assert "data-lpignore" in body and "autocomplete='new-password'" in body  # no autofill
+{% if spec.subagents.enabled %}    assert 'id="cfg-ctx-sub-maxsteps"' in body  # subagent step cap editable too
+    assert "patch.subagents" in body  # sent intact on the config patch
+{% endif %}    assert "data-lpignore" in body and "autocomplete='new-password'" in body  # no autofill
 
 
 def test_index_does_not_yank_reader_to_bottom_mid_stream():
@@ -1011,6 +1013,25 @@ def test_config_get_exposes_max_steps_for_the_context_tab():
     data = _client().get("/config").json()
     assert "max_steps" in data
     assert isinstance(data["max_steps"], int)
+
+
+{% if spec.subagents.enabled %}def test_config_round_trips_subagents_max_steps_without_dropping_the_roster():
+    """The Context tab edits the roster-wide subagent step cap. A POST replaces the
+    whole `subagents` key, so the frontend sends it intact — the worker roster must
+    survive, with only max_steps changed (a worker with no cap inherits the default)."""
+    client = _client()
+    before = client.get("/config").json()
+    assert "subagents" in before and "max_steps" in before["subagents"]
+    # Emulate the Context save: the full subagents object with only max_steps changed.
+    sub = {**before["subagents"], "max_steps": 7,
+           "agents": [{"name": "w", "prompt": "You are W."}]}
+    resp = client.post("/config", json={"subagents": sub})
+    assert resp.status_code == 200, resp.text
+    after = client.get("/config").json()["subagents"]
+    assert after["max_steps"] == 7  # the cap changed
+    assert [a["name"] for a in after["agents"]] == ["w"]  # the roster survived
+    assert after["agents"][0]["max_steps"] is None  # unset worker inherits the default
+{% endif %}
 
 
 def test_config_post_round_trips_max_steps_and_tool_result_strategy():

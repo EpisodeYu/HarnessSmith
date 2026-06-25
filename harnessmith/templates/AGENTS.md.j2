@@ -403,6 +403,7 @@ The roster is a runtime knob in `config.yaml` under `subagents:` — edit it fre
 ```yaml
 subagents:
   max_parallel: 4            # how many delegated tasks run at once
+  max_steps: 20              # roster-wide cap on a worker's tool rounds (a worker may override its own)
   agents:
     - name: researcher
       description: "Gathers facts with read-only tools."
@@ -411,7 +412,7 @@ subagents:
         You are a focused research subagent. ...
       tools: []   # empty = every read-only (SAFE) tool by default; list names to narrow it
       allow_high_risk: false
-      max_steps: 12
+      # max_steps: 30        # optional per-worker override; omitted = inherit subagents.max_steps
 ```
 
 Each worker's `tools` is its own allowlist (a subset of the tools registered in
@@ -422,9 +423,10 @@ tool by default** (the same set the plan/ask paradigms offer) — high-risk tool
 `subagents` tool, so workers cannot spawn further subagents. Workers run
 **non-interactive** (no HITL prompts), so keep `allow_high_risk: false` unless you
 mean it. An empty roster removes the `subagents` tool entirely. Each worker's spend still counts
-toward the per-LLM cost limits (`harness/usage.py`); its own steps are bounded by
-`max_steps`. Delegate only **independent** subtasks — for one long chain of
-reasoning, don't decompose.
+toward the per-LLM cost limits (`harness/usage.py`); its tool rounds are bounded by
+the roster-wide `subagents.max_steps` (default 20), which a worker may override with
+its own `max_steps` (a worker is always finitely bounded — there is no unlimited).
+Delegate only **independent** subtasks — for one long chain of reasoning, don't decompose.
 {% endif %}
 ## Stop / continue / re-ask
 

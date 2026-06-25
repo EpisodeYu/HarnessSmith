@@ -13,7 +13,7 @@
 - **作用域工具**:worker 的 `tools` 是它**自己的 allowlist**(已注册工具的子集),经 `registry.active_names(set(worker.tools), allow_high_risk=worker.allow_high_risk)` 过滤;**`subagents` 始终被剔除**(深度 1,带兜底:`run_tool` 的 `allowed` 也不含 subagents)。
 - **并行 fan-out**:一次 `subagents(tasks=[...])` 列多个 `{agent, task}` → `ThreadPoolExecutor(max_workers=max_parallel)` 并发;结果按**输入顺序**(非完成顺序)合并返回。单任务跳过线程池。
 - **非交互 worker**:worker 线程不继承 HITL confirmer/asker 的 ContextVar(`confirm_tool` 无 confirmer = 放行;`ask` 无 asker = 「无人可问」降级),即 worker 不弹 HITL、不挂起。supervisor 自身的工具仍走 HITL。
-- **预算 / runaway**:worker 花费经共享 `UsageLedger`(自带锁,线程安全)汇入 `.harness/usage.json`,受各 profile `cost_limit` 约束;worker 自身步数受 `max_steps` 上限;主回合受 supervisor `max_steps`/`cost_limit`。
+- **预算 / runaway**:worker 花费经共享 `UsageLedger`(自带锁,线程安全)汇入 `.harness/usage.json`,受各 profile `cost_limit` 约束;worker 步数受其自身 `max_steps`(未设则继承 roster 级 `subagents.max_steps`,默认 20)上限——worker 始终有限受控;主回合受 supervisor `max_steps`/`cost_limit`。Web Context 页面可显式配置该 roster 级上限(参考主循环 `max_steps`)。
 - **trace 隔离**:worker 用 `Trace(enabled=False)`(不写父 JSONL,避免并发抢写),但挂共享 ledger 让花费照常累计。
 - **关闭零痕迹**:`spec.subagents.enabled` 默认 `false` → 不渲染 `subagents.py`/`test_subagents.py`,config/prompts/cli/web 的所有片段全部门控 → 关掉时产物与无 subagents 生成逐字一致;无新增依赖。
 
@@ -37,7 +37,7 @@
 - 向导(CLI `cli_wizard.py` + Web `wizard/static/index.html`)— 能力组新增「启用多 agent 子代理」开关(**默认勾选**,见 §7 调整记录);`build_spec` 写 `subagents.enabled`;Web JS 写 `spec.subagents`。
 
 ### 运行期配置
-- 产物 `harness/config.py` — `SubagentDef(name, description, prompt, role="generation", tools=[], allow_high_risk=False, max_steps=12)` + `SubagentsConfig(max_parallel=4, agents=[])`(门控)+ `Config.subagents`。
+- 产物 `harness/config.py` — `SubagentDef(name, description, prompt, role="subagents", tools=[], allow_high_risk=False, max_steps=None)`(`max_steps=None` 表示继承 roster 级默认)+ `SubagentsConfig(max_parallel=4, max_steps=20, agents=[])`(门控)+ `Config.subagents`。
 - 产物 `config.yaml` — `subagents:` 块(门控,种单个 `researcher` 示例 worker,`tools: []` = 默认全只读)+ `tools:` 里 `subagents` allowlist 条目。
 
 ### 接线(全部门控)
@@ -102,7 +102,7 @@ flowchart TD
 2. **作用域工具 + 深度 1**:`active = [n for n in registry.active_names(set(agent_def.tools), allow_high_risk=agent_def.allow_high_risk) if n != SUBAGENTS_TOOL]`;`allowed=set(active)`;`schemas = registry.schemas(active)`。`subagents` 被显式剔除 → worker **拿不到委派工具**(兜底:`run_tool(..., allowed=allowed)` 在执行边界再拒一次)。
 3. **上下文隔离**:`messages = [{"role":"system","content":agent_def.prompt}, {"role":"user","content":task}]` —— **全新 history**,不带 supervisor 对话 / 全局 system / rules / memory / skills。
 4. **trace 隔离**:`trace = Trace(enabled=False)`(不写父 JSONL,规避并发抢写);`trace.ledger = ledger`(花费照常累计)。
-5. **循环**:`while True:` 先 `max_steps` 上限(到顶 break,`answer="(subagent stopped after N steps)"`)→ `ledger.ensure_within(profile)`(预算 block_stop)→ `generate(client, messages, schemas or None, config=config, fallback_name=profile.fallback)`(`context_cfg=None` 故关闭溢出救援,保留 fallback)→ `trace.add_usage` → 无 tool_calls 则 `answer=content` break;否则 `assistant_message` + 逐个 `run_tool(...)` + 追加 tool 结果 → `steps += 1`。
+5. **循环**:`while True:` 先算有效步数上限 `step_cap = agent_def.max_steps if 设置 else config.subagents.max_steps`,到顶 break(`answer="(subagent stopped after N steps)"`)→ `ledger.ensure_within(profile)`(预算 block_stop)→ `generate(client, messages, schemas or None, config=config, fallback_name=profile.fallback)`(`context_cfg=None` 故关闭溢出救援,保留 fallback)→ `trace.add_usage` → 无 tool_calls 则 `answer=content` break;否则 `assistant_message` + 逐个 `run_tool(...)` + 追加 tool 结果 → `steps += 1`。
 6. 返回 `(answer, steps)`。
 
 ### 5.4 client factory(并行安全 + mock)
@@ -123,7 +123,7 @@ flowchart TD
 
 ### 5.7 配置模型(`config.py`,门控)
 
-- `SubagentDef(name, description="", prompt, role="subagents", tools=[], allow_high_risk=False, max_steps=12)`。`role` 默认指向独立的 `subagents` 角色(见 §7-④),`profile_for("subagents")` 未映射时回落首 profile。
+- `SubagentDef(name, description="", prompt, role="subagents", tools=[], allow_high_risk=False, max_steps=None)`(`max_steps=None` 继承 `SubagentsConfig.max_steps`,默认 20)。`role` 默认指向独立的 `subagents` 角色(见 §7-④),`profile_for("subagents")` 未映射时回落首 profile。
 - `SubagentsConfig(max_parallel=4, agents=[])` + `Config.subagents`。
 - `config.yaml` 种单个 `researcher` 示例 worker(`role: subagents`、`tools: []` = 默认全只读)+ `tools:` 里 `subagents` allowlist 条目 + `roles:` 里可选 `subagents:` 映射提示。空 roster → `register_subagent_tools` 返回 `[]` 并 `unregister(subagents)`。
 

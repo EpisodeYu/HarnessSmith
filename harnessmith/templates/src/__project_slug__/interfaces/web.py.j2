@@ -81,6 +81,11 @@ _EDITABLE_FIELDS = (
     # EXISTS) is still generation-time only; this just wires already-present code.
     "extensions", "hooks",
 {% if spec.memory.enabled %}    "memory",
+{% endif %}{% if spec.subagents.enabled %}    # Roster-wide subagent knobs (max_steps default / max_parallel / the worker
+    # roster). The Context page edits the step cap; a POST replaces the whole
+    # `subagents` object, so the frontend sends it intact (same local-trust admin
+    # surface as the rest of /config).
+    "subagents",
 {% endif %})
 
 

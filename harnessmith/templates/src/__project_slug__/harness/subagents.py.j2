@@ -147,9 +147,12 @@ def _run_subagent(
     hooks = Hooks()
     steps = 0
     answer = ""
+    # A worker uses its own max_steps when set, else the roster-wide default
+    # (config.subagents.max_steps) — a worker is always finitely bounded.
+    step_cap = agent_def.max_steps if agent_def.max_steps is not None else config.subagents.max_steps
     while True:
-        if agent_def.max_steps and steps >= agent_def.max_steps:
-            answer = answer or f"(subagent stopped after {agent_def.max_steps} steps)"
+        if step_cap and steps >= step_cap:
+            answer = answer or f"(subagent stopped after {step_cap} steps)"
             break
         try:
             if ledger is not None:

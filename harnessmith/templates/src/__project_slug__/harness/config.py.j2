@@ -415,7 +415,8 @@ class McpConfig(BaseModel):
     recurse — depth 1. ``allow_high_risk`` lets a worker use ``risk="high"`` tools
     it EXPLICITLY lists (default off; workers run non-interactive, so HITL won't
     gate them — an empty ``tools`` never auto-includes high-risk tools).
-    ``max_steps`` caps the worker's tool-call rounds (a per-worker runaway guard)."""
+    ``max_steps`` caps the worker's tool-call rounds (a per-worker runaway guard);
+    leave it unset (``None``) to inherit the roster-wide ``subagents.max_steps``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -425,7 +426,7 @@ class McpConfig(BaseModel):
     role: str = "subagents"
     tools: list[str] = Field(default_factory=list)
     allow_high_risk: bool = False
-    max_steps: int = Field(default=12, ge=1)
+    max_steps: int | None = Field(default=None, ge=1)
 
 
 class SubagentsConfig(BaseModel):
@@ -433,12 +434,16 @@ class SubagentsConfig(BaseModel):
     ``subagents.enabled``). The supervisor is the normal ``agent`` paradigm; it
     delegates to these workers with the ``subagents`` tool when it judges a subtask
     worth it. ``max_parallel`` bounds the fan-out thread pool (several delegated
-    tasks run concurrently). ``agents`` is the worker roster — edit it freely at
-    runtime; an empty roster removes the ``subagents`` tool entirely."""
+    tasks run concurrently). ``max_steps`` is the roster-wide cap on a worker's
+    tool-call rounds, applied to any worker that doesn't set its own ``max_steps``
+    (a runaway guard; a worker always has a finite ceiling — there is no unlimited).
+    ``agents`` is the worker roster — edit it freely at runtime; an empty roster
+    removes the ``subagents`` tool entirely."""
 
     model_config = ConfigDict(extra="forbid")
 
     max_parallel: int = Field(default=4, ge=1)
+    max_steps: int = Field(default=20, ge=1)
     agents: list[SubagentDef] = Field(default_factory=list)
 
 
