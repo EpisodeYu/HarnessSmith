@@ -406,10 +406,13 @@ class McpConfig(BaseModel):
     isolated context — no global rules/memory are injected). ``role`` picks its LLM
     profile (falls back to the first profile when unset — point workers at a cheaper
     model to save cost). ``tools`` is the worker's OWN allowlist (a subset of the
-    registered tools; ``subagents`` is always excluded so workers can't recurse —
-    depth 1). ``allow_high_risk`` lets a worker use ``risk="high"`` tools it lists
-    (default off; workers run non-interactive, so HITL won't gate them). ``max_steps``
-    caps the worker's tool-call rounds (a per-worker runaway guard)."""
+    registered tools); leave it EMPTY to give the worker every read-only (SAFE)
+    tool by default (the same set the plan/ask paradigms offer), so a worker can
+    do something out of the box. ``subagents`` is always excluded so workers can't
+    recurse — depth 1. ``allow_high_risk`` lets a worker use ``risk="high"`` tools
+    it EXPLICITLY lists (default off; workers run non-interactive, so HITL won't
+    gate them — an empty ``tools`` never auto-includes high-risk tools).
+    ``max_steps`` caps the worker's tool-call rounds (a per-worker runaway guard)."""
 
     model_config = ConfigDict(extra="forbid")
 

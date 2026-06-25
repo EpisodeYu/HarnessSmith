@@ -26,7 +26,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 from .config import Config, SubagentDef
-from .tools import SAFE, Registry, Tool
+from .tools import HIGH, SAFE, Registry, Tool
 from .tools import registry as default_registry
 
 # The one tool the supervisor calls to delegate. A worker never gets it (depth 1).
@@ -92,7 +92,8 @@ def _run_subagent(
 ) -> tuple[str, int]:
     """Run ONE worker turn in isolation; return ``(answer, steps)``.
 
-    Fresh history (context isolation), a scoped tool allowlist (never including
+    Fresh history (context isolation), a scoped tool allowlist (the worker's own
+    ``tools``, or every read-only tool when it lists none; never including
     ``subagents`` — depth 1), and the worker's own profile. Reuses the same shared
     loop plumbing the built-in paradigms use (``generate`` / ``run_tool``), so a
     worker behaves like a small self-contained agent without touching the core
@@ -104,13 +105,26 @@ def _run_subagent(
     from .usage import LLMBudgetExceeded
 
     profile = config.profile_for(agent_def.role)
-    active = [
-        name
-        for name in registry.active_names(
-            set(agent_def.tools), allow_high_risk=agent_def.allow_high_risk
-        )
-        if name != SUBAGENTS_TOOL
-    ]
+    if agent_def.tools:
+        # An explicit allowlist: the worker's OWN subset of registered tools.
+        active = [
+            name
+            for name in registry.active_names(
+                set(agent_def.tools), allow_high_risk=agent_def.allow_high_risk
+            )
+            if name != SUBAGENTS_TOOL
+        ]
+    else:
+        # No allowlist given -> default to EVERY read-only (SAFE) tool, so a worker
+        # can actually do something out of the box (the same read-only set the
+        # plan/ask paradigms offer). High-risk tools (shell / file or memory writes)
+        # stay opt-in: list them explicitly with allow_high_risk. Workers run
+        # non-interactive, so these never prompt for HITL confirmation.
+        active = [
+            name
+            for name in registry.names()
+            if name != SUBAGENTS_TOOL and registry.risk_of(name) != HIGH
+        ]
     allowed = set(active)
     schemas = registry.schemas(active)
 

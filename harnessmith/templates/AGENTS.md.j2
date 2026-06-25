@@ -415,10 +415,13 @@ subagents:
 ```
 
 Each worker's `tools` is its own allowlist (a subset of the tools registered in
-this product). **Topology is fixed at depth 1**: a worker never gets the `subagents`
-tool, so workers cannot spawn further subagents. Workers run **non-interactive**
-(no HITL prompts), so keep `allow_high_risk: false` unless you mean it. An empty
-roster removes the `subagents` tool entirely. Each worker's spend still counts
+this product); **leave `tools` empty to give the worker every read-only (SAFE)
+tool by default** (the same set the plan/ask paradigms offer) — high-risk tools
+(shell / file or memory writes) stay opt-in, listed explicitly with
+`allow_high_risk: true`. **Topology is fixed at depth 1**: a worker never gets the
+`subagents` tool, so workers cannot spawn further subagents. Workers run
+**non-interactive** (no HITL prompts), so keep `allow_high_risk: false` unless you
+mean it. An empty roster removes the `subagents` tool entirely. Each worker's spend still counts
 toward the per-LLM cost limits (`harness/usage.py`); its own steps are bounded by
 `max_steps`. Delegate only **independent** subtasks — for one long chain of
 reasoning, don't decompose.

@@ -278,7 +278,8 @@ runs in its own fresh context with its own tools and model, then returns a resul
 the main agent synthesizes.
 
 Configure the roster under `subagents:` in `config.yaml` (each worker's name,
-prompt, `role` = which LLM profile, its own `tools` allowlist, and `max_steps`).
+prompt, `role` = which LLM profile, its own `tools` allowlist — empty = every
+read-only tool by default — and `max_steps`).
 Workers never get the `subagents` tool, so the topology is fixed at depth 1 (no
 runaway recursion). It's plain code over a thread pool — no agent framework. See
 [`AGENTS.md`](./AGENTS.md).

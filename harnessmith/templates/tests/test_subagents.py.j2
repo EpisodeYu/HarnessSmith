@@ -22,7 +22,7 @@ from {{ project_slug }}.harness.subagents import (
     register_subagent_tools,
     subagents_section,
 )
-from {{ project_slug }}.harness.tools import SAFE, Registry, Tool
+from {{ project_slug }}.harness.tools import HIGH, SAFE, Registry, Tool
 from {{ project_slug }}.harness.usage import UsageLedger
 
 
@@ -110,6 +110,24 @@ def test_subagent_isolated_context_scoped_tools_depth1():
     offered = {t["function"]["name"] for t in (client.seen_tools or [])}
     assert offered == {"safe_tool"}
     assert SUBAGENTS_TOOL not in offered
+
+
+def test_worker_empty_tools_defaults_to_all_readonly():
+    """A worker that lists no `tools` is offered EVERY read-only (SAFE) tool by
+    default — but never high-risk tools, and never the subagents tool (depth 1)."""
+    reg = Registry()
+    reg.register(Tool("safe_read", "safe", {"type": "object", "properties": {}}, lambda: "ok", SAFE))
+    reg.register(Tool("danger", "high risk", {"type": "object", "properties": {}}, lambda: "x", HIGH))
+    config = _config(agents=[{"name": "w", "prompt": "You are W.", "tools": [], "max_steps": 2}])
+    register_subagent_tools(config, reg, mock=True)  # also registers the subagents tool into reg
+
+    client = RecordingClient()
+    _run_subagent(
+        config.subagents.agents[0], "do X",
+        config=config, client=client, ledger=UsageLedger(path=None), registry=reg,
+    )
+    offered = {t["function"]["name"] for t in (client.seen_tools or [])}
+    assert offered == {"safe_read"}  # SAFE only: danger (HIGH) and subagents excluded
 
 
 def test_subagents_parallel_fan_out_returns_all_results():

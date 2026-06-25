@@ -278,8 +278,10 @@ memory:
 # `subagents` tool (fixed topology, depth 1 — no recursion). Edit the roster freely
 # (a runtime knob); an empty roster removes the subagents tool. `role` points a
 # worker at an LLM profile above (use a cheaper model for workers); `tools` is the
-# worker's OWN allowlist (a subset of the tools registered above); `max_steps` caps
-# its tool rounds. See harness/subagents.py.
+# worker's OWN allowlist (a subset of the tools registered above) — leave it EMPTY
+# to give the worker every read-only (SAFE) tool by default (high-risk tools stay
+# opt-in: list them explicitly + set allow_high_risk); `max_steps` caps its tool
+# rounds. See harness/subagents.py.
 subagents:
   max_parallel: 4   # how many delegated tasks may run at once (thread-pool bound)
   agents:
@@ -290,7 +292,7 @@ subagents:
         You are a focused research subagent. Investigate the given task using your
         tools, then report concise, well-organized findings the supervisor can use.
         Do not ask the user questions; work with what you are given.
-      tools: [get_current_time, calculator]   # the worker's own tools (add more from `tools:` above, e.g. MCP read tools)
+      tools: [get_current_time, calculator]   # a NARROW allowlist (omit `tools` to give every read-only tool instead)
       allow_high_risk: false   # true lets this worker use risk=high tools it lists (workers run non-interactive)
       max_steps: 12
     - name: writer
@@ -299,7 +301,7 @@ subagents:
       prompt: |-
         You are a writing subagent. Produce a clear, well-structured draft for the
         given task using only the material in the task. Be concise and accurate.
-      tools: []
+      tools: []   # empty = every read-only (SAFE) tool by default
       allow_high_risk: false
       max_steps: 8
 {% endif %}
