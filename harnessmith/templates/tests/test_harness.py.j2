@@ -356,7 +356,6 @@ def test_debug_log_off_means_no_log_file(tmp_path):
 
 
 def test_debug_log_setup_is_idempotent_and_toggleable(tmp_path):
-    import logging
     from logging.handlers import RotatingFileHandler
 
     from {{ project_slug }}.harness import debuglog
