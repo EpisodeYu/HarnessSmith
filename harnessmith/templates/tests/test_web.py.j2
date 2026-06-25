@@ -153,8 +153,8 @@ def test_index_new_profile_card_leaves_key_url_unmasked():
     assert "profileCard({}, true)" in body  # the Add-profile button marks the card new
     assert "!isNew && envSet(" in body  # a new card never masks the key/url box
 {% if spec.mcp.enabled %}
-import sys
-from pathlib import Path
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 _DUMMY = str(Path(__file__).parent / "_mcp_dummy_server.py")
 
@@ -645,8 +645,10 @@ def test_chat_persists_working_dir_per_session(tmp_path):
 
     client = _session_client(tmp_path)
     sdir = str(tmp_path / "sessions")
-    dir_a = tmp_path / "a"; dir_a.mkdir()
-    dir_b = tmp_path / "b"; dir_b.mkdir()
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    dir_b = tmp_path / "b"
+    dir_b.mkdir()
     sid_a = _sse_session_id(
         client.get("/chat", params={"message": "qa", "stream": "false", "cwd": str(dir_a)}).text
     )
@@ -664,7 +666,8 @@ def test_chat_reuses_stored_working_dir_on_resume(tmp_path):
 
     client = _session_client(tmp_path)
     sdir = str(tmp_path / "sessions")
-    work = tmp_path / "proj"; work.mkdir()
+    work = tmp_path / "proj"
+    work.mkdir()
     sid = _sse_session_id(
         client.get("/chat", params={"message": "first", "stream": "false", "cwd": str(work)}).text
     )
