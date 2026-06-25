@@ -65,7 +65,8 @@ def run(
     ``history`` is prior conversation messages (no system prompt) to resume from;
     the returned ``RunResult.messages`` is the full body after this turn. ``cancel``
     stops the turn at a clean boundary (Stop / Ctrl-C, ``stop_reason="interrupted"``);
-    ``checkpoint`` write-aheads the body after each step for crash safety."""
+    ``checkpoint`` write-aheads the body once before the first step and after each
+    completed one (crash safety, so even a first-turn failure stays resumable)."""
     hooks = hooks or Hooks()
     if client is None:
         if client_for is None:
@@ -104,6 +105,13 @@ def run(
         {"role": "user", "content": user_input},
     ]
     trace.event("run_start", mode=MODE, role=role, model=profile.model, tools=active)
+
+    # Persist the opening turn before the first model call: a first-turn failure
+    # (e.g. a bad model name) then still leaves the conversation on disk to resume,
+    # instead of vanishing. A turn the user never started never reaches here, so it
+    # stays unsaved; later turns re-checkpoint the same body harmlessly.
+    if checkpoint is not None:
+        checkpoint(messages[1:])
 
     step = 0
     stop_reason = "final"

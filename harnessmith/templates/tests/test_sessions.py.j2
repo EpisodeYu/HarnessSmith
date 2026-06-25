@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from {{ project_slug }}.harness import session as session_store
 from {{ project_slug }}.harness.config import Config
 from {{ project_slug }}.harness.loop import run
@@ -33,6 +35,32 @@ def test_run_result_carries_message_body(tmp_path):
     assert all(m["role"] != "system" for m in result.messages)
     assert result.messages[0] == {"role": "user", "content": "hello there"}
     assert {"role": "assistant", "content": "hi back"} in result.messages
+
+
+def test_first_turn_failure_still_persists_the_conversation(tmp_path):
+    """A first-turn LLM failure (e.g. a bad model name) is checkpointed before the
+    model call, so the conversation is preserved on disk and resumable — only a turn
+    the user never started (the loop never runs) stays unsaved."""
+    config = _config(tmp_path)
+    sdir = config.sessions.dir
+    sid = session_store.new_id()
+
+    class Boom(MockLLM):
+        def complete(self, messages, tools=None, *, cancel=None):
+            raise RuntimeError("unknown model 'typo-model'")
+
+    with pytest.raises(RuntimeError):
+        run(
+            "my question",
+            client=Boom(),
+            config=config,
+            checkpoint=lambda body: session_store.checkpoint(sid, body, sdir),
+        )
+
+    # The failed opening turn left a resumable session carrying the user's prompt,
+    # instead of vanishing entirely.
+    assert session_store.load(sid, sdir) == [{"role": "user", "content": "my question"}]
+    assert session_store.status_of(sid, sdir) == "running"
 
 
 def test_save_load_latest_roundtrip(tmp_path):

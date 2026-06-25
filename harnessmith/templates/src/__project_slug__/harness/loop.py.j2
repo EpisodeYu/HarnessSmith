@@ -55,8 +55,9 @@ def run(
     ``history`` is prior conversation messages (no system prompt) to resume from.
     ``cancel`` is a cooperative stop predicate (checked at each step boundary and
     forwarded to the LLM stream so Stop / Ctrl-C cut generation mid-token);
-    ``checkpoint`` is called with the conversation body after each completed step
-    (write-ahead, so a crash mid-turn still leaves resumable work on disk).
+    ``checkpoint`` is called with the conversation body once before the first step
+    and after each completed one (write-ahead, so a crash mid-turn — or a first-turn
+    failure like a bad model name — still leaves resumable work on disk).
     ``working_dir`` is an optional absolute path injected into the system prompt as
     a hint (not a sandbox); unset leaves the prompt unchanged from a no-path run.
     """

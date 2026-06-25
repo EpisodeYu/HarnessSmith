@@ -68,7 +68,8 @@ def run(
     is a cooperative stop predicate (checked at each step boundary and forwarded to
     the LLM stream so Stop / Ctrl-C cut generation mid-token, stopping with
     ``stop_reason="interrupted"`` on a clean message boundary); ``checkpoint`` is
-    called with the body after each completed step (write-ahead for crash safety)."""
+    called with the body once before the first step and after each completed one
+    (write-ahead for crash safety, so even a first-turn failure stays resumable)."""
     hooks = hooks or Hooks()
     if client is None:
         if client_for is None:
@@ -104,6 +105,13 @@ def run(
         {"role": "user", "content": user_input},
     ]
     trace.event("run_start", mode=MODE, role=role, model=profile.model, tools=active)
+
+    # Persist the opening turn before the first model call: a first-turn failure
+    # (e.g. a bad model name) then still leaves the conversation on disk to resume,
+    # instead of vanishing. A turn the user never started never reaches here, so it
+    # stays unsaved; later turns re-checkpoint the same body harmlessly.
+    if checkpoint is not None:
+        checkpoint(messages[1:])
 
     step = 0
     stop_reason = "final"

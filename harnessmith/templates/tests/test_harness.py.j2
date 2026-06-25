@@ -513,8 +513,10 @@ def test_stop_unblocks_a_hung_tool(tmp_path):
 
 
 def test_checkpoint_called_after_each_completed_step(tmp_path):
-    """The write-ahead checkpoint fires once per completed tool step, with the
-    body so far (no system prompt). The final answer step doesn't checkpoint."""
+    """The write-ahead checkpoint fires once for the opening turn (before the first
+    model call, so a first-turn failure is still saved) and once per completed tool
+    step, with the body so far (no system prompt). The final answer step doesn't
+    checkpoint."""
     config = _config(tmp_path)
     bodies = []
     client = MockLLM(script=[ScriptedCall("get_current_time", {}), "done"])
@@ -522,7 +524,7 @@ def test_checkpoint_called_after_each_completed_step(tmp_path):
         "go", client=client, config=config, checkpoint=lambda b: bodies.append([m["role"] for m in b])
     )
     assert result.stop_reason == "final"
-    assert bodies == [["user", "assistant", "tool"]]
+    assert bodies == [["user"], ["user", "assistant", "tool"]]
 
 
 def test_openai_client_stream_closes_on_cancel():

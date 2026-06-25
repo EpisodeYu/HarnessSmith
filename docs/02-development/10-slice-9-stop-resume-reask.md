@@ -38,7 +38,8 @@
 
 ### 继续(Tier B:崩溃安全)
 - 产物 `harness/session.py` — ① 记录加 `status: "running" | "complete"`;`save` 接 `status`,**原子写**(写 `.tmp` + `os.replace`)。② 新增 `checkpoint(session_id, messages, dir)` = per-step write-ahead(每步完成以 `status="running"` 原子重写)。③ 新增 `repair_orphan_tool_results(messages)`:扫描 assistant `tool_calls` 缺失的 `tool_call_id`,补合成 `{"role":"tool","tool_call_id":...,"content":"ERROR: interrupted"}`;`load`/`resolve` 载入时若 `status!="complete"` 或检出悬挂 tool_use 即修复。
-- 产物 `harness/paradigms/*` 或经 hook — 每步完成调用 `session.checkpoint(...)`。续接复用现成 `--continue`/`--resume`/Web 续聊。
+- 产物 `harness/paradigms/*` 或经 hook — **首个 model 调用前**先 `checkpoint` 一次开场回合(见下方首轮失败加固),之后每步完成再调用 `session.checkpoint(...)`。续接复用现成 `--continue`/`--resume`/Web 续聊。
+  - **首轮失败加固(2026-06)**:旧版 `checkpoint` 仅在「一步完成后」触发,故首轮 LLM 调用即失败(如模型名写错)时从未落盘,而三处入口(`run`/`chat`/web)的 `except` 又不存档 → 整段对话(含用户提问)彻底丢失。修复:范式在构建 `messages` 后、首个 model 调用前先 `checkpoint(messages[1:])`,首轮失败也留下可续 session(`status="running"`)。用户从未发起的回合(开了 chat/web 又退出)根本不进 loop,故仍不落盘——即「只有空对话不保留」。
 
 ### 重问(Web 专属)
 - 产物 `harness/session.py` — `turns(messages)`(派生 user 消息边界:序号 + 预览)+ `truncate_to_turn(messages, n)`(截到第 n 个 user 回合之前)。
