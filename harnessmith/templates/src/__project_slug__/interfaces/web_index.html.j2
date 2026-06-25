@@ -179,33 +179,53 @@
       </div>
 
       <div data-cfg="context" class="hidden space-y-3">
-        <label class="block text-sm"><span data-i18n="ctx_strategy_label">Strategy</span>
-          <select id="cfg-ctx-strategy" class="mt-1 block rounded-lg border px-3 py-2"></select></label>
-        <label class="block text-sm"><span data-i18n="ctx_keep_label">keep_last_turns</span>
-          <input id="cfg-ctx-keep" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
-        <label class="block text-sm"><span data-i18n="ctx_toolcap_label">max_tool_result_chars</span>
-          <input id="cfg-ctx-toolcap" type="number" min="0" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
-          <span class="block text-xs text-gray-500" data-i18n="ctx_toolcap_hint">Cap one tool result (0 = off).</span></label>
-        <label class="block text-sm"><span data-i18n="ctx_trunc_label">Tool-result truncation</span>
-          <select id="cfg-ctx-trunc" class="mt-1 block rounded-lg border px-3 py-2"></select>
-          <span class="block text-xs text-gray-500" data-i18n="ctx_trunc_hint">How an oversized result is capped: middle keeps the head and tail.</span></label>
-        <label class="block text-sm"><span data-i18n="ctx_maxsteps_label">max_steps</span>
-          <input id="cfg-ctx-maxsteps" type="number" min="0" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
-          <span class="block text-xs text-gray-500" data-i18n="ctx_maxsteps_hint">Hard ceiling on tool-call steps per turn (0 = unlimited).</span></label>
-{% if spec.subagents.enabled %}        <label class="block text-sm"><span data-i18n="ctx_sub_maxsteps_label">subagents max_steps</span>
-          <input id="cfg-ctx-sub-maxsteps" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
-          <span class="block text-xs text-gray-500" data-i18n="ctx_sub_maxsteps_hint">Roster-wide cap on a worker's tool-call rounds (a worker may override its own).</span></label>
-{% endif %}
+        <!-- Group 1: how far one turn (and each subagent) may run -->
         <div>
-          <p class="text-sm" data-i18n="ctx_triggers_label">Triggers (threshold; blank = off)</p>
-          <p class="text-xs text-gray-500" data-i18n="ctx_triggers_hint">Blank = off. window_pct compacts at a fraction of a profile's context_window.</p>
-          <div id="cfg-ctx-triggers" class="mt-1 space-y-2"></div>
-          <label class="mt-2 block text-sm"><span data-i18n="ctx_combine_label">Trigger combine (or/and)</span>
-            <select id="cfg-ctx-combine" class="mt-1 block rounded-lg border px-3 py-2">
-              <option value="or">or</option><option value="and">and</option>
-            </select></label>
+          <h4 class="text-sm font-medium" data-i18n="ctx_grp_limits">Loop limits</h4>
+          <p class="text-xs text-gray-500" data-i18n="ctx_grp_limits_hint">How far one turn — and each subagent — may run.</p>
+          <div class="mt-2 space-y-3">
+            <label class="block text-sm"><span data-i18n="ctx_maxsteps_label">max_steps</span>
+              <input id="cfg-ctx-maxsteps" type="number" min="0" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
+              <span class="block text-xs text-gray-500" data-i18n="ctx_maxsteps_hint">Hard ceiling on tool-call steps per turn (0 = unlimited).</span></label>
+{% if spec.subagents.enabled %}            <label class="block text-sm"><span data-i18n="ctx_sub_maxsteps_label">subagents max_steps</span>
+              <input id="cfg-ctx-sub-maxsteps" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
+              <span class="block text-xs text-gray-500" data-i18n="ctx_sub_maxsteps_hint">Roster-wide cap on a worker's tool-call rounds (a worker may override its own).</span></label>
+{% endif %}          </div>
         </div>
-        <p class="text-xs text-gray-500" data-i18n="ctx_extend_hint">Register @register_strategy / @register_condition in harness/context.py; they appear here once imported. See AGENTS.md.</p>
+        <!-- Group 2: how and when the history is compacted to fit the window -->
+        <div class="border-t pt-3">
+          <h4 class="text-sm font-medium" data-i18n="ctx_grp_compaction">Context compaction</h4>
+          <p class="text-xs text-gray-500" data-i18n="ctx_grp_compaction_hint">When and how the conversation history is summarized to fit the context window.</p>
+          <div class="mt-2 space-y-3">
+            <label class="block text-sm"><span data-i18n="ctx_strategy_label">Strategy</span>
+              <select id="cfg-ctx-strategy" class="mt-1 block rounded-lg border px-3 py-2"></select></label>
+            <label class="block text-sm"><span data-i18n="ctx_keep_label">keep_last_turns</span>
+              <input id="cfg-ctx-keep" type="number" min="1" class="mt-1 block w-40 rounded-lg border px-3 py-2" /></label>
+            <div>
+              <p class="text-sm" data-i18n="ctx_triggers_label">Triggers (threshold; blank = off)</p>
+              <p class="text-xs text-gray-500" data-i18n="ctx_triggers_hint">Blank = off. window_pct compacts at a fraction of a profile's context_window.</p>
+              <div id="cfg-ctx-triggers" class="mt-1 space-y-2"></div>
+              <label class="mt-2 block text-sm"><span data-i18n="ctx_combine_label">Trigger combine (or/and)</span>
+                <select id="cfg-ctx-combine" class="mt-1 block rounded-lg border px-3 py-2">
+                  <option value="or">or</option><option value="and">and</option>
+                </select></label>
+            </div>
+            <p class="text-xs text-gray-500" data-i18n="ctx_extend_hint">Register @register_strategy / @register_condition in harness/context.py; they appear here once imported. See AGENTS.md.</p>
+          </div>
+        </div>
+        <!-- Group 3: how oversized tool outputs are capped before the model sees them -->
+        <div class="border-t pt-3">
+          <h4 class="text-sm font-medium" data-i18n="ctx_grp_toolresults">Tool results</h4>
+          <p class="text-xs text-gray-500" data-i18n="ctx_grp_toolresults_hint">How an oversized tool output is capped before the model sees it.</p>
+          <div class="mt-2 space-y-3">
+            <label class="block text-sm"><span data-i18n="ctx_toolcap_label">max_tool_result_chars</span>
+              <input id="cfg-ctx-toolcap" type="number" min="0" class="mt-1 block w-40 rounded-lg border px-3 py-2" />
+              <span class="block text-xs text-gray-500" data-i18n="ctx_toolcap_hint">Cap one tool result (0 = off).</span></label>
+            <label class="block text-sm"><span data-i18n="ctx_trunc_label">Tool-result truncation</span>
+              <select id="cfg-ctx-trunc" class="mt-1 block rounded-lg border px-3 py-2"></select>
+              <span class="block text-xs text-gray-500" data-i18n="ctx_trunc_hint">How an oversized result is capped: middle keeps the head and tail.</span></label>
+          </div>
+        </div>
       </div>
 
       <div data-cfg="budget" class="hidden space-y-3">
@@ -480,6 +500,9 @@
         set_url_ph: "set this URL's value in .env (overwrites if it exists)", set_url_btn: "Save to .env",
         key_saved: "saved to .env", key_need_name: "set the env-var name first",
         key_unchanged: "already set (unchanged)",
+        ctx_grp_limits: "Loop limits", ctx_grp_limits_hint: "How far one turn — and each subagent — may run.",
+        ctx_grp_compaction: "Context compaction", ctx_grp_compaction_hint: "When and how the conversation history is summarized to fit the context window.",
+        ctx_grp_toolresults: "Tool results", ctx_grp_toolresults_hint: "How an oversized tool output is capped before the model sees it.",
         ctx_strategy_label: "Compaction strategy", ctx_keep_label: "keep_last_turns", ctx_combine_label: "Trigger combine (or/and)",
         ctx_toolcap_label: "max_tool_result_chars",
         ctx_toolcap_hint: "Cap one tool result before it enters history (0 = off).",
@@ -637,6 +660,9 @@
         set_url_ph: "在 .env 设置该 url 的值(如已存在则覆盖)", set_url_btn: "写入 .env",
         key_saved: "已写入 .env", key_need_name: "请先填环境变量名",
         key_unchanged: "已设置(未改动)",
+        ctx_grp_limits: "运行上限", ctx_grp_limits_hint: "单轮(以及每个子代理)最多能跑多远。",
+        ctx_grp_compaction: "上下文压缩", ctx_grp_compaction_hint: "何时、如何把对话历史压缩进上下文窗口。",
+        ctx_grp_toolresults: "工具结果", ctx_grp_toolresults_hint: "过大的工具输出在喂给模型前如何截断。",
         ctx_strategy_label: "上下文压缩策略", ctx_keep_label: "完整保留最近轮数", ctx_combine_label: "触发组合方式 (or/and)",
         ctx_toolcap_label: "单工具结果上限(字符)",
         ctx_toolcap_hint: "单条工具结果进入历史前的字符上限(0=不限)。",
