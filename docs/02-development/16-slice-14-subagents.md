@@ -89,7 +89,7 @@ flowchart TD
 
 ### 5.2 `subagents` 工具(并行 fan-out)
 
-- **schema**:`{ tasks: [ {agent: str, task: str}, ... ] }`(`_SUBAGENTS_SCHEMA`,`additionalProperties:false`)。`description` 由 `_subagents_description(roster)` 动态拼出,**枚举可用 subagent 名 + 描述**,并提示「列多个 = 并行」。`risk=safe`。
+- **schema**:`{ tasks: [ {agent: str, task: str}, ... ] }`(`_SUBAGENTS_SCHEMA`,`additionalProperties:false`)。`description` 由 `_subagents_description(roster)` 动态拼出,**枚举可用 subagent 名 + 描述**,并明确定位:**仅做只读调研/调查、适合并行 fan-out**(worker 只读工具 + 非交互、不能改东西,改动让主 agent 自己做),提示「列多个 = 并行」。同口径也写进 `subagents_section` 系统提示与 `task` schema 描述。`risk=safe`。
 - **闭包捕获**:`register_subagent_tools(config, registry, *, mock, ledger)` 把 `agents`(name→`SubagentDef`)、`max_parallel`、`shared_ledger`、`_client(role)` factory 闭包进 `subagents`。
 - **并行**:`tasks` 规范化(只留 dict)→ 单任务走快路径(不开线程池);多任务 `with ThreadPoolExecutor(max_workers=min(max_parallel, len(items))) as pool: results = list(pool.map(_run_one, items))`。`pool.map` 保证**结果按输入顺序**(非完成顺序)。
 - **容错**:`_run_one` 里未知 agent / 空 task / worker 抛错都转成 `ERROR: ...` 字符串(单个 worker 失败不崩 supervisor);结果经 `_format_results` 合并为 `Dispatched N subagent task(s).` + 每 worker 一个 `--- [name] (k steps) ---\n<answer>` 块。

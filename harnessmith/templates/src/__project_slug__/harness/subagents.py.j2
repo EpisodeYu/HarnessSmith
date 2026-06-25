@@ -38,8 +38,9 @@ _SUBAGENTS_SCHEMA = {
         "tasks": {
             "type": "array",
             "description": (
-                "The subtasks to delegate. List SEVERAL to run them in parallel "
-                "(fan out independent work); list one to delegate a single task."
+                "The read-only investigation/research subtasks to delegate. List "
+                "SEVERAL to run them in parallel (fan out independent lookups); "
+                "list one for a single lookup."
             ),
             "items": {
                 "type": "object",
@@ -51,7 +52,8 @@ _SUBAGENTS_SCHEMA = {
                     "task": {
                         "type": "string",
                         "description": (
-                            "The self-contained task for that subagent. It runs in a "
+                            "The self-contained, read-only task for that subagent "
+                            "(investigate/find/analyze — not change). It runs in a "
                             "fresh context, so include everything it needs to know."
                         ),
                     },
@@ -71,13 +73,18 @@ def _subagents_description(agent_defs: list[SubagentDef]) -> str:
         f"{a.name} ({a.description})" if a.description else a.name for a in agent_defs
     )
     return (
-        "Delegate one or more independent subtasks to specialized worker subagents "
-        "and get their results back. Pass `tasks` as a list of {agent, task}: list "
-        "SEVERAL at once and they run in PARALLEL — use this to fan out independent "
-        "work (research, analysis, drafting) and keep your own context clean. Each "
-        "worker runs in its OWN fresh context with its OWN tools, so give it a "
-        "self-contained task with all the context it needs. You stay responsible "
-        f"for synthesizing the results into the final answer. Subagents: {roster}."
+        "Delegate independent, READ-ONLY subtasks to specialized worker subagents "
+        "and get their findings back. Best for investigation and research you can "
+        "fan out in PARALLEL — searching, reading, gathering and analyzing "
+        "information across several threads at once while keeping your own context "
+        "clean. NOT for making changes: each worker has only read-only tools and "
+        "runs non-interactively (it cannot write files, run mutating commands, or "
+        "ask you or the user anything), so do any edits or other actions yourself "
+        "after reviewing what they report. Pass `tasks` as a list of {agent, task}: "
+        "list SEVERAL at once to run them in parallel, or one for a single lookup. "
+        "Each worker runs in its OWN fresh context, so give it a self-contained "
+        "task with all the context it needs. You stay responsible for synthesizing "
+        f"their findings into the final answer. Subagents: {roster}."
     )
 
 
@@ -272,11 +279,15 @@ def subagents_section(config: Config) -> str:
         for a in sub.agents
     )
     return (
-        "You can delegate work to specialized subagents with the `subagents` tool. "
-        "Each runs in its own isolated context with its own tools and returns a "
-        "result for you to synthesize. Delegate INDEPENDENT subtasks together in a "
-        "single `subagents` call so they run in parallel; do simple steps yourself "
-        "rather than over-delegating. Available subagents:\n" + roster
+        "You can delegate READ-ONLY work to specialized subagents with the "
+        "`subagents` tool. Use it for investigation and research you can run in "
+        "PARALLEL (search, read, gather and analyze information) — subagents have "
+        "only read-only tools and run non-interactively, so they cannot make "
+        "changes; perform any edits or other mutating actions yourself. Each runs "
+        "in its own isolated context and returns findings for you to synthesize. "
+        "Delegate INDEPENDENT subtasks together in a single `subagents` call so "
+        "they run in parallel; do simple lookups yourself rather than "
+        "over-delegating. Available subagents:\n" + roster
     )
 
 
