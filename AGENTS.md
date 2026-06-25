@@ -35,7 +35,7 @@ harnessmith/                  # ← 生成器本体（这个包发布到 PyPI）
   templates/                  # ← 产物模板（.j2）。渲染出的才是用户的代码
     src/__project_slug__/harness/    # 产物核心：loop/llm/llm_anthropic/tools/context/
                                      #   session/interaction/hooks/usage/trace/prompts/
-                                     #   paradigms/ + mcp/skills/memory（opt-in）
+                                     #   paradigms/ + mcp/skills/memory/subagents（opt-in）
     src/__project_slug__/interfaces/ # cli.py（+ web.py / web_index.html opt-in）
     tests/                           # 产物自带测试（mock LLM）
 docs/02-development/          # 设计与切片文档（00-overview = 唯一口径）
@@ -80,7 +80,7 @@ uvx twine check dist/*            # 校验元数据 + README 渲染
 ## 6. 红线速记（命中即停，详见 `CLAUDE.md §6`）
 
 - **绝不**在产物里引入任何 agent 编排框架（LangChain/LangGraph/ADK）——定位红线。
-- **薄优先**：默认产物核心循环 150–300 行；重能力（MCP/Web/skills/memory）只走 **spec 开关**，关闭 = 代码与依赖中均不存在。
+- **薄优先**：默认产物核心循环 150–300 行；重能力（MCP/Web/skills/memory/subagents）只走 **spec 开关**，关闭 = 代码与依赖中均不存在。
 - 改 `HarnessSpec` 字段语义、给**默认产物**加运行期依赖、改 LLM API 面、任何让**密钥进 git/spec/trace/日志**的路径 → 先停下请人审。
 - **密钥**只进 gitignored `.env`；`config.yaml` / spec 只存 env 引用名。
 
@@ -88,7 +88,7 @@ uvx twine check dist/*            # 校验元数据 + README 渲染
 
 `harnessmith/spec.py` 的 `HarnessSpec`（顶层字段）：
 
-`version` · `project_slug`（产物包名，默认 `agent_harness`）· `display_name`（产物 UI/README 显示名）· `language`（产物 Web 默认语言 `en`/`zh`）· `llms`（每 profile 选 `provider: openai|anthropic`）· `roles` · `prompts`（`system` + `rules_files`）· `tools` · `paradigms`（`agent`/`plan`/`ask` 多选，默认 `["agent"]`）· `interfaces`（`cli`/`web`/`tui`）· `mcp.enabled` · `skills.enabled` · `memory.enabled` · `observability` · `context`（种子）· `rag`/`secrets`（预留）。
+`version` · `project_slug`（产物包名，默认 `agent_harness`）· `display_name`（产物 UI/README 显示名）· `language`（产物 Web 默认语言 `en`/`zh`）· `llms`（每 profile 选 `provider: openai|anthropic`）· `roles` · `prompts`（`system` + `rules_files`）· `tools` · `paradigms`（`agent`/`plan`/`ask` 多选，默认 `["agent"]`）· `interfaces`（`cli`/`web`/`tui`）· `mcp.enabled` · `skills.enabled` · `memory.enabled` · `subagents.enabled`（多智能体子代理，agent-as-tool；默认关）· `observability` · `context`（种子）· `rag`/`secrets`（预留）。
 
 口径：**spec = 配方（生成什么 + 初值，结构轴）；产物 `config.yaml` = 运行期权威（行为轴）**。结构变更要重新生成，行为变更不用。
 

@@ -25,7 +25,7 @@ A config-to-code generator that produces a standalone, framework-free agent harn
 
 ## Quick start
 
-Pick how to launch the setup wizard — either way you build a standalone, framework-free harness **from scratch** (you choose the capabilities: paradigms, web UI, MCP, skills, memory) that is smoke-verified before handover.
+Pick how to launch the setup wizard — either way you build a standalone, framework-free harness **from scratch** (you choose the capabilities: paradigms, web UI, MCP, skills, memory, multi-agent subagents) that is smoke-verified before handover.
 
 **Clone the repo and run the one-click launcher** — cross-platform (Windows, macOS, Linux), nothing to memorize; double-clicking the file works too. It installs [uv](https://docs.astral.sh/uv/) on first use, then asks whether you want the web wizard (recommended) or the terminal wizard:
 
@@ -75,7 +75,7 @@ HarnessSmith is a generator for the agent harness, in the spirit of `create-next
 - **No agent-framework lock-in.** The generated code has zero dependency on any agent-orchestration framework. The loop is plain Python that you own. Ordinary general-purpose libraries (OpenAI SDK, Pydantic, Typer, FastAPI) are used as libraries, not as frameworks that own your control flow.
 - **Own your code.** The output is a self-contained repository with its own tests, lockfile, Dockerfile, and documentation. Every line can be read, changed, or deleted.
 - **Config-to-code.** Capabilities are selected at generation time; the generator renders only what was selected. A feature that is switched off leaves no trace — no module, no dependency, no dead code.
-- **Thin by default.** The default product is a minimal, fully runnable harness whose core loop stays in the low hundreds of lines. Heavier capabilities (MCP, web interface, skills, memory) are opt-in spec toggles.
+- **Thin by default.** The default product is a minimal, fully runnable harness whose core loop stays in the low hundreds of lines. Heavier capabilities (MCP, web interface, skills, memory, multi-agent subagents) are opt-in spec toggles.
 
 ## Highlights
 
@@ -96,6 +96,7 @@ HarnessSmith is a generator for the agent harness, in the spirit of `create-next
 - **Composable hooks and a thin tool-policy layer** — mount one or more `Hooks` subclasses through `config.hooks` (subclass-and-mount, no `@register_hook`); five lifecycle points (`before_step` / `after_step` / `before_tool` / `after_tool` / `on_error`). `before_tool` may refuse a call and `after_tool` may redact a result — a code-level policy gate with no middleware machinery — and multiple hooks compose in order. The web UI has a dedicated **Hooks** tab with a privacy-safe execution log; `info` (CLI) and `GET /registries` (web) surface every extension point — tools, paradigms, context strategies/conditions, memory backends, imported extensions, and mounted hooks.
 - **Per-session working directory** — an optional working-directory hint (CLI `--cwd`, the `chat` REPL's `/cwd`, or the web chat toolbar with a directory browser) is injected into the system prompt as guidance, not a sandbox. The current date/time is injected each turn too.
 - **Tool ecosystem without built-in bloat** — a decorator-based tool registry with per-tool risk levels, plus an opt-in MCP client (stdio, HTTP, and SSE transports) with a curated catalog (keyless multi-engine web search, fetch, git, time, Desktop Commander, GitHub). The default web-search server is keyless and multi-engine (Bing/Baidu/DuckDuckGo/Brave/Sogou/…) with automatic failover, so it keeps working when any single engine is slow or unreachable on a given network. Node-based MCP servers are `npm install`ed once into a stable per-server dir and launched directly with `node` (never the ephemeral `npx` cache, which is unreliable on Windows). MCP servers are managed at runtime: health status, add/edit/remove, and hot reconnection from the web panel; `mcp status` from the CLI.
+- **Multi-agent subagents** — opt-in orchestrator-worker delegation (agent-as-tool, the pattern mature harnesses use — Claude Code's `Task` / Anthropic Sub-agents): a single `subagents` tool fans independent subtasks out to scoped worker agents that run in parallel, each with its own fresh context, tool allowlist, model profile, and step cap (per-worker, or a roster-wide default). Topology is fixed at depth 1 — workers never get the `subagents` tool, so they cannot recurse — and the roster is a runtime knob in `config.yaml`. Plain generated code over a stdlib thread pool; no orchestration framework, DSL, or dynamic graph.
 - **Agent Skills** — opt-in support for the open `SKILL.md` standard with progressive disclosure; skills are plain files, no framework involved.
 - **Cross-session memory** — an opt-in, self-maintained long-term note injected each turn, written through tools, consolidated by a dedicated LLM role at session boundaries, and replaceable via a thin `@register_memory` backend registry.
 - **Always-applied project rules** — markdown rule files (`AGENTS.md` / `CLAUDE.md` / `.cursor/rules` conventions) injected into every system prompt.
@@ -131,6 +132,7 @@ HarnessSmith is a generator for the agent harness, in the spirit of `create-next
 | MCP tools | Model Context Protocol client over stdio / HTTP / SSE, allowlist and risk flags, curated catalog prefill, runtime server management with health probes and hot reconnect |
 | Agent Skills | `SKILL.md` discovery, metadata injection, and on-demand loading |
 | Long-term memory | Self-maintained markdown note with tool-driven writes, policy shaping, consolidation, and a pluggable backend registry |
+| Subagents (multi-agent) | Orchestrator-worker delegation via a single `subagents` tool: scoped worker agents run in parallel (own fresh context, tool allowlist, model profile, and step cap), fixed at depth 1 (no recursion); the worker roster is edited at runtime in `config.yaml`. A stdlib thread pool, not an orchestration framework |
 
 ## Architecture
 
@@ -151,7 +153,7 @@ flowchart LR
     hooks["hooks.py + extensions.py (policy + discovery)"]
     cli["interfaces/cli.py"]
     web["interfaces/web.py (SSE chat + /config)"]
-    extras["skills.py / memory.py (opt-in)"]
+    extras["skills.py / memory.py / subagents.py (opt-in)"]
     docker["Dockerfile + devcontainer"]
   end
   repo --> repoInner
@@ -209,7 +211,7 @@ uv run harnessmith new my-agent --spec ./harness.spec.yaml  # non-interactive, f
 uv run harnessmith doctor                                   # preflight check of the local toolchain
 ```
 
-- The **web wizard** (`wizard`) and the **terminal wizard** (`new` with no `--spec` / `--preset`) collect the same structural choices — display name, paradigms, web interface, MCP, skills, memory — and apply identical defaults; the web wizard suits desktops, the terminal wizard suits headless servers.
+- The **web wizard** (`wizard`) and the **terminal wizard** (`new` with no `--spec` / `--preset`) collect the same structural choices — display name, paradigms, web interface, MCP, skills, memory, multi-agent subagents — and apply identical defaults; the web wizard suits desktops, the terminal wizard suits headless servers.
 - After rendering, the generator locks dependencies and runs a smoke verification (`uv sync`, import check, one mock function-calling turn, `pytest`). Pass `--no-verify` to skip it, for example when offline.
 - Secrets are never collected by any wizard and never enter the spec, the generated `config.yaml`, or git.
 - The `--preset` shortcut is for scripted or CI generation, not the recommended start: the bundled `coding-assistant` preset enables MCP with **every tool allowlisted — shell and file writes included — and no confirmation gate** (`confirm: none`). Prefer a wizard, or review `config.yaml` (tighten the tool allowlist, set `confirm: high`) before pointing it at a real model.
