@@ -409,7 +409,7 @@ subagents:
       role: subagents        # the shared `subagents` role -> set its model under Config -> LLM -> Roles (a cheaper model saves cost)
       prompt: |-
         You are a focused research subagent. ...
-      tools: [get_current_time, calculator]   # the worker's OWN allowlist
+      tools: []   # empty = every read-only (SAFE) tool by default; list names to narrow it
       allow_high_risk: false
       max_steps: 12
 ```

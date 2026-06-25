@@ -38,7 +38,7 @@
 
 ### 运行期配置
 - 产物 `harness/config.py` — `SubagentDef(name, description, prompt, role="generation", tools=[], allow_high_risk=False, max_steps=12)` + `SubagentsConfig(max_parallel=4, agents=[])`(门控)+ `Config.subagents`。
-- 产物 `config.yaml` — `subagents:` 块(门控,种 `researcher`/`writer` 两个示例 worker)+ `tools:` 里 `subagents` allowlist 条目。
+- 产物 `config.yaml` — `subagents:` 块(门控,种单个 `researcher` 示例 worker,`tools: []` = 默认全只读)+ `tools:` 里 `subagents` allowlist 条目。
 
 ### 接线(全部门控)
 - `harness/prompts.py` — `build_system_prompt` 在 memory 之后注入 `subagents_section(config)`(列出 roster + 「独立子任务一次性并行委派、你负责综合」)。
@@ -75,8 +75,8 @@ flowchart TD
   user[User] --> sup["loop.run(mode=agent)<br/>= 现有 agent 范式 (supervisor)"]
   sup -->|"普通工具"| t1["get_current_time / calculator / mcp..."]
   sup -->|"LLM 自主决定调用<br/>subagents(tasks=[{agent,task},...])"| disp["subagents 工具闭包<br/>(register_subagent_tools 注册)"]
-  disp -->|"ThreadPoolExecutor(max_parallel)"| w1["_run_subagent(researcher)<br/>fresh history + scoped tools + own profile"]
-  disp --> w2["_run_subagent(writer)"]
+  disp -->|"ThreadPoolExecutor(max_parallel)"| w1["_run_subagent(researcher, task A)<br/>fresh history + scoped tools + own profile"]
+  disp --> w2["_run_subagent(researcher, task B)"]
   disp --> w3["_run_subagent(...)"]
   w1 -->|"(answer, steps)"| disp
   w2 --> disp
@@ -125,7 +125,7 @@ flowchart TD
 
 - `SubagentDef(name, description="", prompt, role="subagents", tools=[], allow_high_risk=False, max_steps=12)`。`role` 默认指向独立的 `subagents` 角色(见 §7-④),`profile_for("subagents")` 未映射时回落首 profile。
 - `SubagentsConfig(max_parallel=4, agents=[])` + `Config.subagents`。
-- `config.yaml` 种 `researcher`/`writer` 两个示例 worker(均 `role: subagents`)+ `tools:` 里 `subagents` allowlist 条目 + `roles:` 里可选 `subagents:` 映射提示。空 roster → `register_subagent_tools` 返回 `[]` 并 `unregister(subagents)`。
+- `config.yaml` 种单个 `researcher` 示例 worker(`role: subagents`、`tools: []` = 默认全只读)+ `tools:` 里 `subagents` allowlist 条目 + `roles:` 里可选 `subagents:` 映射提示。空 roster → `register_subagent_tools` 返回 `[]` 并 `unregister(subagents)`。
 
 ## 6. 真实验证(mimo-v2.5-pro,非 mock)
 
@@ -154,6 +154,6 @@ flowchart TD
 
 - **① 工具改名 `dispatch` → `subagents`(已做)**:产物里委派工具的注册名从 `dispatch` 改为 `subagents`(常量 `DISPATCH_TOOL` → `SUBAGENTS_TOOL`、schema/描述/局部函数/系统提示/`config.yaml` 的 `tools:` 条目同步)。仅影响 `subagents.enabled` 门控范围,关闭时仍逐字无痕迹。注:这里 `subagents` 既是模块/`config.yaml` 段名,也是工具名(同 memory 段 + `memory_*` 工具的模式)。
 - **② 向导默认开 + 工具页归入内置(已做)**:CLI/Web 向导「启用多 agent 子代理」由默认不勾改为**默认勾选**(spec 字段 `subagents.enabled` 默认仍 `false`,即手写 spec 省略=关,保持 opt-in 约定;只改向导初值)。产物 Web 工具页把 `subagents` 加入 `BUILTIN_TOOLS`(门控),归到 **Built-in tools** 分组,不再落到 Custom tools。
-- **③ worker 默认可用全部只读工具(已做)**:改前 worker 的 `tools` 是显式 allowlist,空 `tools` = 空集 → 「worker 无工具可用」。对照成熟 harness(Claude Code 内置 Explore/Plan 子代理 = read-only 工具集、省略 `tools:` 即继承只读工具)。现行实现:`_run_subagent` 里把**空 `tools` 解释为「全部只读(SAFE)工具」**(`registry.names()` 过滤 `risk_of(name) != HIGH`,口径与 plan/ask 的 `allow_high_risk=False` 一致;`memory_read` 进、`memory_append`/`memory_write`=HIGH 不进),并永久剔除 `subagents`(深度 1);显式列了 `tools` 则维持原 allowlist 子集语义。高风险工具仍需显式列 + `allow_high_risk: true`(空 `tools` 不会自动带入高风险)。**免确认**本就成立:worker 跑在线程池子线程,HITL confirmer 经 ContextVar 持有、不跨线程传递 → worker 工具不弹确认(`harness/interaction.py:255–266` `confirm_tool` 无 confirmer 返回 `None`=放行)。示例 roster 改为:`researcher` 保留窄 allowlist 作示例,`writer` 留空 `tools: []` 演示「默认全只读」。新增产物测试 `test_worker_empty_tools_defaults_to_all_readonly`。
+- **③ worker 默认可用全部只读工具(已做)**:改前 worker 的 `tools` 是显式 allowlist,空 `tools` = 空集 → 「worker 无工具可用」。对照成熟 harness(Claude Code 内置 Explore/Plan 子代理 = read-only 工具集、省略 `tools:` 即继承只读工具)。现行实现:`_run_subagent` 里把**空 `tools` 解释为「全部只读(SAFE)工具」**(`registry.names()` 过滤 `risk_of(name) != HIGH`,口径与 plan/ask 的 `allow_high_risk=False` 一致;`memory_read` 进、`memory_append`/`memory_write`=HIGH 不进),并永久剔除 `subagents`(深度 1);显式列了 `tools` 则维持原 allowlist 子集语义。高风险工具仍需显式列 + `allow_high_risk: true`(空 `tools` 不会自动带入高风险)。**免确认**本就成立:worker 跑在线程池子线程,HITL confirmer 经 ContextVar 持有、不跨线程传递 → worker 工具不弹确认(`harness/interaction.py:255–266` `confirm_tool` 无 confirmer 返回 `None`=放行)。示例 roster 简化为单个 `researcher`(`tools: []`),开箱即继承全部只读工具(含 MCP 标了 `safe_tools` 的读工具)——避免 supervisor 把调研活路由到一个被窄 allowlist 锁死的 worker。新增产物测试 `test_worker_empty_tools_defaults_to_all_readonly`。
 - **④ 实时展示各 subagent 工作状态(调研结论:需做事件流改造,暂不实施)**:现状 `subagents` 工具在一次工具调用里同步阻塞跑线程池,Web 只看到「一个工具调用 pending」的 spinner,无法看到每个 worker 在干什么。要做到类 Cursor 的逐 subagent 实时状态,需要让「正在执行的工具内部」能向前端 SSE 推送中间事件(per-worker running/done + 当前所调工具),并处理线程池子线程下 ContextVar 不跨线程传递的问题(把事件回调显式传入 worker 线程,或用线程安全队列回灌主事件流)。属事件流/前端渲染的非平凡改造,单列后续切片评估。
 - **⑤ worker 模型成为独立 `subagents` 角色 + Web Roles 显式可配(已做)**:此前 worker `role` 默认 `generation`,worker 模型与主循环绑死、无独立旋钮。现把 `SubagentDef.role` 默认改为 `subagents`,新增可选 `subagents` 角色(与 `compaction`/`title`/`memory` 同款:未映射时 `profile_for` 回落首 profile);`config.yaml roles:` 加可选 `subagents:` 映射提示,示例 roster 两个 worker 均 `role: subagents`;Web 产物 `Config → LLM → Roles` 的 `buildRoles` 角色清单(门控)新增 `subagents`(i18n `role_subagents` en/zh),改了即经 `/config` 重绑 `register_subagent_tools`、worker 下次按新 profile 起 client。仍可在单个 worker 上写不同 `role` 覆盖。门控:`subagents.enabled` 关闭时 roles 提示/UI/默认逐字无痕迹。

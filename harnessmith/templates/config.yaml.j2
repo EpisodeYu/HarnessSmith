@@ -293,16 +293,7 @@ subagents:
         You are a focused research subagent. Investigate the given task using your
         tools, then report concise, well-organized findings the supervisor can use.
         Do not ask the user questions; work with what you are given.
-      tools: [get_current_time, calculator]   # a NARROW allowlist (omit `tools` to give every read-only tool instead)
+      tools: []   # empty = every read-only (SAFE) tool by default (built-ins + MCP tools you marked read-only); list names explicitly to narrow it
       allow_high_risk: false   # true lets this worker use risk=high tools it lists (workers run non-interactive)
       max_steps: 12
-    - name: writer
-      description: "Drafts and edits prose from provided material."
-      role: subagents
-      prompt: |-
-        You are a writing subagent. Produce a clear, well-structured draft for the
-        given task using only the material in the task. Be concise and accurate.
-      tools: []   # empty = every read-only (SAFE) tool by default
-      allow_high_risk: false
-      max_steps: 8
 {% endif %}
