@@ -139,7 +139,7 @@ def build_system_prompt(config: Config, working_dir: str | None = None) -> str:
     if memory:
         parts.append(memory)
 {% endif %}{% if spec.subagents.enabled %}    # Multi-agent: tell the supervisor it can delegate to worker subagents via the
-    # `dispatch` tool (see harness/subagents.py). Empty when no subagents configured.
+    # `subagents` tool (see harness/subagents.py). Empty when no subagents configured.
     from .subagents import subagents_section
 
     subagents = subagents_section(config)

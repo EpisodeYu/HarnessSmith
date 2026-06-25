@@ -105,7 +105,7 @@ tools:
     enabled: true    # long-term memory: append a durable note (writes a local file)
   - name: memory_write
     enabled: true    # long-term memory: replace the whole note (writes a local file)
-{% endif %}{% if spec.subagents.enabled %}  - name: dispatch
+{% endif %}{% if spec.subagents.enabled %}  - name: subagents
     enabled: true    # multi-agent: delegate subtasks to worker subagents in parallel (safe; runs scoped workers)
 {% endif %}
 # HITL tool confirmation (opt-in guardrail; default off). Which tools must pause
@@ -272,11 +272,11 @@ memory:
 {% endif %}{% if spec.subagents.enabled %}
 # Multi-agent (subagents / agent-as-tool): the supervisor (the normal `agent`
 # paradigm) delegates independent subtasks to these worker subagents via the
-# `dispatch` tool (offered in `tools:` above) — list several in one call and they
+# `subagents` tool (offered in `tools:` above) — list several in one call and they
 # run in PARALLEL. Each worker runs in its OWN fresh context with its OWN tools and
 # model, then returns a result the supervisor synthesizes. Workers never get the
-# `dispatch` tool (fixed topology, depth 1 — no recursion). Edit the roster freely
-# (a runtime knob); an empty roster removes the dispatch tool. `role` points a
+# `subagents` tool (fixed topology, depth 1 — no recursion). Edit the roster freely
+# (a runtime knob); an empty roster removes the subagents tool. `role` points a
 # worker at an LLM profile above (use a cheaper model for workers); `tools` is the
 # worker's OWN allowlist (a subset of the tools registered above); `max_steps` caps
 # its tool rounds. See harness/subagents.py.

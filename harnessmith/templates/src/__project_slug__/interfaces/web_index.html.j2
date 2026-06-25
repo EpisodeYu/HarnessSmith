@@ -2287,7 +2287,7 @@
     // from skills.py when enabled). Any other name without "__" is one YOU
     // registered — those sort to the very top. Only affects grouping, never
     // behavior; keep in sync if you rename a built-in.
-    const BUILTIN_TOOLS = new Set(["get_current_time", "calculator", "ask_question", "write_todos"{% if spec.skills.enabled %}, "read_skill"{% endif %}{% if spec.memory.enabled %}, "memory_read", "memory_append", "memory_write"{% endif %}]);
+    const BUILTIN_TOOLS = new Set(["get_current_time", "calculator", "ask_question", "write_todos"{% if spec.skills.enabled %}, "read_skill"{% endif %}{% if spec.memory.enabled %}, "memory_read", "memory_append", "memory_write"{% endif %}{% if spec.subagents.enabled %}, "subagents"{% endif %}]);
     // Tools discovered from MCP servers (GET /mcp/discover), cached per page load so
     // a server's tools can be offered without hand-writing the allowlist. null =
     // not scanned yet; buildTools then falls back to whatever's already in config.

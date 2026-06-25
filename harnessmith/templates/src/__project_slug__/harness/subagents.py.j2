@@ -2,16 +2,16 @@
 
 Generated only when ``subagents.enabled`` (opt-in). This is the same shape mature
 harnesses use (Claude Code's ``Task`` tool, Anthropic Sub-agents, OpenAI
-agent-as-tool): a single ``dispatch`` tool the SUPERVISOR (the normal ``agent``
+agent-as-tool): a single ``subagents`` tool the SUPERVISOR (the normal ``agent``
 paradigm) calls when it judges a subtask is worth delegating. There is no new
 paradigm and no change to the core loop — delegation is just a tool.
 
 Each worker runs in its OWN fresh context (strong context isolation — the win
 that motivates the pattern), with its own scoped tool allowlist and its own LLM
-profile. Several tasks in one ``dispatch`` call fan out in PARALLEL over a stdlib
+profile. Several tasks in one ``subagents`` call fan out in PARALLEL over a stdlib
 thread pool; results come back in input order for the supervisor to synthesize.
 
-Fixed topology, depth 1: a worker is never offered the ``dispatch`` tool, so
+Fixed topology, depth 1: a worker is never offered the ``subagents`` tool, so
 workers cannot spawn further subagents (no runaway recursion). This stays inside
 the project's red line — plain generated code over ``concurrent.futures``, NOT an
 orchestration framework / DSL / dynamic graph.
@@ -30,9 +30,9 @@ from .tools import SAFE, Registry, Tool
 from .tools import registry as default_registry
 
 # The one tool the supervisor calls to delegate. A worker never gets it (depth 1).
-DISPATCH_TOOL = "dispatch"
+SUBAGENTS_TOOL = "subagents"
 
-_DISPATCH_SCHEMA = {
+_SUBAGENTS_SCHEMA = {
     "type": "object",
     "properties": {
         "tasks": {
@@ -66,7 +66,7 @@ _DISPATCH_SCHEMA = {
 }
 
 
-def _dispatch_description(agent_defs: list[SubagentDef]) -> str:
+def _subagents_description(agent_defs: list[SubagentDef]) -> str:
     roster = "; ".join(
         f"{a.name} ({a.description})" if a.description else a.name for a in agent_defs
     )
@@ -93,7 +93,7 @@ def _run_subagent(
     """Run ONE worker turn in isolation; return ``(answer, steps)``.
 
     Fresh history (context isolation), a scoped tool allowlist (never including
-    ``dispatch`` — depth 1), and the worker's own profile. Reuses the same shared
+    ``subagents`` — depth 1), and the worker's own profile. Reuses the same shared
     loop plumbing the built-in paradigms use (``generate`` / ``run_tool``), so a
     worker behaves like a small self-contained agent without touching the core
     loop. Its spend still accrues to the shared cost ledger; its trace is isolated
@@ -109,7 +109,7 @@ def _run_subagent(
         for name in registry.active_names(
             set(agent_def.tools), allow_high_risk=agent_def.allow_high_risk
         )
-        if name != DISPATCH_TOOL
+        if name != SUBAGENTS_TOOL
     ]
     allowed = set(active)
     schemas = registry.schemas(active)
@@ -174,11 +174,11 @@ def register_subagent_tools(
     mock: bool = False,
     ledger=None,
 ) -> list[str]:
-    """Register the ``dispatch`` tool so the supervisor can delegate; return its
-    name (``["dispatch"]``) or ``[]`` when no subagents are configured.
+    """Register the ``subagents`` tool so the supervisor can delegate; return its
+    name (``["subagents"]``) or ``[]`` when no subagents are configured.
 
     Reads the roster from ``config.subagents`` each call, so a config reload picks
-    up roster edits. With no workers configured the ``dispatch`` tool is removed
+    up roster edits. With no workers configured the ``subagents`` tool is removed
     (so an empty roster offers nothing). ``mock`` routes workers through the
     offline mock LLM (tests / ``--mock`` smoke); ``ledger`` shares the caller's
     cost ledger (default: the persistent ``.harness/usage.json`` one). Call once at
@@ -186,7 +186,7 @@ def register_subagent_tools(
     create_app)."""
     sub = getattr(config, "subagents", None)
     if sub is None or not sub.agents:
-        registry.unregister(DISPATCH_TOOL)
+        registry.unregister(SUBAGENTS_TOOL)
         return []
 
     agents = {a.name: a for a in sub.agents}
@@ -222,10 +222,10 @@ def register_subagent_tools(
         except Exception as exc:  # a worker failure is reported, never crashes the supervisor
             return name, f"ERROR: subagent {name!r} failed: {type(exc).__name__}: {exc}", 0
 
-    def dispatch(tasks: list | None = None) -> str:
+    def subagents(tasks: list | None = None) -> str:
         items = [t for t in (tasks or []) if isinstance(t, dict)]
         if not items:
-            return "ERROR: dispatch needs a non-empty `tasks` list of {agent, task} objects."
+            return "ERROR: subagents needs a non-empty `tasks` list of {agent, task} objects."
         # Parallel fan-out over a bounded stdlib thread pool; results stay in input
         # order (not completion order). A single task skips the pool entirely.
         if len(items) == 1:
@@ -237,14 +237,14 @@ def register_subagent_tools(
 
     registry.register(
         Tool(
-            name=DISPATCH_TOOL,
-            description=_dispatch_description(sub.agents),
-            parameters=_DISPATCH_SCHEMA,
-            func=dispatch,
+            name=SUBAGENTS_TOOL,
+            description=_subagents_description(sub.agents),
+            parameters=_SUBAGENTS_SCHEMA,
+            func=subagents,
             risk=SAFE,
         )
     )
-    return [DISPATCH_TOOL]
+    return [SUBAGENTS_TOOL]
 
 
 def subagents_section(config: Config) -> str:
@@ -258,10 +258,10 @@ def subagents_section(config: Config) -> str:
         for a in sub.agents
     )
     return (
-        "You can delegate work to specialized subagents with the `dispatch` tool. "
+        "You can delegate work to specialized subagents with the `subagents` tool. "
         "Each runs in its own isolated context with its own tools and returns a "
         "result for you to synthesize. Delegate INDEPENDENT subtasks together in a "
-        "single dispatch call so they run in parallel; do simple steps yourself "
+        "single `subagents` call so they run in parallel; do simple steps yourself "
         "rather than over-delegating. Available subagents:\n" + roster
     )
 

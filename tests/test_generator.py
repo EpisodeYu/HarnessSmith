@@ -966,7 +966,7 @@ def test_subagents_disabled_omits_footprint(tmp_path, preset_spec):
 
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
     assert "subagents:" not in config_yaml
-    assert "dispatch" not in config_yaml
+    assert "- name: subagents" not in config_yaml
 
     prompts_py = (pkg / "harness" / "prompts.py").read_text(encoding="utf-8")
     assert "subagents" not in prompts_py.lower()
@@ -990,7 +990,7 @@ def test_subagents_enabled_generates_support(tmp_path, spec):
 
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
     assert "subagents:" in config_yaml and "max_parallel:" in config_yaml
-    assert "- name: dispatch" in config_yaml  # the delegate tool is allowlisted
+    assert "- name: subagents" in config_yaml  # the delegate tool is allowlisted
 
     prompts_py = (pkg / "harness" / "prompts.py").read_text(encoding="utf-8")
     assert "subagents_section" in prompts_py

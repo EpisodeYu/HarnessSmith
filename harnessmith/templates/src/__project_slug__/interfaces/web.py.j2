@@ -1280,7 +1280,7 @@ def create_app(
         # immediately (no restart). Section NAMES only — values never logged here.
         obs = app.state.config.observability
         setup_debug_log(obs.debug, obs.debug_dir)
-{% if spec.subagents.enabled %}        # Re-bind the dispatch tool to the new config so workers use the latest LLM
+{% if spec.subagents.enabled %}        # Re-bind the subagents tool to the new config so workers use the latest LLM
         # profiles (the closure captures config at registration time; the Budget page
         # can change a worker's model/prices).
         from ..harness.subagents import register_subagent_tools
@@ -1375,7 +1375,7 @@ def create_app(
         register_memory_tools(new_config)  # re-bind the long-term memory tools
 {% endif %}{% if spec.subagents.enabled %}        from ..harness.subagents import register_subagent_tools
 
-        register_subagent_tools(new_config, mock=app.state.mock)  # re-bind the dispatch tool to the new roster
+        register_subagent_tools(new_config, mock=app.state.mock)  # re-bind the subagents tool to the new roster
 {% endif %}{% if spec.mcp.enabled %}        # Rebuild the MCP manager so connected servers + offered tools match the import.
         if app.state.mcp_manager is not None:
             await run_in_threadpool(lambda: _rebuild_mcp_manager(app))

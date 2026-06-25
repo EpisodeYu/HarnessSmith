@@ -322,7 +322,7 @@ def _setup_memory(config) -> None:
     register_memory_tools(config)
 {% endif %}{% if spec.subagents.enabled %}
 def _setup_subagents(config, mock: bool) -> None:
-    """Register the `dispatch` tool so the supervisor can delegate to subagents."""
+    """Register the `subagents` tool so the supervisor can delegate to subagents."""
     from ..harness.subagents import register_subagent_tools
 
     register_subagent_tools(config, mock=mock)
@@ -893,7 +893,7 @@ def info(
     from ..harness.memory import register_memory_tools
 
     register_memory_tools(config)
-{% endif %}{% if spec.subagents.enabled %}    # The subagents `dispatch` tool also registers at runtime; register it here so
+{% endif %}{% if spec.subagents.enabled %}    # The `subagents` tool also registers at runtime; register it here so
     # `info` reports it as enabled rather than as an unloaded allowlist entry.
     from ..harness.subagents import register_subagent_tools
 

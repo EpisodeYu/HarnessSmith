@@ -211,7 +211,7 @@ def test_golden_memory_enabled_generates_and_smoke_passes(tmp_path):
 @pytest.mark.golden
 def test_golden_subagents_enabled_generates_and_smoke_passes(tmp_path):
     """subagents.enabled -> generate -> lock -> sync + import + mock step + pytest
-    (the generated test_subagents.py: dispatch tool, isolation, depth-1, parallel
+    (the generated test_subagents.py: subagents tool, isolation, depth-1, parallel
     fan-out, cost accrual, and an end-to-end delegate-then-synthesize turn).
 
     Stays thin: multi-agent is plain code over a stdlib thread pool, so no new

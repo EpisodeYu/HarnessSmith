@@ -176,8 +176,8 @@ def run_wizard(*, default_target_dir: str | None = None) -> WizardResult:
     )
     answers["subagents"] = _need(
         questionary.confirm(
-            "Enable multi-agent subagents (delegate subtasks via a dispatch tool)?",
-            default=False,
+            "Enable multi-agent subagents (delegate subtasks via a subagents tool)?",
+            default=True,
         ).ask()
     )
     answers["mcp"] = _need(

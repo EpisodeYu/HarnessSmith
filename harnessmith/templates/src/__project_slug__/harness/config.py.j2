@@ -401,12 +401,12 @@ class McpConfig(BaseModel):
 {% endif %}{% if spec.subagents.enabled %}class SubagentDef(BaseModel):
     """One worker subagent in the roster (agent-as-tool — see ``harness/subagents.py``).
 
-    Each worker the supervisor can delegate to via the ``dispatch`` tool. ``prompt``
+    Each worker the supervisor can delegate to via the ``subagents`` tool. ``prompt``
     is the worker's system prompt (its persona/instructions; it runs in a fresh,
     isolated context — no global rules/memory are injected). ``role`` picks its LLM
     profile (falls back to the first profile when unset — point workers at a cheaper
     model to save cost). ``tools`` is the worker's OWN allowlist (a subset of the
-    registered tools; ``dispatch`` is always excluded so workers can't recurse —
+    registered tools; ``subagents`` is always excluded so workers can't recurse —
     depth 1). ``allow_high_risk`` lets a worker use ``risk="high"`` tools it lists
     (default off; workers run non-interactive, so HITL won't gate them). ``max_steps``
     caps the worker's tool-call rounds (a per-worker runaway guard)."""
@@ -425,10 +425,10 @@ class McpConfig(BaseModel):
 class SubagentsConfig(BaseModel):
     """Multi-agent roster (opt-in; this slice's only spec field is
     ``subagents.enabled``). The supervisor is the normal ``agent`` paradigm; it
-    delegates to these workers with the ``dispatch`` tool when it judges a subtask
+    delegates to these workers with the ``subagents`` tool when it judges a subtask
     worth it. ``max_parallel`` bounds the fan-out thread pool (several delegated
     tasks run concurrently). ``agents`` is the worker roster — edit it freely at
-    runtime; an empty roster removes the ``dispatch`` tool entirely."""
+    runtime; an empty roster removes the ``subagents`` tool entirely."""
 
     model_config = ConfigDict(extra="forbid")
 

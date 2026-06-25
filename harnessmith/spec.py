@@ -113,7 +113,7 @@ class Subagents(BaseModel):
 
     Like :class:`Mcp` / :class:`Skills` / :class:`Memory`, generation-time decides
     ONLY whether the capability exists: ``enabled`` renders ``harness/subagents.py``
-    (a single ``dispatch`` tool that fans work out to scoped worker agents, in
+    (a single ``subagents`` tool that fans work out to scoped worker agents, in
     parallel, each with its own fresh context, tool allowlist, and model profile),
     seeds an example ``subagents`` block in ``config.yaml``, and injects a short
     "you can delegate" note into the supervisor's system prompt. The roster
@@ -122,9 +122,9 @@ class Subagents(BaseModel):
     zero subagents footprint.
 
     The supervisor is just the normal ``agent`` paradigm (it autonomously decides
-    when to delegate by calling ``dispatch``) — there is NO new paradigm and NO
+    when to delegate by calling ``subagents``) — there is NO new paradigm and NO
     change to the core loop. Topology is fixed at depth 1: a worker never gets the
-    ``dispatch`` tool, so workers cannot spawn further subagents. This stays well
+    ``subagents`` tool, so workers cannot spawn further subagents. This stays well
     inside the project's red line (no orchestration framework / DSL / dynamic
     graph): it is plain generated code over a stdlib thread pool.
     """
