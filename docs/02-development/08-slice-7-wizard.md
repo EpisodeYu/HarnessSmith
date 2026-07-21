@@ -13,7 +13,7 @@
 - **wizard 产 spec(配方);产物配置页改活旋钮**:wizard 是生成期采集层(`spec` = 配方);运行期行为性配置由产物自身分页 `/config` 管。两者不混(`00-overview.md` §3）。
 - **wizard 只收结构,行为性烤默认**:向导 UI 只问「生成什么」,不展示 llms/prompts/budget/context;后端对缺省项烤可用默认值(默认 LLM profile 指向 `OPENAI_API_KEY`/`OPENAI_BASE_URL`、`model` **故意留空**、默认 system prompt、内置工具开、`budget.max_steps=8`)使产物开箱即跑。理由:① 一个生成器对应多个产物,各配自己的 LLM;② 向导选项过多劝退新手;③ 初值要带进产物但不必在向导露出。`model` 留空 → 产物在用户填好 model 前门控对话(web `hasLLM` 要求非空 model),避免半配置状态用空/猜测 model 打 API。显式传入(或手写 spec)优先于默认。
 - **语言选择贯穿(UI 语言)**:向导顶部单一语言选择贯穿到 ① 向导 UI、② 产物 web 默认 UI 语言(经 `spec.language` 种子化,运行期浏览器仍可切并记忆)。Agent 回答语言不在向导设(模型按用户输入语言自动回答;想固定在产物 Prompts 改)。
-- **显示名 vs 包名**:新增 spec 字段 `display_name`(人类可读,用于产物 UI 标题/header + README,空则回落 `project_slug`);向导输入显示名并由它派生 `project_slug`(snake_case,可手改)。
+- **显示名 vs 包名**:新增 spec 字段 `display_name`(人类可读,用于产物 UI 标题/header + README,空则回落 `project_slug`);向导输入显示名并由它派生 `project_slug`(snake_case,可手改)。`display_name` 是**单行、去首尾空白、最长 120 字符且不含控制字符**的标签;进入 Python/YAML、HTML、Markdown、shell/Docker 等不同上下文时分别做对应编码/引用,不能把一套转义跨上下文复用。
 - **spec 仍是全字段**(配方):`HarnessSpec` 字段集不变;差异只在向导 UI 暴露哪些——结构暴露、行为性烤默认。手写 spec / `--mcp-server` / 产物配置页仍可改全部行为性字段。
 - **依赖隔离**:fastapi/uvicorn 进 `harnessmith[wizard]` extra;questionary 进核心 `dependencies`(终端向导用,非产物);核心 CLI、`uvx harnessmith new`、产物均不含 fastapi/uvicorn。
 
@@ -33,7 +33,7 @@
 产物侧(`interfaces.web` 门控):
 
 - `interfaces/web_index.html.j2` — Config 视图重组为按功能子 tab + 顶部语言切换（`{{ language }}` 种子化 + localStorage 记忆);LLM tab 每 profile 带写入式 set-key（写 `.env`、不回显）+「测试」按钮（`POST /test-llm` 做真实可达性探针:**走 loop 的 `stream()` 路径、收到第一个 chunk 即关闭连接**——只需证明可达 + 已鉴权 + 模型存在,无需等完整回答;思考型模型对 "ping" 思考数十秒、且降 `reasoning_effort` 也压不下(实测 low≈不设,均 ~5.5s),故只看首 chunk(~1s)即 PASSED,不再降 effort、不再二次探针。探针**强制覆盖 reliability**:`max_retries=0` + `timeout_seconds` 上限 `_PROBE_TIMEOUT_SECONDS`(20s),避免死端点按 SDK 默认 600s×重试挂数分钟;失败时回传真实 provider 错误。前端 `fetch` 配 30s `AbortController` 兜底,绝不无限转圈）+ 角色下拉（generation/compaction…,默认选中首个 profile、无 profile 时为空,不再提供「用第一个配置」占位项;对话页 generator 下拉同样镜像 generation 角色)。标题/header 用 `{{ display_name }}`。
-- `harness/config.py` — `set_env_value(name, value)`(只写本地 gitignored `.env`、单行防注入、env 名校验);单价字段 `input_cost_per_million`/`output_cost_per_million`（per-million、货币无关);`reasoning_effort`（顶层,仅显式选了才发,默认不传)。
+- `harness/config.py` — `set_env_value(name, value)`(只写本地 gitignored `.env`、单行防注入、env 名校验);LLM/MCP 的所有 env 引用与生成器共用 `[A-Za-z_][A-Za-z0-9_]*` 语法并拒绝常见密钥形态,错误只报字段、不回显误贴真值;单价字段 `input_cost_per_million`/`output_cost_per_million`（per-million、货币无关);`reasoning_effort`（顶层,仅显式选了才发,默认不传)。
 - `interfaces/cli.py` — `<pkg> set-key <ENV_NAME>`(隐藏输入);`serve` 默认自动挑空闲端口 + `--open`。
 - 产物模板 `__launch_name__.{sh,bat}.j2` — 渲染成 `<显示名>.{sh,bat}` 一键启动脚本（文件名按 `display_name` 清洗:空白折叠为单个 `-`(终端无需引号)、Windows 非法字符 → `_`、保留设备名回落 slug);动作 = web 时 `serve --open`、否则 `chat`。
 - 测试 + 产物 `README`/`AGENTS`。
@@ -45,7 +45,7 @@
 - **产物分页配置页**:`GET /config` 读 → 各功能 tab 表单 → Save 整体 patch（后端 Pydantic 再校验);只改行为性。语言切换纯前端 + localStorage。
 - **context 两层增强**:context 由单一阈值触发重构为**触发条件 / 策略两层薄注册表**——`triggers`(内置 `max_tokens`/`max_turns`/`window_pct`,`combine: or/and` 组合)定何时压、`strategy`（truncate/summarize/none + `@register_strategy`/`@register_condition` 用户可自加）定怎么压;**默认策略 = `summarize`**,默认触发后续改为 usage 驱动的 `window_pct`(详见 [`00-overview.md`](./00-overview.md) §6「context 默认」行 + [`15-llm-robustness-and-context.md`](./15-llm-robustness-and-context.md))。`summarize` 缺 compaction 角色时回落首个 profile（用 generation 模型做摘要）。
 - **扩展可发现性**:产物 `GET /registries` 内省 `STRATEGIES`/`CONDITIONS`/`PARADIGMS`/memory backends（纯名字)+ CLI `info` 列「已注册 vs 已启用」;Web Context/Paradigms tab 据此渲染下拉/勾选列表、对未注册名字标 ⚠ + 提示「可 `@register_*` 自定义,import 后即现」。
-- **写入式 `.env` 密钥助手**:CLI `set-key` + Web `POST /env` / LLM tab 把 key/base_url 真值只写本地 gitignored `.env`、write-only 不回显、绝不进 `config.yaml`/spec/trace/日志。keyring 仍 v1+。生成器向导始终不收 key。
+- **写入式 `.env` 密钥助手**:CLI `set-key` + Web `POST /env` / LLM tab 把 key/base_url 真值只写本地 gitignored `.env`、write-only 不回显、绝不进 `config.yaml`/spec/trace/日志。spec、catalog、运行期 YAML 与 Web 保存入口对 `api_key_env`/`base_url_env`/MCP `env`/`auth_env` 使用同一 env 名校验;疑似把真实 key 粘进「变量名」时拒绝且错误不复述输入。keyring 仍 v1+。生成器向导始终不收 key。
 - **跨平台启动健壮性**：一键启动脚本与向导一键生成在缺 uv / 缺 Node 时带 y/N 确认地自举（uv 走 winget/官方安装器或 pip 清华源、Node 走便携二进制),并对 `uv sync`/产物 MCP 子进程做镜像源与代理自动解析（探测官方源不可达 → 用国内镜像;读系统代理注入 npx/uvx 子进程);一键生成展示分步进度条 + 实时日志尾 + 秒表。**不偷偷跑第三方 GitHub 代理脚本**(供应链信任红线)。这些是生成器侧/启动脚本的便利,产物本身不依赖向导。**一键步骤显式拆分:render → sync →〔node〕→〔warm〕→ serve**。其中 **`warm`(UI「准备 MCP 工具」)是独立步骤**:预填了任何 stdio MCP server 时,先跑 `uv run <slug> mcp warm`(便携 Node 已在 PATH)把各 npx/uvx 包**一次性预拉**并写 sentinel,随后 `serve` 因 sentinel 命中**秒开**——把这段冷下载从「启动 Web」里剥出来单列,职责清晰。warm 进度按**逐 server 计数**呈现(`warming i/N: <name>`;字节级真进度拿不到——npx/uvx 的进度条仅 TTY 可见,管道捕获时不吐百分比)。warm 为**尽力而为**:某 server 拉不动只在产物 MCP 页失败隔离,不阻塞启动。`serve` 探活超时仍按 server 数放宽(`max(300, 150×server数)`)作兜底(万一 sentinel 未命中、serve 自行前台预热)。
 - **代理探测一致性 + 可选包索引**(后补):各处「PyPI 可达性」探测统一走系统代理——`curl`(根启动器 `HarnessSmith.bat/.sh` 与产物 `__launch_name__.bat/.sh`)本身不读 WinINET / macOS GUI 代理,故探测前先把系统代理写进 `HTTP(S)_PROXY`(Win 读注册表、macOS 读 `scutil --proxy`、Linux 依赖既有 env),让 `curl` 探测与 `uv`/`urllib`(本就走系统代理)看到同一条网,避免在公司代理后误判 PyPI 不可达而切到「经此代理根本不通」的清华镜像。向导一键启动新增**可选「包索引」旋钮**(留空=自动;优先级 显式 > env `UV_DEFAULT_INDEX` > 自动探测),`/generate` 经 `index_url` 串到 `_uv_sync`;`_uv_sync` 首行把本次实际所用源(explicit/env-pinned/auto-mirror/auto-official)写进 `.setup.log` 便于事后诊断。**对墙外 / 墙内无代理 / 代理三类用户均无行为负面影响**(默认不变,唯一全局新增是 `.setup.log` 多一行说明)。
 
@@ -53,8 +53,8 @@
 
 - wizard（结构-only 表单)产合法 spec 并能生成可跑产物:`POST /spec` → 烤默认 → `HarnessSpec` 校验 → 写 spec → `generate()` → `uv lock` → `uv sync`+import+mock+`pytest` 全绿。
 - 结构-only 表单 + 烤默认:向导 UI 只暴露结构控件;烤出默认 LLM/prompt/budget/tools 使产物完整;显式行为性字段优先于默认。
-- wizard 不泄密 / 不进产物:只采集/回显 env 名;核心 `dependencies` 不含 fastapi/uvicorn。
-- catalog 预填经 wizard 落 `config.yaml`;`display_name` 渲染进标题/README,未设回落 slug。
+- wizard 不泄密 / 不进产物:只采集/回显合法 env 名;疑似密钥真值被当作引用时拒绝且错误脱敏;核心 `dependencies` 不含 fastapi/uvicorn。
+- catalog 预填经 wizard 落 `config.yaml`;`display_name` 渲染进标题/README,未设回落 slug;恶意引号/换行/HTML/命令替换字符有跨 Python/YAML/HTML/shell 的生成产物测试。
 - 产物配置分页 + 语言(en/zh);语言贯穿(向导语言 → `spec.language` → 产物 web 默认);`spec.language` 默认 `en`、非法值被拒。
 - context 种子化 + 条件/策略两层(`triggers` + `@register_strategy`/`@register_condition`);扩展可发现性(`GET /registries` + CLI `info` + web 渲染下拉 + 未注册标 ⚠)。
 - 终端交互向导:`build_spec` 烤默认 + run_wizard 跑通 + 取消 abort + FastAPI 隔离(子进程守卫核心向导不 import FastAPI);非交互/`--no-input` 报错指路。
@@ -71,7 +71,7 @@
 ## 5. 本 slice 注意
 
 - **不进产物 / 不绑框架**:wizard 仅生成器侧、FastAPI 非 agent 编排框架;产物不依赖 wizard。
-- **密钥红线**(`CLAUDE.md §6.5`):向导表单 / 回显 / 产出 spec、产物配置页 / `/config` 只存 env 变量名;写入式 `.env` 助手 write-only。生成器向导始终不收 key。
+- **密钥红线**(`CLAUDE.md §6.5`):向导表单 / 回显 / 产出 spec、产物配置页 / `/config` 只存通过统一语法校验的 env 变量名;疑似误贴密钥值时拒绝且错误不回显;写入式 `.env` 助手 write-only。生成器向导始终不收 key。
 - **配方 vs 活旋钮**(`00-overview.md` §3）:wizard 产 `spec`（配方);产物分页 `/config` 改运行期行为性配置;结构性只能重新生成。
 - **薄**:默认产物（`web:false`）零改动、零新增依赖;产物 Web 分页/i18n 是单页前端内的事,`web.py` 后端不变。
 - **v1+ 衔接**:原生 Anthropic 双规范见 [`125-slice-12-anthropic-dual-spec.md`](./125-slice-12-anthropic-dual-spec.md);`/config` 与公开面隔离(v1+)仍是发布前提。

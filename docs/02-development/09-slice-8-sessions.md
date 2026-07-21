@@ -17,7 +17,7 @@
 
 - **① 存储**:默认开;每次 `run` 自动写 `.harness/sessions/<id>.json`(单文件存整段 messages,非 JSONL);`--continue` 接最近一次(按文件 mtime)。
 - **② CLI**:两者都做 —— `run --continue` / `--resume <id>`(单轮跨调用接力)+ 新增 `chat` 多轮 REPL。
-- **③ Web**:续聊纳入本片 —— `/chat?session=<id>` 后端载/存 + 前端记 session、「新会话」按钮、会话列表 + 历史渲染。
+- **③ Web**:续聊纳入本片 —— `POST /chat` 的 JSON body 带 `session` 后端载/存,返回一次性随机 `run_id`;前端再以 `GET /chat/{run_id}/events` 只读订阅 SSE,并记 session、「新会话」按钮、会话列表 + 历史渲染。GET/query string 不启动模型或工具工作。
 
 ## 2. 交付物
 
@@ -32,7 +32,7 @@
 
 ### CLI / Web
 - 产物 `interfaces/cli.py` — `run` 加 `--continue`/`--resume <id>`(载入 history → 跑 → save,结尾打印 `session: <id>`);新增 `chat` REPL(累积 + 每轮落盘 → `/exit`/EOF 退出;支持 `--continue/--resume`);抽 `_mcp_setup(config)` helper 供 `run`/`chat`/`serve` 共用。
-- 产物 `interfaces/web.py` — `/chat` 加 `session` 参数(载 history + 跑完 save + 首发 `event: session`);`GET /sessions`(列 `{id,updated,mode,title,preview}`)、`GET /sessions/{id}`(回 messages 供回放)、`PATCH /sessions/{id}`(改标题)、`DELETE /sessions/{id}`(幂等)。会话首轮**自动起标题(临时标题 + LLM 并行精修)**:先用用户首条消息(裁剪到首行/≤40 字)作零成本临时标题、紧随 `run`/`session` 即时发 SSE `title`;再在后台线程并行用 LLM 精修(可配置 role `title`,缺省回落 `generation`)发第二个 `title` 覆盖,worker 收尾 `save` 时落盘其中胜出者,LLM 失败/超时则保留临时标题。**标题调用不再阻塞首事件**——`run`/`session` 先于标题发出,run_id 即时可用、Stop 立即可按,消除思考型模型(如 mimo)起标题导致的首事件长静默窗口。`sessions.auto_title` 开关;Web 专属。
+- 产物 `interfaces/web.py` — `POST /chat` JSON 加 `session` 参数(载 history + 跑完 save),创建并立即启动 worker,返回一次性随机 `run_id`;`GET /chat/{run_id}/events` 只能订阅该 run 的事件队列(不从 query string 收消息、不启动工作),首发 `event: session`;`GET /sessions`(列 `{id,updated,mode,title,preview}`)、`GET /sessions/{id}`(回 messages 供回放)、`PATCH /sessions/{id}`(改标题)、`DELETE /sessions/{id}`(幂等)。会话首轮**自动起标题(临时标题 + LLM 并行精修)**:先用用户首条消息(裁剪到首行/≤40 字)作零成本临时标题、紧随 `run`/`session` 即时发 SSE `title`;再在后台线程并行用 LLM 精修(可配置 role `title`,缺省回落 `generation`)发第二个 `title` 覆盖,worker 收尾 `save` 时落盘其中胜出者,LLM 失败/超时则保留临时标题。**标题调用不再阻塞首事件**——`run`/`session` 先于标题发出,run_id 即时可用、Stop 立即可按,消除思考型模型(如 mimo)起标题导致的首事件长静默窗口。`sessions.auto_title` 开关;Web 专属。
 - 产物 `interfaces/web_index.html` — 全高度双栏壳(左 session 侧栏 + 右全屏),会话列表、「新会话」、侧栏内联重命名/删除(不用 `window.prompt`/`window.confirm`)、中英 i18n。空草稿不新建/不持久化。
 
 ### 边角
@@ -47,7 +47,7 @@
 - 多轮存取 + 历史预置:`run` 写会话;`--continue`/`--resume` 后第二轮 messages 正确含第一轮正文。
 - 会话文件不含密钥(env 设 key,断言 key 值不在会话文件)。
 - 关闭仍薄:`sessions.enabled=false` 不落盘、行为退回单轮;零新增依赖。
-- Web 续聊:`/chat?session=` → `/sessions/{id}` 回放;新会话隔离;侧栏重命名/删除路由 + 路径穿越收窄。
+- Web 续聊:`POST /chat {session}` → 一次性 `GET /chat/{run_id}/events` SSE → `/sessions/{id}` 回放;新会话隔离;旧式 `GET /chat?...` 不再存在;侧栏重命名/删除路由 + 路径穿越收窄。
 - 大改动回归(动范式核心 + 跨 ≥3 文件):golden 全量 + Docker build/run mock。
 - `ReadLints` clean。
 

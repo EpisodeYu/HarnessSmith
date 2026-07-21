@@ -6,11 +6,32 @@ import pytest
 
 from harnessmith.catalog import (
     CatalogError,
+    CatalogServer,
     available_servers,
     get_server,
     load_catalog,
     resolve_servers,
 )
+
+
+@pytest.mark.parametrize(
+    "kwargs,secret",
+    [
+        ({"env": ["sk-secret"]}, "sk-secret"),
+        (
+            {"auth_env": "ghp_abcdefghijklmnopqrstuvwxyz123456"},
+            "ghp_abcdefghijklmnopqrstuvwxyz123456",
+        ),
+        (
+            {"env_const": {"ghp_abcdefghijklmnopqrstuvwxyz123456": "not-a-secret"}},
+            "ghp_abcdefghijklmnopqrstuvwxyz123456",
+        ),
+    ],
+)
+def test_catalog_env_references_reject_secrets_without_echo(kwargs, secret):
+    with pytest.raises(CatalogError) as caught:
+        CatalogServer(name="unsafe", command="x", **kwargs)
+    assert secret not in str(caught.value)
 
 
 def test_catalog_loads_baseline_servers():

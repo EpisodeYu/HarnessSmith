@@ -18,7 +18,7 @@
 ## 1. 关键决策
 
 - **① 取消机制**:一根协作式取消令牌(`threading.Event` 或 `cancelled() -> bool`)从入口穿到 `loop.run` → 范式循环 → `client.stream`。范式在每步开头(挨着 budget 检查)查一次;`stream` 在逐 chunk 循环里查一次,命中即 `close()` 流并 break。`complete`(非流式)无法中途打断单次阻塞调用,取消在下一步边界生效(Web 默认流式,故影响小)。
-- **② 停止入口(显式端点 + 断连兜底)**:Web = 显式 `POST /chat/{run_id}/stop`(配 `app.state.runs` 取消令牌表)+ 前端发送按钮换停止按钮 + 「浏览器断连即取消」兜底(SSE 生成器侧检测断连 → 置位同一令牌)。CLI = SIGINT 处理器(首个 Ctrl+C 置位令牌→优雅停+存档;再按一次→硬退出)。
+- **② 停止入口(显式端点 + 断连兜底)**:Web = `POST /chat` 创建并启动 run、返回不可猜 `run_id`,随后 `GET /chat/{run_id}/events` 只读订阅;显式 `POST /chat/{run_id}/stop` 配 `app.state.runs` 取消令牌表 + 前端发送按钮换停止按钮 + 「SSE 订阅断连即取消」兜底(订阅生成器关闭 → 置位同一令牌)。CLI = SIGINT 处理器(首个 Ctrl+C 置位令牌→优雅停+存档;再按一次→硬退出)。
 - **③ 继续语义(Tier B:崩溃安全)**:① 优雅中断把进行中 `messages` 存进同一 session;② per-step 原子 write-ahead + 会话 `status`;③ resume 时对悬挂 `tool_use` 注入合成 error `tool_result` 修复合法性。下次任意发送即带全部上下文续上,LLM 靠上下文自明(不强制注入提示)。
 - **④ 重问(Web 专属)**:破坏式截断重生(确认丢后续)。CLI 不做(Claude CLI 重问靠复杂 rewind TUI,按「支持但复杂→不做」)。
 - **⑤ 重问 = 破坏式截断**(覆盖、丢后续),不做 fork。
@@ -32,7 +32,7 @@
 - 产物 `harness/llm.py` — `LLMClient` Protocol + `OpenAIClient` 的 `stream`/`complete` 加 `cancel` 形参;`stream` 逐 chunk `if cancel and cancel(): stream_obj.close(); break`,返回已组装的半截 `LLMResponse`(由范式 break 前丢弃)。`MockLLM` 同步加 `cancel`。
 
 ### 停止入口
-- 产物 `interfaces/web.py` — `create_app` 加 `app.state.runs: dict[str, threading.Event]`(+ 锁);`_chat_events` 生成 `run_id`、建 `cancel`、首发 `event: run {run_id}`,worker 把 `cancel.is_set` 传进 `run_loop`;中断时 worker 仍 `save(部分 messages, status="interrupted")` 并发 `event: stopped`;`finally` 注销 `run_id`。`POST /chat/{run_id}/stop` 置位对应 `Event`(未知 id 幂等 200)。断连兜底(`Request.is_disconnected()` / `GeneratorExit`)置位同一 `Event`。
+- 产物 `interfaces/web.py` — `create_app` 加 `app.state.runs: dict[str, threading.Event]`(+ 锁);`POST /chat` 生成 192-bit 随机 `run_id`、建 `cancel`、立即启动 worker 并返回 id;`GET /chat/{run_id}/events` 消耗一次性订阅能力、只读取事件队列,首发 `event: run {run_id}`;worker 把 `cancel.is_set` 传进 `run_loop`,中断时仍 `save(部分 messages, status="interrupted")` 并发 `event: stopped`,`finally` 注销。`POST /chat/{run_id}/stop` 置位对应 `Event`(未知 id 幂等 200)。SSE 订阅关闭(`GeneratorExit`)置位同一 `Event`。
 - 产物 `interfaces/cli.py` — `run`/`chat` 装 SIGINT 处理器置位 `cancel`(不抛异常);返回 `interrupted` 时正常 `save`(标 `interrupted`)+ 打印「已停止,下次发送即可继续」;二次 Ctrl+C 硬退出。
   - **issue #5 B2 加固(2026-06)**:`uv run` 下单次 Ctrl-C 流式中途,uv 可在 cli 收尾 `save` 之前杀子进程(退出 130),旧版最后落盘只剩每步 `running` checkpoint(可续跑但状态标签误导)。修复:① SIGINT 处理器首次触发即 `on_stop` **同步原子写 `interrupted`**(抢在 uv 杀进程之前);② 写前闸 checkpoint cancel-aware(取消在途时落 `interrupted` 非 `running`);③ `except KeyboardInterrupt` 兜底再写一次。`status_of` 文档点明:磁盘上读到的 `running` = 上一轮未净结(崩溃/被杀),按 interrupted 等价处理、非「仍在跑」。
 
@@ -43,7 +43,7 @@
 
 ### 重问(Web 专属)
 - 产物 `harness/session.py` — `turns(messages)`(派生 user 消息边界:序号 + 预览)+ `truncate_to_turn(messages, n)`(截到第 n 个 user 回合之前)。
-- 产物 `interfaces/web.py` — `/chat` 加可选 `edit_turn: int`:载 session → `truncate_to_turn` → 以编辑后的 message 作新一轮 → 跑完覆盖保存。
+- 产物 `interfaces/web.py` — `POST /chat` JSON 加可选 `edit_turn: int`:载 session → `truncate_to_turn` → 以编辑后的 message 作新一轮 → 跑完覆盖保存。
 - 产物 `interfaces/web_index.html` — 回放区每条历史 user 消息加「编辑」控件→就地变 textarea→点发送→页面内联确认条(「会丢失后续对话」,不用 `window.confirm`)→确认后带 `edit_turn` 发起 `/chat`。流式期间发送按钮↔停止按钮切换。
 
 ### 边角 + 文档
@@ -57,7 +57,7 @@
 - 停止终止全链路:mock 流式中途 `cancel` → 范式 `stop_reason="interrupted"`、`stream_obj.close()` 被调用、半截输出被丢弃;`messages` 对 API 合法。
 - 停止后可继续:中断后 session 存了合法部分 messages(status `interrupted`);`--continue`/Web 续聊第二轮上下文含原问题 + 已完成工具步骤。
 - 崩溃恢复(Tier B):per-step `checkpoint` 原子写;模拟硬崩溃(只留 checkpoint)后 `load` 检出非 `complete` + `repair_orphan_tool_results` 补齐悬挂 tool_use → resume 历史对 API 合法、可续。
-- Web 停止按钮 + 断连:`run` 事件带 `run_id`;`POST /chat/{run_id}/stop` 置位→`stopped`→流结束;断连亦触发取消。
+- Web 停止按钮 + 断连:`POST /chat` 返回不可猜 `run_id`,`GET /chat/{run_id}/events` 一次性订阅;`POST /chat/{run_id}/stop` 置位→`stopped`→流结束;订阅断连亦触发取消;旧式 query-string GET 不启动 run。
 - CLI Ctrl+C:首个 SIGINT 优雅停 + 存档 + 提示;二次硬退出;非主线程降级为不可中断。
 - 重问截断重生(Web):`edit_turn` 截到该 user 回合前 → 编辑后问题重生 → 覆盖 session;前端内联确认(不出现 `window.confirm`/`window.prompt`)。
 - 关闭/未触发仍薄:`sessions.enabled=false` 时停止仍能终止(只是不存档可续);无重问入口;不新增运行期依赖。

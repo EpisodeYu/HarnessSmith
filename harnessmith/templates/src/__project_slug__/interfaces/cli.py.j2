@@ -785,8 +785,15 @@ def set_key(
     config.yaml only ever holds the env-var NAME; this fills in its value in .env
     (gitignored) so you don't have to set OS environment variables by hand.
     """
-    from ..harness.config import ConfigError, set_env_value
+    from ..harness.config import ConfigError, set_env_value, validate_env_name
 
+    try:
+        # Validate before constructing the prompt: if a real token was pasted as
+        # NAME, even the terminal prompt/error must not repeat it.
+        validate_env_name(name)
+    except ConfigError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
     value = typer.prompt(f"Value for {name}", hide_input=True)
     try:
         set_env_value(name, value)
@@ -1240,11 +1247,22 @@ def serve(
         "--open/--no-open",
         help="Open the web UI in your default browser once it starts.",
     ),
+    unsafe_allow_remote: bool = typer.Option(
+        False,
+        "--unsafe-allow-remote",
+        help="Allow a non-loopback bind (unsafe: exposes the local control plane).",
+    ),
 ) -> None:
     """Serve the web chat + live /config panel."""
     import uvicorn
 
-    from .web import create_app
+    from .web import _is_loopback_host, create_app
+
+    if not _is_loopback_host(host) and not unsafe_allow_remote:
+        raise typer.BadParameter(
+            "a non-loopback --host requires --unsafe-allow-remote; prefer an SSH "
+            "port forward to 127.0.0.1"
+        )
 
     bind_port = port if port else _find_free_port(8000, host)
     config = load_config(config_path)
@@ -1255,7 +1273,12 @@ def serve(
 {% if spec.memory.enabled %}    _setup_memory(config)
 {% endif %}{% if spec.subagents.enabled %}    _setup_subagents(config, mock)
 {% endif %}    # Pass config_path so a /config panel Save persists back to this file.
-    application = create_app(config, mock=mock, config_path=config_path)
+    application = create_app(
+        config,
+        mock=mock,
+        config_path=config_path,
+        allow_remote=unsafe_allow_remote,
+    )
 {% if spec.mcp.enabled %}    # First run only: pre-fetch the stdio MCP packages (npx/uvx) HERE, with live
     # progress to this terminal, so the page opens with tools ready instead of
     # mid-download — and so a slow cold download shows progress + a heartbeat rather

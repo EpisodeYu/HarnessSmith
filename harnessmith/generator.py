@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import signal
 import socket
 import subprocess
@@ -303,6 +304,9 @@ def generate(
         undefined=StrictUndefined,
         autoescape=False,
     )
+    # Templates span several syntactic contexts.  Keep autoescape disabled for
+    # code/YAML templates and opt into the context-specific encoder at each sink.
+    env.filters["shellquote"] = shlex.quote
     context = _build_context(spec, mcp_servers or [], confirm_default=confirm_default)
 
     launch_stem = launch_script_stem(spec)

@@ -14,6 +14,8 @@ from pathlib import Path
 
 import yaml
 
+from ..spec import is_env_var_name
+
 CATALOG_PATH = Path(__file__).parent / "mcp_servers.yaml"
 
 SAFE = "safe"
@@ -48,6 +50,20 @@ class CatalogServer:
     source: str = ""
     updated: str = ""
     tools: list[CatalogTool] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Reject malformed env names and secret literals before rendering."""
+        references = ([self.auth_env] if self.auth_env is not None else []) + list(self.env)
+        if any(not is_env_var_name(name) for name in references):
+            raise CatalogError(
+                f"catalog server {self.name!r} has an invalid env reference; use an "
+                "environment-variable name ([A-Za-z_][A-Za-z0-9_]*) and never a secret value"
+            )
+        if any(not is_env_var_name(name) for name in self.env_const):
+            raise CatalogError(
+                f"catalog server {self.name!r} has an invalid env_const name; use "
+                "[A-Za-z_][A-Za-z0-9_]*"
+            )
 
     @property
     def safe_tools(self) -> list[str]:

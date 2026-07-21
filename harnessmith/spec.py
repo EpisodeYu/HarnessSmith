@@ -9,6 +9,7 @@ and real values live only in ``.env``.
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Literal
 
@@ -16,6 +17,60 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SECRET_PREFIXES = (
+    "sk-",
+    "sk_",
+    "sk-ant-",
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "github_pat_",
+    "gsk_",
+    "hf_",
+    "xoxb-",
+    "xoxp-",
+    "glpat-",
+)
+_REDACTED_ENV_REFERENCE = "<redacted-invalid-env-reference>"
+_DISPLAY_NAME_MAX_LENGTH = 120
+
+
+def is_env_var_name(value: object) -> bool:
+    """Return whether ``value`` is an env-var name, not a common secret literal."""
+    if not isinstance(value, str) or not ENV_VAR_NAME_RE.fullmatch(value):
+        return False
+    # Some real credentials also satisfy the identifier grammar (GitHub PATs are
+    # the common example), so reject well-known token shapes as a second guardrail.
+    if value.startswith(_SECRET_PREFIXES):
+        return False
+    if re.fullmatch(r"(?:AKIA|ASIA)[A-Z0-9]{16}", value):
+        return False
+    if value.startswith("AIza") and len(value) >= 32:
+        return False
+    return True
+
+
+def _redact_invalid_env_fields(data: Any, fields: tuple[str, ...]) -> Any:
+    """Redact bad references before Pydantic copies them into an error object."""
+    if not isinstance(data, dict):
+        return data
+    clean = dict(data)
+    for field in fields:
+        value = clean.get(field)
+        if value is not None and not is_env_var_name(value):
+            clean[field] = _REDACTED_ENV_REFERENCE
+    return clean
+
+
+def _validate_env_reference(value: str | None) -> str | None:
+    if value is not None and not is_env_var_name(value):
+        raise ValueError(
+            "must be an environment-variable name "
+            "([A-Za-z_][A-Za-z0-9_]*); secret-looking values are rejected"
+        )
+    return value
 
 
 class LLMProfile(BaseModel):
@@ -34,6 +89,16 @@ class LLMProfile(BaseModel):
     provider: Literal["openai", "anthropic"] = "openai"
     api_key_env: str = "OPENAI_API_KEY"
     base_url_env: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _redact_invalid_env_references(cls, data: Any) -> Any:
+        return _redact_invalid_env_fields(data, ("api_key_env", "base_url_env"))
+
+    @field_validator("api_key_env", "base_url_env")
+    @classmethod
+    def _env_references_are_names(cls, value: str | None) -> str | None:
+        return _validate_env_reference(value)
 
 
 class ToolSpec(BaseModel):
@@ -142,6 +207,16 @@ class Observability(BaseModel):
     trace: bool = True
     trace_dir: str = "traces"
 
+    @field_validator("trace_dir")
+    @classmethod
+    def _trace_dir_is_one_line(cls, value: str) -> str:
+        if not value or any(
+            unicodedata.category(char) in {"Cc", "Cf", "Zl", "Zp"}
+            for char in value
+        ):
+            raise ValueError("trace_dir must be a non-empty single-line path")
+        return value
+
 
 class Prompts(BaseModel):
     """System-prompt assembly inputs (consumed by prompts.py in Slice 1)."""
@@ -229,6 +304,25 @@ class HarnessSpec(BaseModel):
             if name not in deduped:
                 deduped.append(name)
         return deduped
+
+    @field_validator("display_name")
+    @classmethod
+    def _validate_display_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if any(
+            unicodedata.category(char) in {"Cc", "Cf", "Zl", "Zp"}
+            for char in value
+        ):
+            raise ValueError("display_name must be a single line without control characters")
+        value = value.strip()
+        if not value:
+            raise ValueError("display_name must not be blank")
+        if len(value) > _DISPLAY_NAME_MAX_LENGTH:
+            raise ValueError(
+                f"display_name must be at most {_DISPLAY_NAME_MAX_LENGTH} characters"
+            )
+        return value
 
     @field_validator("project_slug")
     @classmethod

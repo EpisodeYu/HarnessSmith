@@ -19,6 +19,64 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_CONFIG_PATH = "config.yaml"
 DEFAULT_ENV_FILE = ".env"
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SECRET_PREFIXES = (
+    "sk-", "sk_", "sk-ant-", "ghp_", "gho_", "ghu_", "ghs_",
+    "github_pat_", "gsk_", "hf_", "xoxb-", "xoxp-", "glpat-",
+)
+_REDACTED_ENV_REFERENCE = "<redacted-invalid-env-reference>"
+
+
+def _is_env_var_name(value: object) -> bool:
+    """Shared runtime rule for every field that references an environment value."""
+    if not isinstance(value, str) or not _ENV_NAME_RE.fullmatch(value):
+        return False
+    if value.startswith(_SECRET_PREFIXES):
+        return False
+    if re.fullmatch(r"(?:AKIA|ASIA)[A-Z0-9]{16}", value):
+        return False
+    if value.startswith("AIza") and len(value) >= 32:
+        return False
+    return True
+
+
+def _redact_invalid_env_fields(
+    data: Any,
+    *,
+    scalar_fields: tuple[str, ...] = (),
+    list_fields: tuple[str, ...] = (),
+    mapping_key_fields: tuple[str, ...] = (),
+) -> Any:
+    """Remove pasted secrets before Pydantic can include them in error details."""
+    if not isinstance(data, dict):
+        return data
+    clean = dict(data)
+    for field in scalar_fields:
+        value = clean.get(field)
+        if value is not None and not _is_env_var_name(value):
+            clean[field] = _REDACTED_ENV_REFERENCE
+    for field in list_fields:
+        value = clean.get(field)
+        if isinstance(value, (list, tuple)) and any(
+            not _is_env_var_name(item) for item in value
+        ):
+            clean[field] = [_REDACTED_ENV_REFERENCE]
+    for field in mapping_key_fields:
+        value = clean.get(field)
+        if isinstance(value, dict) and any(
+            not _is_env_var_name(item) for item in value
+        ):
+            clean[field] = {_REDACTED_ENV_REFERENCE: ""}
+    return clean
+
+
+def _validate_env_reference(value: str | None) -> str | None:
+    if value is not None and not _is_env_var_name(value):
+        raise ValueError(
+            "must be an environment-variable name "
+            "([A-Za-z_][A-Za-z0-9_]*); secret-looking values are rejected"
+        )
+    return value
 
 
 class ConfigError(Exception):
@@ -111,6 +169,18 @@ class LLMProfileConfig(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0)
     max_retries: int | None = Field(default=None, ge=0)
     fallback: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _redact_invalid_env_references(cls, data: Any) -> Any:
+        return _redact_invalid_env_fields(
+            data, scalar_fields=("api_key_env", "base_url_env")
+        )
+
+    @field_validator("api_key_env", "base_url_env")
+    @classmethod
+    def _env_references_are_names(cls, value: str | None) -> str | None:
+        return _validate_env_reference(value)
 
 
 class PromptsConfig(BaseModel):
@@ -303,6 +373,41 @@ class McpServerConfig(BaseModel):
     # risk="safe" (offered even to read-only paradigms like plan/ask); every other
     # discovered tool defaults to risk="high" (mutating; agent-only, opt-in).
     safe_tools: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _redact_invalid_env_references(cls, data: Any) -> Any:
+        return _redact_invalid_env_fields(
+            data,
+            scalar_fields=("auth_env",),
+            list_fields=("env",),
+            mapping_key_fields=("env_const",),
+        )
+
+    @field_validator("auth_env")
+    @classmethod
+    def _auth_env_is_a_name(cls, value: str | None) -> str | None:
+        return _validate_env_reference(value)
+
+    @field_validator("env")
+    @classmethod
+    def _env_entries_are_names(cls, value: list[str]) -> list[str]:
+        if any(not _is_env_var_name(name) for name in value):
+            raise ValueError(
+                "env entries must be environment-variable names "
+                "([A-Za-z_][A-Za-z0-9_]*); secret-looking values are rejected"
+            )
+        return value
+
+    @field_validator("env_const")
+    @classmethod
+    def _env_const_keys_are_names(cls, value: dict[str, str]) -> dict[str, str]:
+        if any(not _is_env_var_name(name) for name in value):
+            raise ValueError(
+                "env_const keys must be environment-variable names "
+                "([A-Za-z_][A-Za-z0-9_]*); secret-looking values are rejected"
+            )
+        return value
 
     @model_validator(mode="after")
     def _one_transport(self) -> "McpServerConfig":
@@ -594,7 +699,12 @@ def resolve_env(name: str | None) -> str | None:
     return _env_file_values().get(name.upper())
 
 
-_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+def validate_env_name(name: str) -> None:
+    """Validate an env-var NAME without ever including the supplied text in errors."""
+    if not _is_env_var_name(name):
+        raise ConfigError(
+            "invalid env-var name (use letters, digits, underscores; never paste a secret as the name)"
+        )
 
 
 def set_env_value(name: str, value: str, env_path: str | Path = DEFAULT_ENV_FILE) -> None:
@@ -606,10 +716,7 @@ def set_env_value(name: str, value: str, env_path: str | Path = DEFAULT_ENV_FILE
     NAME; this fills in its value so you don't have to set OS environment
     variables by hand (handy on Windows). One line, no newline injection.
     """
-    if not _ENV_NAME_RE.match(name):
-        raise ConfigError(
-            f"invalid env-var name {name!r} (use letters, digits, underscores)"
-        )
+    validate_env_name(name)
     value = value.replace("\r", "").replace("\n", "")
     path = Path(env_path)
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []

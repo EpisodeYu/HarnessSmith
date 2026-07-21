@@ -237,7 +237,7 @@ Model and endpoint live in `config.yaml` (or the web `/config` LLM tab): set `mo
 |---|---|
 | `run [PROMPT]` | Execute one turn. Options: `--mode agent\|plan\|ask`, `--stream`, `--continue`, `--resume <id>`, `--role`, `--cwd`, `--mock` |
 | `chat` | Multi-turn REPL with persistent sessions; `/cwd` sets the working-directory hint; `Ctrl-D` or `/exit` to quit |
-| `serve` | Start the web interface (`--host`, `--port`, `--open`); web-enabled products |
+| `serve` | Start the web interface (`--host`, `--port`, `--open`); non-loopback requires `--unsafe-allow-remote` |
 | `info` | Introspect every extension point — registered tools, paradigms, context strategies/conditions, memory backends, imported extensions, and mounted hooks |
 | `test-llm` | Connectivity and capability probe for each configured LLM profile |
 | `set-key <ENV_NAME>` | Write a secret into `.env` without echoing it or touching git |
@@ -257,10 +257,10 @@ Structural changes (adding or removing an interface or module) require regenerat
 
 ## Security model
 
-- **Secrets never enter git.** Real values live exclusively in the gitignored `.env`; all other files reference environment-variable names. `set-key` and the web panel's key writer are write-only and never echo values. Traces and the debug log record no secrets.
+- **Secrets never enter git.** Real values live exclusively in the gitignored `.env`; all other files reference validated environment-variable names. Values accidentally pasted into an env-name field are rejected without being echoed. `set-key` and the web panel's key writer are write-only. Traces and the debug log record no secrets.
 - **High-risk tools are off by default.** Shell and file-writing tools ship disabled and require explicit allowlisting; the runtime allowlist can only narrow the set compiled in at generation time, never extend it.
 - **Human-in-the-loop confirmation** (`tools.confirm: none|high|all|<tool names>`) intercepts risky tool calls with `allow once / reject / allow for session / allow always`; non-interactive contexts reject by default. Confirmation is a guardrail for trusted operators, not a security boundary — hard isolation belongs to Docker or to excluding the capability at generation time.
-- **The web interface targets local, trusted use.** The `/config` panel and the MCP management page can modify runtime behavior and launch local processes; do not expose them to untrusted networks.
+- **The web interface targets local, trusted use.** It defaults to trusted loopback Hosts, rejects cross-site browser requests, requires a per-process CSRF token for mutations, and creates chat runs by POST before SSE subscription. Non-loopback binding requires the explicit `--unsafe-allow-remote` flag; because `/config` and MCP management can modify runtime behavior and launch local processes, add independent authentication before any shared deployment.
 
 ## License
 
@@ -479,7 +479,7 @@ docker build -t my-agent . && docker run --rm -it my-agent
 |---|---|
 | `run [PROMPT]` | 执行一轮。选项:`--mode agent\|plan\|ask`、`--stream`、`--continue`、`--resume <id>`、`--role`、`--cwd`、`--mock` |
 | `chat` | 多轮 REPL,会话自动持久化;`/cwd` 设置工作目录提示;`Ctrl-D` 或 `/exit` 退出 |
-| `serve` | 启动 Web 界面(`--host`、`--port`、`--open`);启用 Web 的产物 |
+| `serve` | 启动 Web 界面(`--host`、`--port`、`--open`);非 loopback 需 `--unsafe-allow-remote` |
 | `info` | 内省所有扩展点——已注册的工具、范式、上下文策略/触发条件、记忆后端、已导入的 extensions 与已挂载的 hooks |
 | `test-llm` | 对每个 LLM profile 做连通性与能力探测 |
 | `set-key <ENV_NAME>` | 将密钥写入 `.env`,不回显、不触碰 git |
@@ -499,10 +499,10 @@ docker build -t my-agent . && docker run --rm -it my-agent
 
 ## 安全模型
 
-- **密钥不入 git。** 真实值仅存于 gitignored 的 `.env`;其余文件只引用环境变量名。`set-key` 与 Web 面板的密钥写入均为只写、不回显;trace 与 debug 日志不记录密钥。
+- **密钥不入 git。** 真实值仅存于 gitignored 的 `.env`;其余文件只引用通过校验的环境变量名。误把真值粘进变量名字段会被拒绝且错误不回显。`set-key` 与 Web 面板的密钥写入均为只写;trace 与 debug 日志不记录密钥。
 - **高风险工具默认关闭。** shell 与写文件类工具默认禁用,需显式 allowlist 开启;运行期 allowlist 只能在生成期编译进的集合内收窄,永远不能扩张。
 - **人在环确认**(`tools.confirm: none|high|all|<工具名>`)以"允许一次 / 拒绝 / 本会话允许 / 永久允许"拦截高风险工具调用;非交互场景默认拒绝。确认机制是面向可信操作者的护栏,不是安全边界——硬隔离依靠 Docker,或在生成期就不编译该能力。
-- **Web 界面面向本地可信使用。** `/config` 面板与 MCP 管理页可修改运行期行为并启动本地进程,请勿暴露给不可信网络。
+- **Web 界面面向本地可信使用。** 默认仅信任 loopback Host、拒绝跨站浏览器请求、写请求须携带每进程随机 CSRF token,chat 先 POST 创建再按不可猜 id 订阅 SSE。非 loopback 绑定需显式 `--unsafe-allow-remote`;该开关不提供认证。共享部署前须另加独立认证,并隔离可改配置、环境变量与 MCP 进程管理的本地控制面。
 
 ## 许可
 

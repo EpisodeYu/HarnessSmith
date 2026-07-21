@@ -1,8 +1,9 @@
 """Optional web interface: a streaming chat + a live ``/config`` panel (FastAPI).
 
-Generated only when ``interfaces.web`` is enabled. ``/chat`` streams the loop's
-progress over Server-Sent Events by listening on the existing :class:`Hooks`
-extension point — the loop itself is untouched. ``/config`` reads and edits the
+Generated only when ``interfaces.web`` is enabled. ``POST /chat`` creates a run;
+``GET /chat/{run_id}/events`` subscribes to its progress over Server-Sent Events
+through the existing :class:`Hooks` extension point — the loop itself is untouched.
+``/config`` reads and edits the
 *runtime behavioral* config (prompts, enabled tools, context, sampling, per-LLM
 pricing + cost limits) and never exposes secrets: profiles only carry env-var
 NAMES. A Save applies the
@@ -15,12 +16,16 @@ Run it with ``{{ project_slug }} serve`` or ``uvicorn``.
 
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import json
 import queue
+import secrets
 import threading
 import time
 from collections import deque
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 from fastapi import FastAPI, Request
@@ -61,6 +66,59 @@ from ..harness.paradigms import PARADIGMS
 from ..harness import session as session_store
 
 _INDEX_HTML = (Path(__file__).parent / "web_index.html").read_text(encoding="utf-8")
+_CSRF_HEADER = "X-Harness-CSRF"
+_SESSION_COOKIE = "harness-local-session"
+_CSRF_HTML_MARKER = "__HARNESS_CSRF_TOKEN__"
+_RUN_REQUEST_TTL_SECONDS = 60.0
+
+
+def _authority(value: str, scheme: str = "http") -> tuple[str, int] | None:
+    """Normalize a Host/origin authority without DNS resolution."""
+    try:
+        parsed = urlsplit(value if "://" in value else f"{scheme}://{value}")
+        if parsed.username is not None or parsed.password is not None or not parsed.hostname:
+            return None
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return None
+    return parsed.hostname.rstrip(".").lower(), port
+
+
+def _is_loopback_host(value: str) -> bool:
+    # A Host header is an authority, never a URL/path. Reject strings urlsplit
+    # would otherwise leniently parse as a loopback hostname plus trailing path.
+    if "://" in value or any(mark in value for mark in "/?#"):
+        return False
+    # Uvicorn's CLI bind form for IPv6 is raw ``::1``; HTTP Host headers use
+    # ``[::1]:port`` and fall through to the authority parser below.
+    try:
+        if ipaddress.ip_address(value).is_loopback:
+            return True
+    except ValueError:
+        pass
+    authority = _authority(value)
+    if authority is None:
+        return False
+    hostname, _ = authority
+    if hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _same_origin(value: str, request: Request) -> bool:
+    """Exact scheme + host + effective-port comparison for Origin/Referer."""
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    return _authority(value) == _authority(
+        request.headers.get("host", ""), request.url.scheme
+    ) and parsed.scheme == request.url.scheme
 
 # Behavioral config the panel may edit. Structural config (which interfaces or
 # modules exist) is NOT here — that requires regenerating. ``secrets`` is never
@@ -496,6 +554,8 @@ def _chat_events(
     config_path=None,
     working_dir: str | None = None,
     hook_log=None,
+    run_id: str | None = None,
+    cancel_event: threading.Event | None = None,
 ):
     """Drive one ``run()`` in a worker thread and yield its events as SSE.
 
@@ -509,7 +569,7 @@ def _chat_events(
     first event, so run_id ships immediately. The worker persists whichever title
     wins (the LLM one if it lands in time, else the provisional one).
 
-    A cancel token is registered in ``runs`` under a fresh ``run_id`` (emitted as
+    A cancel token is registered in ``runs`` under an unguessable ``run_id`` (emitted as
     the first ``event: run``) so ``POST /chat/{run_id}/stop`` — or a client
     disconnect (``GeneratorExit``) — can stop the loop mid-flight. An interrupted
     turn still persists its partial body (``status="interrupted"``) and emits
@@ -540,8 +600,8 @@ def _chat_events(
 
     # Register this run's cancel token so /stop (and disconnect) can reach it, plus
     # a per-run pending-ask table so /respond can deliver an answer to the worker.
-    run_id = session_store.new_id()
-    cancel_event = threading.Event()
+    run_id = run_id or secrets.token_urlsafe(24)
+    cancel_event = cancel_event or threading.Event()
     run_pending: dict = {}
     if runs is not None and lock is not None:
         with lock:
@@ -714,11 +774,33 @@ def _chat_events(
                     pending.pop(run_id, None)
 
 
+def _subscribe_run_events(event_queue, cancel_event, pending, lock, run_id):
+    """Yield buffered SSE frames for one POST-created run.
+
+    The model worker is already owned by the POST path. This GET only subscribes
+    to its queue; disconnecting still cancels the worker and unblocks pending
+    questions/confirmations fail-closed.
+    """
+    try:
+        while True:
+            frame = event_queue.get()
+            if frame is None:
+                break
+            yield frame
+    except GeneratorExit:
+        cancel_event.set()
+        with lock:
+            for reply_q in list(pending.get(run_id, {}).values()):
+                reply_q.put(None)
+        raise
+
+
 def create_app(
     config: Config | None = None,
     *,
     mock: bool = False,
     config_path: str | Path | None = None,
+    allow_remote: bool = False,
 ) -> FastAPI:
     """Build the FastAPI app.
 
@@ -727,7 +809,7 @@ def create_app(
     passed in (e.g. tests) the path is only tracked if given explicitly — a
     config built in code (no path) never gets written to a stray file.
     """
-    app = FastAPI(title="{{ display_name }} — web")
+    app = FastAPI(title={{ (display_name ~ " — web") | tojson }})
     if config is None:
         config_path = config_path or DEFAULT_CONFIG_PATH
         config = load_config(config_path)
@@ -735,9 +817,17 @@ def create_app(
     # Where a /config Save writes back to (None = apply in-process, don't persist).
     app.state.config_path = Path(config_path) if config_path is not None else None
     app.state.mock = mock
+    # Per-process only: embedded into the served page, required on every mutating
+    # request, and never written to config/git/trace/debug logs.
+    app.state.csrf_token = secrets.token_urlsafe(32)
+    app.state.allow_remote = allow_remote
     # In-flight chat runs: run_id -> cancel Event, so POST /chat/{run_id}/stop can
     # signal a running loop. The lock guards the dict across worker threads.
     app.state.runs = {}
+    # POST /chat creates a short-lived run capability; the SSE GET can only
+    # subscribe by presenting that unguessable id.  Old GET /chat?message= no
+    # longer starts model/tool work.
+    app.state.run_requests = {}
     # Open asks per run: run_id -> {request_id -> reply Queue}, so POST
     # /chat/{run_id}/respond can deliver an answer to a blocked worker (and stop /
     # disconnect can unblock any pending ask). Guarded by the same lock.
@@ -749,6 +839,45 @@ def create_app(
     # In-process record of mounted-hook invocations for the Hooks page's execution
     # log (names/methods/timings only; cleared by hand, reset on restart).
     app.state.hook_log = _HookLog()
+
+    @app.middleware("http")
+    async def local_request_boundary(request: Request, call_next):
+        """Host/origin boundary plus header-token CSRF protection.
+
+        CORS is intentionally not involved: it controls response visibility, not
+        whether a hostile page can send a localhost request in the first place.
+        """
+        host = request.headers.get("host", "")
+        if not host or (not app.state.allow_remote and not _is_loopback_host(host)):
+            return JSONResponse({"error": "untrusted Host"}, status_code=403)
+
+        fetch_site = request.headers.get("sec-fetch-site", "").lower()
+        if fetch_site and fetch_site not in {"same-origin", "none"}:
+            return JSONResponse({"error": "cross-site request rejected"}, status_code=403)
+        origin = request.headers.get("origin")
+        if origin and not _same_origin(origin, request):
+            return JSONResponse({"error": "untrusted Origin"}, status_code=403)
+        referer = request.headers.get("referer")
+        if not origin and referer and not _same_origin(referer, request):
+            return JSONResponse({"error": "untrusted Referer"}, status_code=403)
+
+        # EventSource cannot set a custom header. A Strict, HttpOnly per-process
+        # cookie is therefore the bearer for every endpoint after the root page;
+        # mutations additionally require the explicit header token below.
+        if request.url.path != "/":
+            supplied_cookie = request.cookies.get(_SESSION_COOKIE, "")
+            if not hmac.compare_digest(supplied_cookie, app.state.csrf_token):
+                return JSONResponse({"error": "missing local session"}, status_code=403)
+
+        if request.method not in {"GET", "HEAD"}:
+            supplied = request.headers.get(_CSRF_HEADER, "")
+            if not hmac.compare_digest(supplied, app.state.csrf_token):
+                return JSONResponse({"error": "missing or invalid CSRF token"}, status_code=403)
+
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
 {% if spec.mcp.enabled %}    # The live MCP manager: ONE per serving process, the single source of truth
     # for the MCP page, the Tools page, and the tools offered to the model. Started
     # lazily on the first /mcp call (or eagerly by `serve`), and rebuilt on a server
@@ -768,18 +897,48 @@ def create_app(
     register_subagent_tools(app.state.config, mock=app.state.mock)
 {% endif %}
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        return _INDEX_HTML
+    def index() -> HTMLResponse:
+        html = _INDEX_HTML.replace(_CSRF_HTML_MARKER, app.state.csrf_token, 1)
+        response = HTMLResponse(html, headers={"Cache-Control": "no-store"})
+        response.set_cookie(
+            _SESSION_COOKIE,
+            app.state.csrf_token,
+            httponly=True,
+            samesite="strict",
+        )
+        return response
 
-    @app.get("/chat")
-    def chat(
-        message: str,
-        stream: bool = True,
-        mode: str | None = None,
-        session: str | None = None,
-        edit_turn: int | None = None,
-        cwd: str | None = None,
-    ) -> StreamingResponse:
+    @app.post("/chat")
+    async def create_chat(request: Request):
+        """Create a short-lived chat run; model/tool work is never started by a
+        query-string GET.  The returned id is an unguessable one-use SSE capability."""
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "valid JSON object required"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "JSON object required"}, status_code=400)
+        message = body.get("message")
+        if not isinstance(message, str) or not message.strip():
+            return JSONResponse({"error": "message required"}, status_code=400)
+        stream_value = body.get("stream", True)
+        if isinstance(stream_value, str):
+            stream = stream_value.lower() not in {"0", "false", "no"}
+        else:
+            stream = bool(stream_value)
+        for field in ("mode", "session", "cwd"):
+            if body.get(field) is not None and not isinstance(body[field], str):
+                return JSONResponse({"error": f"{field} must be a string"}, status_code=400)
+        mode = body.get("mode") or None
+        session = body.get("session") or None
+        cwd = body.get("cwd") or None
+        edit_turn = body.get("edit_turn")
+        if edit_turn is not None:
+            try:
+                edit_turn = int(edit_turn)
+            except (TypeError, ValueError):
+                return JSONResponse({"error": "edit_turn must be an integer"}, status_code=400)
+
         cfg = app.state.config
         # Resume the given session, or mint a new id; disabled sessions => one-shot.
         if cfg.sessions.enabled:
@@ -805,15 +964,73 @@ def create_app(
         # else unset (no injection — byte-identical to the original prompt). A
         # provided path is resolved to absolute so the model sees a stable anchor.
         working_dir = _resolve_working_dir(cwd, session_id, cfg)
+        run_id = secrets.token_urlsafe(24)
+        cancel_event = threading.Event()
+        chat_kwargs = {
+            "message": message,
+            "config": cfg,
+            "mock": app.state.mock,
+            "stream": stream,
+            "mode": mode,
+            "session_id": session_id,
+            "history": history,
+            "auto_title": auto_title,
+            "runs": app.state.runs,
+            "pending": app.state.pending,
+            "lock": app.state.runs_lock,
+            "confirm_sessions": app.state.confirm_sessions,
+            "config_path": app.state.config_path,
+            "working_dir": working_dir,
+            "hook_log": app.state.hook_log,
+            "run_id": run_id,
+            "cancel_event": cancel_event,
+        }
+        event_queue: queue.Queue = queue.Queue()
+        run_request = {
+            "created": time.monotonic(),
+            "events": event_queue,
+            "cancel_event": cancel_event,
+        }
+        with app.state.runs_lock:
+            cutoff = time.monotonic() - _RUN_REQUEST_TTL_SECONDS
+            expired = [
+                rid for rid, item in app.state.run_requests.items()
+                if item["created"] < cutoff
+            ]
+            for rid in expired:
+                expired_request = app.state.run_requests.pop(rid, None)
+                if expired_request is not None:
+                    expired_request["cancel_event"].set()
+                for reply_q in list(app.state.pending.get(rid, {}).values()):
+                    reply_q.put(None)
+                app.state.pending.pop(rid, None)
+                app.state.runs.pop(rid, None)
+            app.state.run_requests[run_id] = run_request
+            app.state.runs[run_id] = cancel_event
+
+        def _pump_run() -> None:
+            try:
+                for frame in _chat_events(**chat_kwargs):
+                    event_queue.put(frame)
+            finally:
+                event_queue.put(None)
+
+        threading.Thread(target=_pump_run, daemon=True).start()
+        return {"run_id": run_id}
+
+    @app.get("/chat/{run_id}/events")
+    def chat_events(run_id: str):
+        with app.state.runs_lock:
+            run_request = app.state.run_requests.pop(run_id, None)
+        if run_request is None:
+            return JSONResponse({"error": "unknown or expired run"}, status_code=404)
         return StreamingResponse(
-            _chat_events(
-                message, cfg, mock=app.state.mock, stream=stream, mode=mode,
-                session_id=session_id, history=history, auto_title=auto_title,
-                runs=app.state.runs, pending=app.state.pending, lock=app.state.runs_lock,
-                confirm_sessions=app.state.confirm_sessions,
-                config_path=app.state.config_path,
-                working_dir=working_dir,
-                hook_log=app.state.hook_log,
+            _subscribe_run_events(
+                run_request["events"],
+                run_request["cancel_event"],
+                app.state.pending,
+                app.state.runs_lock,
+                run_id,
             ),
             media_type="text/event-stream",
         )

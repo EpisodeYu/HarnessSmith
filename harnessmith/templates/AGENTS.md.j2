@@ -635,18 +635,27 @@ tab's dropdowns{% endif %} — and a config name that isn't registered is flagge
 
 `interfaces/web.py` is a thin FastAPI app (`{{ project_slug }} serve`):
 
-- `GET /chat?message=...&stream=true` — Server-Sent Events. With `stream=true`
-  (default) the assistant's answer is streamed **token-by-token** (`event: token`)
-  for a live typing effect; tool calls/results and a `final` event (answer +
-  token/cost stats) are always emitted. The loop runs in a worker thread and
-  pushes events onto a queue. Token streaming rides on `loop.run(on_delta=...)`,
-  which calls the client's `stream()` instead of `complete()`. Set `stream=false`
-  for a single non-streamed response.
+- `POST /chat` — create and start a run from a JSON body (`message`, optional
+  `stream` / `mode` / `session` / `cwd` / `edit_turn`); returns an unguessable
+  one-use `run_id`. `GET /chat/{run_id}/events` then subscribes to its
+  Server-Sent Events. A GET/query string never starts model or tool work. With
+  `stream=true` (default) the assistant's answer is streamed **token-by-token**
+  (`event: token`) for a live typing effect; tool calls/results and a `final`
+  event (answer + token/cost stats) are always emitted. Token streaming rides on
+  `loop.run(on_delta=...)`, which calls the client's `stream()` instead of
+  `complete()`. Set `stream=false` for a single non-streamed response.
 - `GET|POST /config` — read/edit the **runtime behavioral** config (the same
   fields as `config.yaml`). A POST applies in-process AND writes the edited
   fields back to `config.yaml` (comments preserved via ruamel.yaml), so it
   survives a restart. Secrets are never returned or editable — profiles only
-  carry env-var names, so only NAMES are ever written to the file.
+  carry validated env-var names, so only NAMES are ever written to the file;
+  secret-looking values pasted into a name field are rejected without echo.
+
+The web control plane is local-only by default: it trusts loopback Hosts,
+rejects cross-site browser requests, and requires a per-process cookie/header
+token for mutations. A non-loopback bind needs `--unsafe-allow-remote`; that flag
+does not add authentication, so put independent authentication in front before
+any shared deployment.
 
 The CLI streams too: `{{ project_slug }} run --stream "..."`. To stream from your
 own code, pass `on_delta` (a `Callable[[str], None]`) to `run()`.

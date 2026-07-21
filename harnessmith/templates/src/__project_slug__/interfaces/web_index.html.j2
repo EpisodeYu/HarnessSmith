@@ -3,9 +3,28 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{ display_name }} — web</title>
+  <meta name="harness-csrf-token" content="__HARNESS_CSRF_TOKEN__" />
+  <title>{{ display_name | e }} — web</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
+    // Every state-changing request carries a per-process token. It exists only in
+    // this no-store page and is never placed in a URL (where access logs would see
+    // it). EventSource GETs are read-only subscriptions to one-use random run ids.
+    const harnessCsrfToken = document.querySelector(
+      'meta[name="harness-csrf-token"]'
+    ).content;
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      init = init || {};
+      const method = String(init.method || "GET").toUpperCase();
+      if (method !== "GET" && method !== "HEAD") {
+        const headers = new Headers(init.headers || {});
+        headers.set("X-Harness-CSRF", harnessCsrfToken);
+        init = Object.assign({}, init, { headers });
+      }
+      return nativeFetch(input, init);
+    };
+
     // Apply the saved theme BEFORE first paint so there is no flash of the wrong
     // theme. `hf_theme` is "light" (default) or "dark".
     (function () {
@@ -81,7 +100,7 @@
   <div class="flex h-screen">
     <aside class="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-white">
       <div class="px-3 py-3">
-        <h1 class="truncate text-base font-semibold" title="{{ display_name }}">{{ display_name }}</h1>
+        <h1 class="truncate text-base font-semibold" title="{{ display_name | e }}">{{ display_name | e }}</h1>
       </div>
       <div class="px-3 pb-2">
         <button id="chat-new" type="button" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-left text-sm hover:bg-slate-50" data-i18n="chat_new">+ New chat</button>
@@ -1702,7 +1721,7 @@
     // Run one turn over SSE. `opts.editTurn` (re-ask) regenerates from a past user
     // turn; `opts.mode` overrides the dropdown (used internally). Reused by the
     // form submit and by re-ask.
-    function startChat(message, opts) {
+    async function startChat(message, opts) {
       opts = opts || {};
       const view = activeView;  // every handler below binds to THIS conversation
       if (!view || view.streaming) return;
@@ -1716,13 +1735,6 @@
       const toolQueue = [];     // tool blocks awaiting their result (FIFO; calls run sequentially)
       const cwd = $("cwd").value.trim();  // working-directory hint (blank = none)
       if (cwd) view.cwd = cwd;            // remember it on the view for resume/relabel
-      let url = "/chat?message=" + encodeURIComponent(message) + "&stream=" + stream;
-      if (mode) url += "&mode=" + encodeURIComponent(mode);
-      if (view.sessionId) url += "&session=" + encodeURIComponent(view.sessionId);
-      if (opts.editTurn != null) url += "&edit_turn=" + encodeURIComponent(opts.editTurn);
-      if (cwd) url += "&cwd=" + encodeURIComponent(cwd);
-      const es = new EventSource(url);
-      view.es = es;
       view.streaming = true;
       refreshSendButton();
       renderSessionList();  // the live dot appears
@@ -1730,6 +1742,32 @@
       // first event arrives. It becomes the live reasoning box if the model streams
       // reasoning, or is dropped (empty) the moment real output begins.
       thinkBox = reasoningBox(view);
+
+      const payload = { message, stream };
+      if (mode) payload.mode = mode;
+      if (view.sessionId) payload.session = view.sessionId;
+      if (opts.editTurn != null) payload.edit_turn = opts.editTurn;
+      if (cwd) payload.cwd = cwd;
+      let created;
+      try {
+        const response = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        created = await response.json();
+        if (!response.ok || !created.run_id) throw new Error(created.error || response.statusText);
+      } catch (error) {
+        if (thinkBox) thinkBox.remove();
+        line(view, "error: " + String(error), "text-red-600");
+        endStream(view);
+        return;
+      }
+      view.runId = created.run_id;  // Stop works before the SSE connection opens
+      const es = new EventSource(
+        "/chat/" + encodeURIComponent(created.run_id) + "/events"
+      );
+      view.es = es;
 
       // End the current thinking phase: collapse it to "Thought for Ns" if it
       // streamed anything, else drop the empty placeholder. Called when real output

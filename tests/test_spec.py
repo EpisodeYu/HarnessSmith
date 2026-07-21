@@ -60,8 +60,35 @@ def test_display_name_is_accepted():
     assert spec.display_name == "My Coding Assistant"
 
 
+def test_display_name_allows_context_sensitive_punctuation():
+    name = 'Eve "Bot" \\ <>&'
+    assert HarnessSpec(display_name=name).display_name == name
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    [
+        "line one\nline two",
+        "tab\tname",
+        "control\x7fname",
+        "control\u0085name",
+        "line\u2028separator",
+        "x" * 121,
+        "   ",
+    ],
+)
+def test_display_name_rejects_multiline_controls_long_and_blank(display_name):
+    with pytest.raises(ValidationError):
+        HarnessSpec(display_name=display_name)
+
+
 def test_language_defaults_to_en():
     assert HarnessSpec().language == "en"
+
+
+def test_trace_dir_cannot_inject_gitignore_lines():
+    with pytest.raises(ValidationError):
+        HarnessSpec.model_validate({"observability": {"trace_dir": "traces\n!.env"}})
 
 
 def test_language_accepts_zh():
@@ -161,6 +188,34 @@ def test_api_key_is_a_name_not_a_value():
     dumped = yaml.safe_dump(spec.model_dump(mode="json"))
     assert "OPENAI_API_KEY" in dumped  # the name is present...
     assert "sk-" not in dumped  # ...but no secret-looking value
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("api_key_env", "sk-proj-secret-value"),
+        ("api_key_env", "ghp_abcdefghijklmnopqrstuvwxyz123456"),
+        ("api_key_env", "AKIAIOSFODNN7EXAMPLE"),
+        ("base_url_env", "https://user:secret@example.test/v1"),
+        ("base_url_env", "bad name"),
+    ],
+)
+def test_env_references_reject_values_without_echoing_them(field, value):
+    with pytest.raises(ValidationError) as caught:
+        HarnessSpec.model_validate(
+            {"llms": [{"name": "default", "model": "m", field: value}]}
+        )
+    rendered = str(caught.value)
+    assert value not in rendered
+    assert "environment-variable name" in rendered
+
+
+@pytest.mark.parametrize("name", ["OPENAI_API_KEY", "_PRIVATE_TOKEN", "lowercase_2"])
+def test_env_references_accept_valid_names(name):
+    spec = HarnessSpec.model_validate(
+        {"llms": [{"name": "default", "model": "m", "api_key_env": name}]}
+    )
+    assert spec.llms[0].api_key_env == name
 
 
 def test_llm_provider_defaults_to_openai():

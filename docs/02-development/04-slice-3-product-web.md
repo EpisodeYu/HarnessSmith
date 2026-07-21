@@ -25,7 +25,7 @@
 
 - `interfaces/web.py` — FastAPI 应用(薄):
   - `GET /` — 单页前端(无构建,Tailwind CDN),含 chat 视图 + config 面板视图。
-  - `/chat`(SSE)— `Hooks` 子类 + 后台线程驱动 `loop.run()`,推 `token`(默认开)/ `tool_call` / `tool_result` / `step` / `final` 事件。`?stream=false` 退化为纯进度事件 + 单次 `final`(供测试/程序化调用)。
+  - `POST /chat` 创建不可猜测、一次性订阅的 run 并启动后台 `loop.run()`；`GET /chat/{run_id}/events` 只订阅该 run 的 SSE 队列，推 `token`(默认开)/ `tool_call` / `tool_result` / `step` / `final`。POST body 的 `stream:false` 退化为纯进度事件 + 单次 `final`。
   - `GET /config` / `POST /config` — 读 / 改运行期**行为性配置**(`_EDITABLE_FIELDS = llms/roles/prompts/tools/context/observability/budget`),改后进程内即时生效**且回写 `config.yaml`**(见 §2.4);绝不读写密钥真值(只可见 env 引用名)。结构性配置(`version`/`project_slug`)与 `secrets` 不可改。
   - `POST /env` — write-only 写 `.env`(不回显);`GET /env-status` — 仅返回 `{NAME: bool}`(各 `api_key_env`/`base_url_env` 是否已设值),**布尔ONLY、key 与 url 一视同仁、绝不回读任何值**,供前端把已设的 key/url 渲染成统一长度的假星号占位(`data-masked`;聚焦清空可改、仍为占位则跳过写入,占位永不入 `.env`;**新添加、尚未保存的 profile 卡片不掩码**——默认 env 名即便已被其它 profile 设过值,也以空框呈现以免误导,保存并重渲染后才按已设状态显示占位);`GET /rules` / `POST /rules` — 读写 rule 文件正文(限仓库内相对路径);`GET /registries` — 内省注册表;系统页相关端点(见 §2.5)。
 - `interfaces/web_index.html` — 单页前端(`{{ display_name }}` 标题)。
@@ -42,6 +42,8 @@
 进 `dependencies`(方案 A):`uv sync`/Docker/`smoke_check` 零改动即装上,最薄。门禁硬要求 `web=false` 时三处(pyproject/lock/req)均不含 fastapi/uvicorn/httpx/ruamel。
 
 ### 2.3 SSE 流式 chat(token 级 + 进度事件,可选)
+- **请求边界(issue #12)**:默认只接受 `localhost`/loopback IP Host；校验同源 `Origin`/`Referer` 与 `Sec-Fetch-Site`。根页签发每进程随机 token（Strict HttpOnly cookie + 页面内 header token，`Cache-Control: no-store`）；所有非根请求需 cookie、POST/PATCH/DELETE 另需 `X-Harness-CSRF`。token 不进 URL/config/git/trace/debug log。CLI 非 loopback bind 必须显式 `--unsafe-allow-remote`，且仍保留同源+token 门禁；共享部署另配独立认证。
+- **两步 run**:`POST /chat` 是唯一启动模型/工具工作的入口；它生成 ≥192-bit run id 并把事件写进队列。`EventSource` 仅 `GET /chat/{run_id}/events` 消费该一次性 capability，旧 `GET /chat?message=...` 为 405；因此跨站 GET 不能启动 LLM/工具。
 - **进度事件**:web 层 `Hooks` 子类把 `tool_call/tool_result/step/error` 投线程安全队列;`loop.run()` 后台线程跑,SSE 生成器从队列取并 `yield`,最后推 `final`。
 - **token 级流式**:`LLMClient.stream(...)` 用 `stream=True` 累积并对文本段回调 `on_delta`;web `on_delta` 把文本作 `event: token` 推入队列,前端逐字追加。
 - **可选**:产物 Web 始终 token 级流式(`?stream=` 服务端参数保留供测试);CLI `--stream/--no-stream`(默认关);库级传 `on_delta`。
@@ -55,7 +57,7 @@
 
 ### 2.5 系统页 + 配置体验(纯前端 UX,关 Web 零痕迹、零新增依赖)
 - **主题切换**:浅色(默认)/ 深色两档,纯前端 localStorage,`<head>` 内联脚本首屏即应用防闪烁,深色用受控 CSS 覆盖(非逐元素 `dark:`)。
-- **流式开关**:系统页 Enable/Disable(默认 Enable),客户端偏好驱动 `/chat?stream=`。
+- **流式开关**:系统页 Enable/Disable(默认 Enable),客户端偏好写入 `POST /chat` 的 `stream` 字段。
 - **配置导入/导出**:`GET /system/config-export`(下载整份 `config.yaml`,只含 env 名、永不含密钥真值)/ `POST /system/config-import`(`Config.model_validate` 校验 → 进程内替换 + 重挂逻辑 → 写回)。本地可信控制面,勿对公网暴露。
 - **语言**:仅在系统页切换(en/zh),localStorage 记忆。
 - **未保存守卫**:面板编辑仅在 DOM,点 Save 才 `POST /config`;脏标记用比较法(`configSnapshot()` ≠ 基线才算脏,重建拆字段的杂散事件不误标脏)、切走前 `confirm`、切回 `!dirty` 才重载。
@@ -65,7 +67,8 @@
 
 ## 3. 退出门禁
 
-- `/chat` SSE(mock):工具调用进度事件 + 末尾 `final`;默认 token 级流式发 `event: token`,`?stream=false` 则无 token 仍有 final。
+- `POST /chat` → `GET /chat/{run_id}/events` SSE(mock):工具调用进度事件 + 末尾 `final`;默认 token 级流式发 `event: token`,`stream:false` 则无 token 仍有 final；run id 不可猜测且只可订阅一次。
+- localhost 请求边界:非 loopback Host、外站 Origin/Referer、`Sec-Fetch-Site: cross-site`、缺 session cookie/CSRF header 的请求均拒绝；非 loopback bind 无 `--unsafe-allow-remote` 时 CLI fail-fast。
 - token 级流式核心:`MockLLM.stream` 逐 token 发文且总和等于 content;`loop.run(on_delta=...)` 把最终回答按 token 流出。
 - `/config` 改运行期配置当场生效 + 回写 `config.yaml`(注释保留)+ 重载可见;无路径不落盘;非法值被 Pydantic 拒绝返 400。
 - `/config` 不泄露密钥:响应只含 env 引用名;POST 的 `secrets`/结构性键被忽略。
@@ -92,4 +95,4 @@
 - **密钥红线**(`CLAUDE.md §6.5`):`/config` 面板、SSE 事件、trace、日志任一路径出现明文 key 即失败;面板只可见 env 引用名;密钥真值经 `POST /env` write-only 写 `.env`。`GET /env-status` 只回 `{NAME: bool}` 是否已设,**key 与 url 都不回值**(url 也按 write-only 掩码,避免回读内嵌凭证/内网域名),前端据此显示假星号占位。
 - **不绑框架**:FastAPI/uvicorn 是通用 Web 库,不是 agent 编排框架;仅在 `web=true` 时进产物。
 - **配方 vs 活旋钮**(`00-overview.md` §3):`/config` 改运行期行为性配置;接口/模块/范式拓扑是结构性的,只能重新生成。Web 面板属产物自持。
-- **发布拓扑前提**:`/chat` 与 `/config`(读 + 改运行期配置)挂同一 app、同端口、无鉴权;在「管理员托管 + 接口发布」拓扑下,**`/config` 须与公开面隔离**(鉴权 / 绑 localhost / 生成期开关)——隔离本体排 v1+(见 `00-overview.md` §8),也是 Slice 11 面板改 `mcp` 的前提。
+- **发布拓扑前提**:本片已补 localhost Host/来源/CSRF 边界，但随机本地 session **不是多用户认证**。显式 `--unsafe-allow-remote` 只表示操作者接受暴露风险；「管理员托管 + 接口发布」仍须在前面增加独立认证，并把 `/config`/`/mcp` 控制面与公开 chat 隔离。

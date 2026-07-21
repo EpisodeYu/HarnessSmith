@@ -12,8 +12,8 @@
 - **常驻 manager = 唯一真相源(本片核心认知)**:把 web 进程的 manager 存进 `app.state`、连接全部已配置 server,作所有 MCP 视图(管理页/Tools 页/状态)与 LLM 工具集的同一来源。修「面板看到的 / 实际在跑的 / 给 LLM 的」三套状态不一致的硬伤。
 - **连接策略**:web `serve`(常驻)连接 `config.mcp.servers` 里的**全部** server(为管理页提供活的连接状态 + 工具发现),**只把 allowlist 内的工具注册进 registry**(LLM 只见启用的);CLI `run`/`chat`(一次性)沿用 Slice 4 的「有≥1 启用工具才启动该 server」;CLI `mcp status` 显式连接全部。
 - **server 启停语义 = Tools 页大复选框**:**不加 per-server `enabled` 字段**。「启用 / 停用一个 server」= Tools 页该 server 的大复选框(= 它下面全部工具小复选框的总开关);彻底移除一个 server = 管理页「删除」。即:server 配置存在就连上、出现在 Tools 页;用不用它的工具由大/小复选框(allowlist)定。
-- **安全面(全功能编辑,守 `00-overview.md` §4 两轴 + §10 红线)**:面板可增删/编辑 stdio(`command`/`args`/`env名`)与远程(`url`/`auth_env名`/`transport`)server。**网页能新增 stdio server = 能让产物 spawn 任意本地命令**,是**新的安全面**——按**威胁模型 A(本地可信、防手滑)**定位,**不是对不可信对手的强制边界**。文档须讲明「勿对公网暴露 `/config`/`/mcp`」;「管理员托管 + 对外发布」拓扑下需配合 `/config` 与公开面隔离(v1+),本片把 MCP 管理面一并纳入该隔离的保护对象。
-- **密钥红线不变**:server 配置只存 `env名`/`auth_env名`,真值经 `.env`/进程环境解析;面板增删改 server 绝不收/不回显真值。
+- **安全面(全功能编辑,守 `00-overview.md` §4 两轴 + §10 红线)**:面板可增删/编辑 stdio(`command`/`args`/`env名`)与远程(`url`/`auth_env名`/`transport`)server。**网页能新增 stdio server = 能让产物 spawn 任意本地命令**,是**新的安全面**——按**威胁模型 A(本地可信、防手滑)**定位,**不是对不可信对手的强制边界**。产物 Web 默认只信 loopback Host,校验 Origin/Referer/Sec-Fetch,以进程级随机 cookie + header token 保护写请求,chat 由 POST 创建后再按随机 id 订阅 SSE;非 loopback bind 必须显式 `--unsafe-allow-remote`,且该开关不等于认证。对共享部署仍必须另加独立认证/隔离控制面。
+- **密钥红线不变**:server 配置只存符合 `[A-Za-z_][A-Za-z0-9_]*` 的 `env名`/`auth_env名`,并拒绝常见密钥形态;真值经 `.env`/进程环境解析。spec、catalog、运行期配置、Web 保存共用规则;面板增删改 server 绝不收/不回显真值,校验错误也不复述疑似密钥。
 - **复用既有机制**:条件渲染、依赖落位、tool allowlist 过滤、HITL 确认(Slice 10)、`/config` 回写(Slice 3 `ruamel` round-trip)全部复用;新增逻辑收敛在 `mcp.py`(常驻管理 + 重连)、`web.py`(`/mcp/*` 端点 + 管理页)、`web_index.html`(MCP 标签 + Tools 大复选框)、`cli.py`(`mcp status`)。
 
 ## 1. 交付物
@@ -146,7 +146,7 @@ stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健
 - wizard DC 默认 + HITL:wizard 产物默认 DC 勾选 + `confirm: high`。
 - Web 访问增强:catalog 有 `bocha`(uvx + `env: [BOCHA_API_KEY]`,工具 safe)/ `jina-reader`(remote `url` + `auth_env: JINA_API_KEY`);向导二者末位 + 默认不勾;选中升级件→种子 `prompts.system` 含软偏好段、未选→字节一致;`--mcp-server bocha jina-reader` 落 config.yaml(两 server + 通配)+ `.env.example`(两 key 名,无值)。
 - auth 与连接解耦:红绿点只表 server 自身连接;`missing_secrets`/`needs_auth` 进 `/mcp/status`+`/mcp/discover`;管理页缺 key 提示不再要求 `!connected`(绿点的 jina-reader 也标黄);`auth_blocked`(仅 remote+未设 `auth_env`)的 server 工具**不注册给 LLM** + Tools 页置灰禁用;stdio 不硬扣;设 key 重连即解除。
-- 不泄密:`/mcp/status` 仅回 env 名;server 增删改只收 env 名;trace/日志不回显。
+- 不泄密:`/mcp/status` 仅回合法 env 名;server 增删改只收通过统一语法/疑似密钥检查的 env 名;校验错误、trace、日志均不回显真值。
 - 关 MCP 零痕迹:`spec.mcp.enabled=false` 产物不含 `mcp.py`/MCP 标签/`/mcp/*`/`mcp` CLI 段。
 - 薄:`mcp.py` 仍单文件聚合、无新抽象层;`loop.py`/`active_names`/`call` 语义不变;`Registry` 仅加 `unregister`/`remove_where`。
 - 大改动回归(动 mcp.py/web.py/cli.py/config.py + Registry 核心微改 + 跨 ≥3 文件):全量 golden + Docker + `uvx` 冒烟。`ReadLints` clean。
@@ -164,8 +164,8 @@ stdio MCP server(尤其 npx 系如 desktop-commander)在异构环境的首跑健
 
 - **薄**:关 MCP 产物逐字一致零痕迹不变;`mcp.py` 仍单文件、无新抽象层。MCP 管理页是 `spec.mcp.enabled` 门控的可选件,不进默认薄核心。
 - **核心克制**:`loop.py` 不动;`active_names`/`call` 语义不变;`Registry` 只加 `unregister`/`remove_where`。一致性靠「重同步 registry」,不引新抽象层 / 不改循环。
-- **密钥红线**(`CLAUDE.md §6.5`):server 增删改只收 env 名;`/mcp/*` 响应 / trace / 日志不回显真值;密钥真值仍走 Slice 3 `/env` write-only。
-- **安全面(新)**:网页增 stdio server = 让产物 spawn 任意命令 = 威胁模型 A 本地控制面,非对手强制边界;勿对公网暴露 `/config`/`/mcp`,「托管+发布」拓扑须 `/config`(含 `/mcp/*`)与公开面隔离(v1+)。
+- **密钥红线**(`CLAUDE.md §6.5`):server 增删改只收通过统一校验的 env 名;疑似误贴密钥时拒绝且不回显;`/mcp/*` 响应 / trace / 日志不回显真值;密钥真值仍走 Slice 3 `/env` write-only。
+- **安全面(新)**:网页增 stdio server = 让产物 spawn 任意命令 = 威胁模型 A 本地控制面,非对手强制边界。默认 loopback Host + same-origin/fetch-metadata + 每进程随机 cookie/header token 只守本机浏览器边界;非 loopback 需显式 unsafe flag,共享/公网部署仍须外加认证并隔离 `/config`(含 `/mcp/*`)。
 - **DC / Node 依赖**:DC 默认开需 Node(npx);缺 Node 时失败隔离(管理页标红 + `mcp status` 提示装 Node),不崩产物。
 - **不绑框架**:`mcp` 是协议 SDK,非 agent 编排框架,仅 `mcp.enabled` 时进产物;管理面是产物自持,HarnessSmith 不做中心化 MCP 配置/托管。
 - **联网 MCP registry / `forge add` 增量接 server** 仍 v1+。

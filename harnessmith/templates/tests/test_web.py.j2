@@ -7,10 +7,20 @@ Generated only when ``interfaces.web`` is enabled. They use the offline MockLLM
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as _FastAPITestClient
 
 from {{ project_slug }}.harness.config import Config, ConfigError, load_config, set_env_value
 from {{ project_slug }}.interfaces.web import create_app
+
+
+class TestClient(_FastAPITestClient):
+    """Local-origin client carrying the app's per-process CSRF token by default."""
+
+    def __init__(self, app, *args, **kwargs):
+        kwargs.setdefault("base_url", "http://127.0.0.1")
+        super().__init__(app, *args, **kwargs)
+        self.headers["X-Harness-CSRF"] = app.state.csrf_token
+        self.cookies.set("harness-local-session", app.state.csrf_token)
 
 
 def _config():
@@ -62,10 +72,114 @@ def _sse_session_id(body: str) -> str | None:
     return data["id"] if data else None
 
 
+def _chat(client: TestClient, params: dict | None = None, **kwargs):
+    """Create a run by POST, then subscribe to its one-use SSE capability."""
+    payload = dict(params or {})
+    payload.update(kwargs)
+    created = client.post("/chat", json=payload)
+    assert created.status_code == 200, created.text
+    run_id = created.json()["run_id"]
+    return client.get(f"/chat/{run_id}/events")
+
+
 def test_index_is_served():
     resp = _client().get("/")
     assert resp.status_code == 200
     assert "<html" in resp.text.lower()
+
+
+def test_index_embeds_process_csrf_token_without_caching_it():
+    app = create_app(_config(), mock=True)
+    client = TestClient(app)
+    resp = client.get("/")
+    assert app.state.csrf_token in resp.text
+    assert "__HARNESS_CSRF_TOKEN__" not in resp.text
+    assert resp.headers["cache-control"] == "no-store"
+    assert "HttpOnly" in resp.headers["set-cookie"] and "SameSite=strict" in resp.headers["set-cookie"]
+    assert app.state.csrf_token not in repr(app.state.config.model_dump())
+
+
+def test_mutations_require_process_csrf_token():
+    app = create_app(_config(), mock=True)
+    raw = _FastAPITestClient(app, base_url="http://127.0.0.1")
+    raw.cookies.set("harness-local-session", app.state.csrf_token)
+    resp = raw.post("/chat", json={"message": "must not run"})
+    assert resp.status_code == 403
+    assert app.state.run_requests == {} and app.state.runs == {}
+
+
+def test_non_root_requests_require_strict_process_session_cookie():
+    app = create_app(_config(), mock=True)
+    raw = _FastAPITestClient(
+        app,
+        base_url="http://127.0.0.1",
+        headers={"X-Harness-CSRF": app.state.csrf_token},
+    )
+    assert raw.get("/config").status_code == 403
+    assert raw.post("/chat", json={"message": "must not run"}).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Host": "attacker.example"},
+        {"Origin": "https://attacker.example"},
+        {"Sec-Fetch-Site": "cross-site"},
+        {"Referer": "https://attacker.example/page"},
+    ],
+)
+def test_untrusted_host_and_cross_site_browser_requests_are_rejected(headers):
+    client = _client()
+    assert client.get("/config", headers=headers).status_code == 403
+    assert client.post("/config", json={"prompts": {"system": "evil"}}, headers=headers).status_code == 403
+
+
+def test_chat_is_post_created_then_subscribed_by_unguessable_one_use_id():
+    app = create_app(_config(), mock=True)
+    client = TestClient(app)
+    assert client.get("/chat", params={"message": "old unsafe API"}).status_code == 405
+
+    created = client.post("/chat", json={"message": "hello", "stream": False})
+    assert created.status_code == 200
+    run_id = created.json()["run_id"]
+    assert len(run_id) >= 32 and run_id in app.state.run_requests
+
+    events = client.get(f"/chat/{run_id}/events")
+    assert events.status_code == 200 and "event: final" in events.text
+    assert client.get(f"/chat/{run_id}/events").status_code == 404
+
+
+def test_chat_rejects_malformed_json_without_starting_work():
+    app = create_app(_config(), mock=True)
+    client = TestClient(app)
+    response = client.post(
+        "/chat", content="{", headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 400
+    assert app.state.run_requests == {} and app.state.runs == {}
+
+
+def test_loopback_hosts_are_the_default_request_boundary():
+    from {{ project_slug }}.interfaces.web import _is_loopback_host
+
+    for host in (
+        "localhost", "localhost:8000", "127.0.0.1:9000", "::1", "[::1]:8000"
+    ):
+        assert _is_loopback_host(host)
+    for host in (
+        "0.0.0.0", "::", "localhost.example", "example.test", "localhost/path"
+    ):
+        assert not _is_loopback_host(host)
+
+
+def test_cli_non_loopback_bind_requires_explicit_unsafe_flag():
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    result = CliRunner().invoke(app, ["serve", "--host", "0.0.0.0"])
+    assert result.exit_code == 2
+    assert "--unsafe-allow-remote" in result.output
 
 
 def test_index_has_unsaved_config_guard():
@@ -382,6 +496,15 @@ def test_mcp_add_server_rejects_invalid_config():
     assert client.post("/mcp/servers", json={"name": "bad"}).status_code == 400
 
 
+def test_mcp_server_save_rejects_secret_env_reference_without_echo():
+    secret = "ghp_abcdefghijklmnopqrstuvwxyz123456"
+    resp = _client().post(
+        "/mcp/servers",
+        json={"name": "unsafe", "url": "https://example.test/mcp", "auth_env": secret},
+    )
+    assert resp.status_code == 400 and secret not in resp.text
+
+
 def test_config_enabling_mcp_tool_registers_it_for_the_model():
     """#3/#5 consistency: enabling a discovered-but-unlisted MCP tool via /config
     registers it into the registry, so what the model is offered always matches the
@@ -540,7 +663,7 @@ def test_index_tools_page_explains_missing_key_connect_failure():
 
 
 def test_chat_streams_tool_call_and_final_over_sse():
-    resp = _client().get("/chat", params={"message": "hello"})
+    resp = _chat(_client(), message="hello")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
 
@@ -577,8 +700,8 @@ def test_chat_recoverable_tool_error_does_not_end_stream():
             "observability": {"trace": False},
             "sessions": {"enabled": False},
         })
-        body = TestClient(create_app(config, mock=True)).get(
-            "/chat", params={"message": "go", "stream": "false"}
+        body = _chat(
+            TestClient(create_app(config, mock=True)), message="go", stream=False
         ).text
     finally:
         registry.remove_where(lambda n: n == "boom")
@@ -590,13 +713,13 @@ def test_chat_recoverable_tool_error_does_not_end_stream():
 
 
 def test_chat_streams_answer_tokens_by_default():
-    body = _client().get("/chat", params={"message": "hi"}).text
+    body = _chat(_client(), message="hi").text
     assert "event: token" in body  # token-level streaming is on by default
     assert "event: thinking" in body  # the reasoning-phase pulse (mock emits one)
 
 
 def test_chat_stream_false_emits_no_tokens():
-    body = _client().get("/chat", params={"message": "hi", "stream": "false"}).text
+    body = _chat(_client(), message="hi", stream=False).text
     assert "event: token" not in body
     assert "event: thinking" not in body  # the thinking pulse is stream-only
     assert "event: final" in body  # still returns the answer, just not streamed
@@ -606,7 +729,7 @@ def test_chat_persists_session_and_lists_it(tmp_path):
     """A chat turn emits its session id, saves the body, and /sessions lists it;
     /sessions/<id> replays the messages so the UI can resume the conversation."""
     client = _session_client(tmp_path)
-    body = client.get("/chat", params={"message": "hello", "stream": "false"}).text
+    body = _chat(client, message="hello", stream=False).text
     sid = _sse_session_id(body)
     assert sid
 
@@ -644,7 +767,7 @@ def test_chat_first_turn_failure_still_persists_session(tmp_path, monkeypatch):
     # Force the (real, non-mock) client path to fail at the first model call.
     monkeypatch.setattr(webmod, "ClientRouter", _BoomRouter)
     client = _session_client(tmp_path, auto_title=False)
-    body = client.get("/chat", params={"message": "remember me", "stream": "false"}).text
+    body = _chat(client, message="remember me", stream=False).text
     assert "event: error" in body  # the run failed
 
     listing = client.get("/sessions").json()["sessions"]
@@ -655,12 +778,10 @@ def test_chat_resumes_prior_session(tmp_path):
     """?session=<id> resumes: the second turn's saved body includes the first."""
     client = _session_client(tmp_path)
     sid = _sse_session_id(
-        client.get("/chat", params={"message": "first", "stream": "false"}).text
+        _chat(client, message="first", stream=False).text
     )
     assert sid
-    client.get(
-        "/chat", params={"message": "second", "stream": "false", "session": sid}
-    )
+    _chat(client, message="second", stream=False, session=sid)
     users = [
         m["content"]
         for m in client.get(f"/sessions/{sid}").json()["messages"]
@@ -681,10 +802,10 @@ def test_chat_persists_working_dir_per_session(tmp_path):
     dir_b = tmp_path / "b"
     dir_b.mkdir()
     sid_a = _sse_session_id(
-        client.get("/chat", params={"message": "qa", "stream": "false", "cwd": str(dir_a)}).text
+        _chat(client, message="qa", stream=False, cwd=str(dir_a)).text
     )
     sid_b = _sse_session_id(
-        client.get("/chat", params={"message": "qb", "stream": "false", "cwd": str(dir_b)}).text
+        _chat(client, message="qb", stream=False, cwd=str(dir_b)).text
     )
     assert sid_a and sid_b and sid_a != sid_b
     assert session_store.cwd_of(sid_a, sdir) == str(dir_a.resolve())
@@ -700,9 +821,9 @@ def test_chat_reuses_stored_working_dir_on_resume(tmp_path):
     work = tmp_path / "proj"
     work.mkdir()
     sid = _sse_session_id(
-        client.get("/chat", params={"message": "first", "stream": "false", "cwd": str(work)}).text
+        _chat(client, message="first", stream=False, cwd=str(work)).text
     )
-    client.get("/chat", params={"message": "second", "stream": "false", "session": sid})
+    _chat(client, message="second", stream=False, session=sid)
     assert session_store.cwd_of(sid, sdir) == str(work.resolve())
 
 
@@ -751,7 +872,7 @@ def test_index_has_permission_policy_dropdown():
 def test_chat_disabled_sessions_emit_nothing(tmp_path):
     """sessions.enabled=false: no session event, empty listing, no files."""
     client = _session_client(tmp_path, enabled=False)
-    body = client.get("/chat", params={"message": "hi", "stream": "false"}).text
+    body = _chat(client, message="hi", stream=False).text
     assert "event: session" not in body
     assert client.get("/sessions").json() == {"sessions": []}
     assert not (tmp_path / "sessions").exists()
@@ -762,9 +883,7 @@ def test_chat_first_turn_emits_title_and_persists(tmp_path):
     emitted up front, the LLM `title` refines it, both land before `final`, and a
     non-empty title is stored so the sidebar can name the session."""
     client = _session_client(tmp_path)
-    body = client.get(
-        "/chat", params={"message": "what is AMF?", "stream": "false"}
-    ).text
+    body = _chat(client, message="what is AMF?", stream=False).text
     # The FIRST title event is the zero-cost provisional one, from the message.
     title = _sse_event_data(body, "title")
     assert title and title["title"] == "what is AMF?"
@@ -780,7 +899,7 @@ def test_chat_first_turn_emits_title_and_persists(tmp_path):
 def test_chat_no_autotitle_when_disabled(tmp_path):
     """sessions.auto_title=false: no title event, session has empty title."""
     client = _session_client(tmp_path, auto_title=False)
-    body = client.get("/chat", params={"message": "hi", "stream": "false"}).text
+    body = _chat(client, message="hi", stream=False).text
     assert "event: title" not in body
     sid = _sse_session_id(body)
     assert sid
@@ -794,9 +913,7 @@ def test_chat_autotitle_skipped_when_title_already_set(tmp_path):
     sdir = str(tmp_path / "sessions")
     session_store.save("kept", [{"role": "user", "content": "old"}], sdir, title="My title")
     client = _session_client(tmp_path)
-    body = client.get(
-        "/chat", params={"message": "second", "stream": "false", "session": "kept"}
-    ).text
+    body = _chat(client, message="second", stream=False, session="kept").text
     assert "event: title" not in body
     assert session_store.title_of("kept", sdir) == "My title"  # unchanged
 
@@ -809,9 +926,7 @@ def test_chat_keeps_provisional_title_when_llm_title_fails(tmp_path, monkeypatch
 
     monkeypatch.setattr(webmod, "_generate_title", lambda *a, **k: "")
     client = _session_client(tmp_path)
-    body = client.get(
-        "/chat", params={"message": "explain the QUIC handshake", "stream": "false"}
-    ).text
+    body = _chat(client, message="explain the QUIC handshake", stream=False).text
     title = _sse_event_data(body, "title")
     assert title and title["title"] == "explain the QUIC handshake"
     sid = title["id"]
@@ -999,7 +1114,7 @@ def test_hooks_execution_log_records_during_chat_and_clears():
     client = TestClient(create_app(config, mock=True))
     assert client.get("/hooks/log").json()["entries"] == []  # empty before any run
 
-    client.get("/chat", params={"message": "hi", "stream": False})  # one mock turn
+    _chat(client, message="hi", stream=False)  # one mock turn
     entries = client.get("/hooks/log").json()["entries"]
     assert entries, "the mounted hook should have fired during the run"
     label = "{{ project_slug }}.harness.hooks:Hooks"
@@ -1194,7 +1309,7 @@ def test_usage_accrues_after_chat_then_clears():
     """A chat turn accrues per-LLM usage; clearing one profile resets it."""
     client = _client()
     client.post("/usage/clear", json={"all": True})
-    client.get("/chat", params={"message": "hi", "stream": "false"})  # mock run
+    _chat(client, message="hi", stream=False)  # mock run
     after = {p["name"]: p for p in client.get("/usage").json()["profiles"]}
     assert after["default"]["prompt_tokens"] > 0
 
@@ -1283,7 +1398,7 @@ def test_index_has_extensions_and_hooks_editors():
 
 def test_index_has_streaming_toggle_on_system_tab():
     """Streaming is an enable/disable control on the System tab (default enabled)
-    that drives the /chat?stream= flag — not a chat-form checkbox."""
+    that drives the POST /chat JSON `stream` field — not a chat-form checkbox."""
     body = _client().get("/").text
     assert 'id="sys-stream-toggle"' in body
     assert 'data-stream="1"' in body and 'data-stream="0"' in body
@@ -1420,6 +1535,37 @@ def test_env_endpoint_writes_dotenv_without_echoing(tmp_path, monkeypatch):
 def test_env_endpoint_rejects_bad_name():
     resp = _client().post("/env", json={"name": "bad name", "value": "x"})
     assert resp.status_code == 400
+
+
+def test_secret_pasted_as_env_name_is_rejected_without_echo_or_dotenv(tmp_path, monkeypatch):
+    secret = "ghp_abcdefghijklmnopqrstuvwxyz123456"
+    monkeypatch.chdir(tmp_path)
+    client = _client()
+
+    env_resp = client.post("/env", json={"name": secret, "value": "ignored"})
+    assert env_resp.status_code == 400 and secret not in env_resp.text
+    assert not (tmp_path / ".env").exists()
+
+    config_resp = client.post(
+        "/config",
+        json={"llms": [{"name": "default", "model": "m", "api_key_env": secret}]},
+    )
+    assert config_resp.status_code == 400 and secret not in config_resp.text
+    assert client.get("/config").json()["llms"][0]["api_key_env"] == "OPENAI_API_KEY"
+
+    imported = (
+        "llms:\n"
+        "  - name: default\n"
+        "    model: m\n"
+        f"    api_key_env: {secret}\n"
+        "roles:\n  generation: default\n"
+    )
+    import_resp = client.post(
+        "/system/config-import",
+        content=imported,
+        headers={"Content-Type": "text/plain"},
+    )
+    assert import_resp.status_code == 400 and secret not in import_resp.text
 
 
 def test_env_status_reports_presence_not_values(tmp_path, monkeypatch):
@@ -1604,7 +1750,7 @@ def test_test_llm_reports_provider_error(monkeypatch):
 
 def test_chat_emits_run_id():
     """Every turn announces a run id (so the client can POST .../stop)."""
-    body = _client().get("/chat", params={"message": "hi", "stream": "false"}).text
+    body = _chat(_client(), message="hi", stream=False).text
     run = _sse_event_data(body, "run")
     assert run and run["run_id"]
 
@@ -1665,9 +1811,9 @@ def test_reask_edit_turn_truncates_and_regenerates(tmp_path):
     overwriting the later conversation (destructive re-ask, not a fork)."""
     client = _session_client(tmp_path, auto_title=False)
     sid = _sse_session_id(
-        client.get("/chat", params={"message": "first", "stream": "false"}).text
+        _chat(client, message="first", stream=False).text
     )
-    client.get("/chat", params={"message": "second", "stream": "false", "session": sid})
+    _chat(client, message="second", stream=False, session=sid)
     users = [
         m["content"]
         for m in client.get(f"/sessions/{sid}").json()["messages"]
@@ -1676,9 +1822,12 @@ def test_reask_edit_turn_truncates_and_regenerates(tmp_path):
     assert users == ["first", "second"]
 
     # Re-ask turn 1 (the "second" question) with an edit.
-    client.get(
-        "/chat",
-        params={"message": "second-edited", "stream": "false", "session": sid, "edit_turn": 1},
+    _chat(
+        client,
+        message="second-edited",
+        stream=False,
+        session=sid,
+        edit_turn=1,
     )
     after = [
         m["content"]

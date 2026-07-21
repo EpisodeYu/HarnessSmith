@@ -6,8 +6,9 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
-from {{ project_slug }}.harness.config import Config, ContextConfig
+from {{ project_slug }}.harness.config import Config, ContextConfig, LLMProfileConfig
 from {{ project_slug }}.harness.context import estimate_tokens, fit
 from {{ project_slug }}.harness.hooks import Hooks
 from {{ project_slug }}.harness.llm import ClientRouter, LLMResponse, ToolCall, Usage
@@ -62,6 +63,27 @@ def _conversation(turns):
         messages.append({"role": "user", "content": "u" * 120 + str(i)})
         messages.append({"role": "assistant", "content": "a" * 120 + str(i)})
     return messages
+
+
+@pytest.mark.parametrize(
+    "field,secret",
+    [
+        ("api_key_env", "sk-proj-runtime-secret"),
+        ("api_key_env", "ghp_abcdefghijklmnopqrstuvwxyz123456"),
+        ("base_url_env", "https://user:secret@example.test/v1"),
+    ],
+)
+def test_runtime_llm_env_references_reject_secrets_without_echo(field, secret):
+    with pytest.raises(ValidationError) as caught:
+        LLMProfileConfig.model_validate({"name": "d", "model": "m", field: secret})
+    rendered = str(caught.value)
+    assert secret not in rendered
+    assert "environment-variable name" in rendered
+
+
+@pytest.mark.parametrize("name", ["OPENAI_API_KEY", "_PRIVATE_TOKEN", "lowercase_2"])
+def test_runtime_llm_env_references_accept_valid_names(name):
+    assert LLMProfileConfig(name="d", model="m", api_key_env=name).api_key_env == name
 
 
 def test_mock_runs_one_tool_call(tmp_path):
@@ -2147,6 +2169,19 @@ def test_cli_run_without_llm_is_a_clean_error_not_a_traceback(tmp_path):
     assert result.exit_code == 2
     assert "Traceback" not in text
     assert "llms:" in text  # points at the fix
+
+
+def test_cli_set_key_rejects_a_pasted_secret_without_echoing_it():
+    """The CLI validates NAME before its hidden-value prompt can repeat a token."""
+    from typer.testing import CliRunner
+
+    from {{ project_slug }}.interfaces.cli import app
+
+    secret = "ghp_abcdefghijklmnopqrstuvwxyz123456"
+    result = CliRunner().invoke(app, ["set-key", secret])
+    assert result.exit_code == 2
+    assert secret not in _cli_text(result)
+    assert "env-var name" in _cli_text(result)
 
 
 def test_cli_test_llm_preflight_reports_missing_key_without_network(tmp_path, monkeypatch):

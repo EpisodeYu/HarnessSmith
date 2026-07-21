@@ -19,7 +19,7 @@ RUN uv sync --frozen --no-dev
 # Warm the uv cache for the uvx-based MCP servers, then force uv offline at
 # runtime so `docker run` launches them with no network. (Node-based servers,
 # e.g. Desktop Commander, need Node and are not baked here.)
-RUN {% for pkg in mcp_uvx_packages %}uvx --from {{ pkg }} python -c "" >/dev/null 2>&1 || true{% if not loop.last %} \
+RUN {% for pkg in mcp_uvx_packages %}uvx --from {{ pkg | shellquote }} python -c "" >/dev/null 2>&1 || true{% if not loop.last %} \
  && {% endif %}{% endfor %}
 
 ENV UV_OFFLINE=1

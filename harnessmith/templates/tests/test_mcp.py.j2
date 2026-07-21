@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from {{ project_slug }}.harness.config import Config, McpConfig, McpServerConfig
 from {{ project_slug }}.harness import mcp as mcp_module
@@ -23,6 +24,36 @@ from {{ project_slug }}.harness.mcp import (
 )
 from {{ project_slug }}.harness.prompts import build_system_prompt
 from {{ project_slug }}.harness.tools import HIGH, SAFE, Registry, ToolError
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("env", ["sk-secret-value"]),
+        ("auth_env", "ghp_abcdefghijklmnopqrstuvwxyz123456"),
+        ("env_const", {"ghp_abcdefghijklmnopqrstuvwxyz123456": "not-a-secret"}),
+    ],
+)
+def test_mcp_env_references_reject_secrets_without_echo(field, value):
+    payload = {"name": "unsafe", "command": "x", field: value}
+    if field == "auth_env":
+        payload = {"name": "unsafe", "url": "https://example.test/mcp", field: value}
+    secret = next(iter(value)) if isinstance(value, dict) else (
+        value[0] if isinstance(value, list) else value
+    )
+    with pytest.raises(ValidationError) as caught:
+        McpServerConfig.model_validate(payload)
+    assert secret not in str(caught.value)
+    assert "environment-variable name" in str(caught.value)
+
+
+def test_mcp_env_references_accept_valid_names():
+    stdio = McpServerConfig(name="stdio", command="x", env=["MCP_TOKEN", "_ALT_2"])
+    remote = McpServerConfig(
+        name="remote", url="https://example.test/mcp", auth_env="MCP_BEARER"
+    )
+    assert stdio.env == ["MCP_TOKEN", "_ALT_2"]
+    assert remote.auth_env == "MCP_BEARER"
 
 DUMMY = str(Path(__file__).parent / "_mcp_dummy_server.py")
 

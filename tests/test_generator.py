@@ -210,7 +210,7 @@ def test_config_yaml_renders_from_spec_without_secrets(tmp_path, preset_spec):
     generate(preset_spec, out, git_init=False)
     config = (out / "config.yaml").read_text(encoding="utf-8")
     assert "project_slug: coding_assistant" in config
-    assert "api_key_env: OPENAI_API_KEY" in config  # env NAME only
+    assert 'api_key_env: "OPENAI_API_KEY"' in config  # env NAME only
     assert "get_current_time" in config and "calculator" in config
     # Per-LLM cost accounting / limit knobs (the Budget page edits these); no
     # per-run budget block anymore.
@@ -385,6 +385,13 @@ def test_web_enabled_generates_web_files_and_deps(tmp_path, spec):
 
     cli = (pkg / "interfaces" / "cli.py").read_text(encoding="utf-8")
     assert "def serve(" in cli
+    assert "--unsafe-allow-remote" in cli
+    assert "a non-loopback --host requires" in cli
+
+    web = (pkg / "interfaces" / "web.py").read_text(encoding="utf-8")
+    assert 'app.state.csrf_token = secrets.token_urlsafe(32)' in web
+    assert '@app.post("/chat")' in web and '@app.get("/chat/{run_id}/events")' in web
+    assert '@app.get("/chat")' not in web
 
     # web.py is valid Python even though fastapi isn't installed in this dev env
     py_compile.compile(str(pkg / "interfaces" / "web.py"), doraise=True)
@@ -412,13 +419,73 @@ def test_display_name_renders_in_titles_and_readme(tmp_path, spec):
     pkg = out / "src" / "agent_harness"
 
     assert (out / "README.md").read_text(encoding="utf-8").splitlines()[0] == "# Friendly Bot"
-    assert 'FastAPI(title="Friendly Bot — web")' in (pkg / "interfaces" / "web.py").read_text(
+    assert 'FastAPI(title="Friendly Bot \\u2014 web")' in (pkg / "interfaces" / "web.py").read_text(
         encoding="utf-8"
     )
     idx = (pkg / "interfaces" / "web_index.html").read_text(encoding="utf-8")
     assert "<title>Friendly Bot — web</title>" in idx
     # the slug still drives the package/folder, not the display name
     assert (pkg / "harness" / "loop.py").is_file()
+
+
+def test_display_name_is_encoded_for_python_html_markdown_and_scripts(tmp_path):
+    """One display label crosses several grammars; every sink owns its encoding."""
+    import compileall
+
+    from harnessmith.spec import HarnessSpec
+
+    display_name = 'Eve "Bot" \\ <script>&'
+    spec = HarnessSpec.model_validate(
+        {
+            "project_slug": "agent_harness",
+            "display_name": display_name,
+            "interfaces": {"web": True},
+        }
+    )
+    out = tmp_path / "escaped"
+    generate(spec, out, git_init=False)
+
+    pkg = out / "src" / "agent_harness"
+    assert compileall.compile_dir(str(pkg), quiet=1)
+    web_py = (pkg / "interfaces" / "web.py").read_text(encoding="utf-8")
+    compile(web_py, str(pkg / "interfaces" / "web.py"), "exec")
+    assert (
+        'FastAPI(title="Eve \\"Bot\\" \\\\ '
+        '\\u003cscript\\u003e\\u0026 \\u2014 web")' in web_py
+    )
+
+    html = (pkg / "interfaces" / "web_index.html").read_text(encoding="utf-8")
+    assert display_name not in html
+    assert "&lt;script&gt;&amp;" in html and "&#34;Bot&#34;" in html
+    readme = (out / "README.md").read_text(encoding="utf-8")
+    assert "&lt;script&gt;&amp;" in readme
+
+    stem = launch_script_stem(spec)
+    for suffix in ("sh", "bat"):
+        launcher = (out / f"{stem}.{suffix}").read_text(encoding="utf-8")
+        assert display_name not in launcher
+
+
+def test_yaml_string_fields_cannot_break_out_of_their_scalar_context(tmp_path):
+    from harnessmith.spec import HarnessSpec
+
+    profile_name = 'main:\nmalicious: true #'
+    spec = HarnessSpec.model_validate(
+        {
+            "version": '0.1"\ninjected: true',
+            "llms": [{"name": profile_name, "model": 'model\nroles: {evil: yes}'}],
+            "roles": {"generation": profile_name},
+            "tools": [{"name": 'tool\nenabled: false'}],
+        }
+    )
+    out = tmp_path / "yaml-safe"
+    generate(spec, out, git_init=False)
+    rendered = yaml.safe_load((out / "config.yaml").read_text(encoding="utf-8"))
+    assert rendered["version"] == spec.version
+    assert rendered["llms"][0]["name"] == profile_name
+    assert rendered["llms"][0]["model"] == spec.llms[0].model
+    assert rendered["roles"] == {"generation": profile_name}
+    assert rendered["tools"][0]["name"] == spec.tools[0].name
 
 
 def test_display_name_falls_back_to_slug(tmp_path, spec):
@@ -438,20 +505,20 @@ def test_context_block_seeds_from_spec(tmp_path, spec):
     out = tmp_path / "ctx"
     generate(spec, out, git_init=False)
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
-    assert "strategy: truncate" in config_yaml
+    assert 'strategy: "truncate"' in config_yaml
     assert "keep_last_turns: 3" in config_yaml
-    assert "combine: and" in config_yaml
-    assert "max_tokens: 4000" in config_yaml
-    assert "max_turns: 20" in config_yaml
+    assert 'combine: "and"' in config_yaml
+    assert '"max_tokens": 4000' in config_yaml
+    assert '"max_turns": 20' in config_yaml
 
 
 def test_context_block_defaults_when_spec_omits_it(tmp_path, spec):
     out = tmp_path / "ctx_default"
     generate(spec, out, git_init=False)
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
-    assert "strategy: summarize" in config_yaml  # default trigger compacts at 192k
+    assert 'strategy: "summarize"' in config_yaml  # default trigger compacts at 192k
     assert "keep_last_turns: 6" in config_yaml
-    assert "combine: or" in config_yaml
+    assert 'combine: "or"' in config_yaml
     assert "max_tokens: 192000" in config_yaml  # the default token trigger
 
 
@@ -627,7 +694,7 @@ def test_mcp_prefill_writes_servers_and_allowlist_to_config(tmp_path, preset_spe
 
     config_yaml = (out / "config.yaml").read_text(encoding="utf-8")
     # servers prefilled into the runtime file
-    assert "command: uvx" in config_yaml
+    assert 'command: "uvx"' in config_yaml
     assert "mcp-server-fetch" in config_yaml
     assert "open-websearch" in config_yaml  # keyless multi-engine web search (Node)
     assert "mcp-server-git" in config_yaml
@@ -1044,7 +1111,6 @@ def test_subagents_supervisor_is_not_a_new_paradigm(tmp_path, spec):
         ("Foo   Bar", "agent_harness", "Foo-Bar"),  # whitespace run -> single -
         ('Bad:/\\<>|?*"Name', "agent_harness", "Bad_________Name"),  # illegal -> _
         (None, "agent_harness", "agent_harness"),  # no display name -> slug
-        ("   ", "fallback_slug", "fallback_slug"),  # blank -> slug
         ("...", "fallback_slug", "fallback_slug"),  # only dots -> slug
         ("ends with dot.", "fallback_slug", "ends-with-dot"),  # trailing dot trimmed
         ("CON", "fallback_slug", "fallback_slug"),  # reserved device name -> slug
